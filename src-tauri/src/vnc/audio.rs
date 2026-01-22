@@ -26,8 +26,14 @@ impl SeparateAudioStream {
         
         // Get local IP for stream URL
         let local_ip = match local_ip_address::local_ip() {
-            Ok(ip) => ip.to_string(),
-            Err(_) => "localhost".to_string(),
+            Ok(ip) => {
+                info!("Using local IP for audio stream: {}", ip);
+                ip.to_string()
+            },
+            Err(e) => {
+                warn!("Failed to get local IP address: {}, using 'localhost' as fallback", e);
+                "localhost".to_string()
+            }
         };
 
         let stream_url = format!("rtsp://{}:{}/audio", local_ip, port);

@@ -6,17 +6,23 @@
 use anyhow::Result;
 use enigo::{Enigo, MouseControllable, KeyboardControllable, MouseButton, Key};
 use log::{debug, warn};
-use std::sync::Mutex;
-use lazy_static::lazy_static;
+use std::sync::OnceLock;
+use parking_lot::Mutex;
 
-lazy_static! {
-    static ref ENIGO: Mutex<Enigo> = Mutex::new(Enigo::new());
-    static ref LAST_MOUSE_POS: Mutex<(u16, u16)> = Mutex::new((0, 0));
+static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
+static LAST_MOUSE_POS: OnceLock<Mutex<(u16, u16)>> = OnceLock::new();
+
+fn get_enigo() -> &'static Mutex<Enigo> {
+    ENIGO.get_or_init(|| Mutex::new(Enigo::new()))
+}
+
+fn get_last_mouse_pos() -> &'static Mutex<(u16, u16)> {
+    LAST_MOUSE_POS.get_or_init(|| Mutex::new((0, 0)))
 }
 
 /// Handle VNC keyboard event
 pub fn handle_vnc_keyboard(key: u32, down: bool) -> Result<()> {
-    let mut enigo = ENIGO.lock().unwrap();
+    let mut enigo = get_enigo().lock();
     
     debug!("Keyboard event: key={} down={}", key, down);
 
@@ -100,8 +106,8 @@ pub fn handle_vnc_keyboard(key: u32, down: bool) -> Result<()> {
 
 /// Handle VNC mouse event
 pub fn handle_vnc_mouse(button_mask: u8, x: u16, y: u16) -> Result<()> {
-    let mut enigo = ENIGO.lock().unwrap();
-    let mut last_pos = LAST_MOUSE_POS.lock().unwrap();
+    let mut enigo = get_enigo().lock();
+    let mut last_pos = get_last_mouse_pos().lock();
     
     debug!("Mouse event: buttons=0x{:x} x={} y={}", button_mask, x, y);
 

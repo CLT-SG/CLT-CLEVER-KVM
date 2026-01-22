@@ -580,11 +580,13 @@ pub async fn start_vnc_server(
     info!("🚀 Starting VNC server...");
     
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock().unwrap();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
     // Check if VNC server is already running
     if let Some(ref vnc_server) = state.vnc_server {
-        let vnc = vnc_server.lock().unwrap();
+        let vnc = vnc_server.lock()
+            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
         if vnc.is_running() {
             warn!("VNC server is already running");
             return Err("VNC server is already running".to_string());
@@ -653,11 +655,13 @@ pub async fn stop_vnc_server(
     info!("🛑 Stopping VNC server...");
     
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock().unwrap();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
     match state.vnc_server.take() {
         Some(vnc_server) => {
-            let mut vnc = vnc_server.lock().unwrap();
+            let mut vnc = vnc_server.lock()
+                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
             match vnc.stop().await {
                 Ok(_) => {
                     state.vnc_registration = None;
@@ -683,11 +687,13 @@ pub async fn get_vnc_status(
     app_handle: tauri::AppHandle,
 ) -> Result<VncStatus, String> {
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock().unwrap();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
     let (running, clients, audio_enabled) = match state.vnc_server.as_ref() {
         Some(vnc_server) => {
-            let vnc = vnc_server.lock().unwrap();
+            let vnc = vnc_server.lock()
+                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
             (
                 vnc.is_running(),
                 vnc.get_client_count(),
@@ -723,12 +729,14 @@ pub async fn register_with_clever_service(
     info!("📡 Registering with CLEVER service at {}", clever_url);
     
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock().unwrap();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
     // Check if VNC server is running
     let (vnc_port, audio_port) = match state.vnc_server.as_ref() {
         Some(vnc_server) => {
-            let vnc = vnc_server.lock().unwrap();
+            let vnc = vnc_server.lock()
+                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
             if !vnc.is_running() {
                 return Err("VNC server is not running".to_string());
             }

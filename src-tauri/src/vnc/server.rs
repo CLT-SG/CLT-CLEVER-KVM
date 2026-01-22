@@ -5,7 +5,6 @@
 
 use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
-use std::thread;
 use std::io::{Read, Write, Result as IoResult};
 use log::{info, warn, error, debug};
 use parking_lot::RwLock;
@@ -124,7 +123,8 @@ impl VncKvmServer {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.config.port))
             .context(format!("Failed to bind to port {}", self.config.port))?;
         
-        listener.set_nonblocking(false)?;
+        // Set to non-blocking mode for async operation
+        listener.set_nonblocking(true)?;
         info!("✅ VNC server listening on 0.0.0.0:{}", self.config.port);
 
         let listener = Arc::new(Mutex::new(listener));
@@ -197,10 +197,10 @@ impl VncKvmServer {
                             clients_lock.push(client.clone());
                         }
 
-                        // Handle client in separate thread
+                        // Handle client in separate blocking task
                         let clients_for_handler = clients.clone();
                         let screen_capture_for_handler = screen_capture.clone();
-                        thread::spawn(move || {
+                        tokio::task::spawn_blocking(move || {
                             if let Err(e) = handle_vnc_client(stream, client.id, screen_capture_for_handler) {
                                 error!("❌ VNC client {} error: {}", client.id, e);
                             }
@@ -442,14 +442,15 @@ fn send_framebuffer_update(
     stream: &mut TcpStream,
     screen_capture: &Arc<Mutex<ScreenCapture>>,
 ) -> IoResult<()> {
+    // Capture frame with minimal lock duration
     let (width, height, pixels) = {
         let mut capture = screen_capture.lock().unwrap();
+        let width = capture.width as u16;
+        let height = capture.height as u16;
+        
+        // Capture frame and immediately convert to owned data
         match capture.capture_frame() {
             Ok(frame) => {
-                let width = capture.width as u16;
-                let height = capture.height as u16;
-                
-                // Convert frame data to RGB pixels
                 let pixel_data = frame.to_vec();
                 (width, height, pixel_data)
             }
@@ -458,7 +459,7 @@ fn send_framebuffer_update(
                 return Ok(()); // Skip this update
             }
         }
-    };
+    }; // Lock is released here
 
     // FramebufferUpdate message header
     stream.write_all(&[0u8])?; // Message type: FramebufferUpdate

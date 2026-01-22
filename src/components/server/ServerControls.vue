@@ -146,6 +146,7 @@ export default {
       statusInterval: null,
       error: null,
       successMessage: null,
+      cleverServiceUrl: import.meta.env.VITE_CLEVER_SERVICE_URL || 'http://clever-service:8000',
     };
   },
   async mounted() {
@@ -199,9 +200,8 @@ export default {
       this.registering = true;
 
       try {
-        const cleverUrl = 'http://clever-service:8000'; // Default clever-service URL
         const registration = await invoke('register_with_clever_service', {
-          cleverUrl: cleverUrl
+          cleverUrl: this.cleverServiceUrl
         });
         
         this.successMessage = `Successfully registered with CLEVER Service (ID: ${registration.id})`;
