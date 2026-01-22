@@ -4,6 +4,7 @@ use tokio::runtime::Runtime;
 
 use crate::network::WebSocketServer;
 use crate::lib::DEFAULT_SERVER_PORT;
+use crate::vnc::{VncKvmServer, ScreencastRegistration};
 
 /// Server configuration options
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -35,6 +36,8 @@ pub struct ServerState {
     pub port: u16,
     pub running: bool,
     pub options: ServerOptions,
+    pub vnc_server: Option<Arc<Mutex<VncKvmServer>>>,
+    pub vnc_registration: Option<ScreencastRegistration>,
 }
 
 impl ServerState {
@@ -48,6 +51,8 @@ impl ServerState {
             port: DEFAULT_SERVER_PORT,
             running: false,
             options: ServerOptions::default(),
+            vnc_server: None,
+            vnc_registration: None,
         }
     }
 }
