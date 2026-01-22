@@ -54,6 +54,60 @@ npm run tauri dev
 - Real-time cursor capture
 - Screen scaling options
 
+🎛️ **VNC Server Mode** (NEW!)
+- Native VNC (RFB 3.8) server for video wall integration
+- Separate audio streaming via RTSP
+- Auto-registration with CLEVER service
+- Multi-client support (up to 10 simultaneous connections)
+- Compatible with all standard VNC clients
+
+## VNC Server Mode
+
+CLT-CLEVER-KVM now includes a native VNC server for seamless integration with video wall systems.
+
+### Features
+- Standard VNC (RFB 3.8) protocol
+- Separate audio streaming via RTSP
+- Auto-registration with clever-service
+- Multi-client support
+- Hardware-accelerated encoding
+
+### Usage
+```bash
+# Start the application
+npm run tauri dev
+
+# In the UI, enable "VNC Server" and "Audio Stream"
+# VNC will be available at: vnc://your-ip:5900
+# Audio stream at: rtsp://your-ip:5901/audio
+```
+
+### Connecting with VNC Clients
+
+**TigerVNC:**
+```bash
+vncviewer <ip-address>:5900
+```
+
+**RealVNC:**
+```bash
+vnc://<ip-address>:5900
+```
+
+### Integration with MediaMTX
+
+Configure MediaMTX to relay VNC + audio:
+```yaml
+paths:
+  vnc_workstation_1:
+    source: vnc://192.168.1.100:5900
+    sourceProtocol: vnc
+  audio_workstation_1:
+    source: rtsp://192.168.1.100:5901/audio
+```
+
+For more details, see [VNC Integration Guide](docs/VNC_INTEGRATION.md).
+
 ## System Requirements
 
 ### Minimum Requirements
