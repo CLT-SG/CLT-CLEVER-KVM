@@ -15,6 +15,9 @@ pub mod input;
 pub mod audio;
 pub mod registration;
 
+#[cfg(test)]
+mod tests;
+
 pub use server::{VncKvmServer, VncServerConfig, VncClient};
 pub use audio::{SeparateAudioStream, RfbAudioExtension};
 pub use registration::{register_vnc_with_clever_service, ScreencastRegistration};
