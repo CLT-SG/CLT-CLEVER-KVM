@@ -59,6 +59,7 @@ fn main() {
             get_system_info,
             check_firewall_status,
             start_vnc_server,
+            start_vnc_servers_all,
             stop_vnc_server,
             get_vnc_status,
             register_with_clever_service

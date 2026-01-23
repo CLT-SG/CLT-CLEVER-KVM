@@ -30,7 +30,7 @@ impl Default for VncServerConfig {
             port: 5900,
             monitor_id: 0,
             enable_audio: true,
-            audio_port: Some(5901),
+            audio_port: Some(6900),
             max_clients: 10,
             password: None,
         }

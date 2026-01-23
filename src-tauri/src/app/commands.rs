@@ -541,13 +541,26 @@ use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register
 use serde::Serialize;
 
 /// VNC server information returned to frontend
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct VncServerInfo {
     pub vnc_url: String,
     pub audio_url: Option<String>,
     pub port: u16,
     pub audio_port: Option<u16>,
     pub clients_connected: usize,
+    pub monitor_id: usize,
+    pub monitor_name: String,
+    pub width: usize,
+    pub height: usize,
+    pub position_x: i32,
+    pub position_y: i32,
+}
+
+/// VNC servers information for multi-monitor setup
+#[derive(Debug, Serialize)]
+pub struct VncServersInfo {
+    pub servers: Vec<VncServerInfo>,
+    pub audio_url: Option<String>,
 }
 
 /// VNC server status
@@ -568,7 +581,7 @@ pub struct RegistrationStatus {
     pub audio_url: Option<String>,
 }
 
-/// Start VNC server
+/// Start VNC server for a single monitor
 #[tauri::command]
 pub async fn start_vnc_server(
     app_handle: tauri::AppHandle,
@@ -583,22 +596,36 @@ pub async fn start_vnc_server(
     let mut state = state.lock()
         .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
-    // Check if VNC server is already running
-    if let Some(ref vnc_server) = state.vnc_server {
+    let monitor_id = monitor.unwrap_or(0);
+    
+    // Check if VNC server for this monitor is already running
+    for vnc_server in &state.vnc_servers {
         let vnc = vnc_server.lock()
             .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-        if vnc.is_running() {
-            warn!("VNC server is already running");
-            return Err("VNC server is already running".to_string());
+        if vnc.is_running() && vnc.get_config().monitor_id == monitor_id {
+            warn!("VNC server for monitor {} is already running", monitor_id);
+            return Err(format!("VNC server for monitor {} is already running", monitor_id));
         }
     }
+    
+    // Get monitor info
+    let monitors = match ScreenCapture::get_all_monitors() {
+        Ok(m) => m,
+        Err(e) => return Err(format!("Failed to get monitors: {}", e)),
+    };
+    
+    if monitor_id >= monitors.len() {
+        return Err(format!("Monitor {} not found", monitor_id));
+    }
+    
+    let monitor_info = &monitors[monitor_id];
 
     // Create VNC server configuration
     let config = VncServerConfig {
-        port: port.unwrap_or(5900),
-        monitor_id: monitor.unwrap_or(0),
+        port: port.unwrap_or(5900 + monitor_id as u16),
+        monitor_id,
         enable_audio,
-        audio_port: if enable_audio { Some(audio_port.unwrap_or(5901)) } else { None },
+        audio_port: if enable_audio { Some(audio_port.unwrap_or(6900)) } else { None },
         max_clients: 10,
         password: None,
     };
@@ -618,10 +645,13 @@ pub async fn start_vnc_server(
                     let clients_connected = vnc_server.get_client_count();
                     
                     // Store VNC server in state
-                    state.vnc_server = Some(Arc::new(Mutex::new(vnc_server)));
+                    state.vnc_servers.push(Arc::new(Mutex::new(vnc_server)));
 
                     info!("✅ VNC server started successfully");
                     info!("   VNC URL: {}", vnc_url);
+                    info!("   Monitor: {} ({}x{}) at ({}, {})", 
+                          monitor_info.name, monitor_info.width, monitor_info.height,
+                          monitor_info.position_x, monitor_info.position_y);
                     if let Some(ref audio) = audio_url {
                         info!("   Audio URL: {}", audio);
                     }
@@ -632,6 +662,12 @@ pub async fn start_vnc_server(
                         port: config.port,
                         audio_port: config.audio_port,
                         clients_connected,
+                        monitor_id,
+                        monitor_name: monitor_info.name.clone(),
+                        width: monitor_info.width,
+                        height: monitor_info.height,
+                        position_x: monitor_info.position_x,
+                        position_y: monitor_info.position_y,
                     })
                 }
                 Err(e) => {
@@ -647,38 +683,101 @@ pub async fn start_vnc_server(
     }
 }
 
-/// Stop VNC server
+/// Start VNC servers for all monitors
+#[tauri::command]
+pub async fn start_vnc_servers_all(
+    app_handle: tauri::AppHandle,
+    enable_audio: bool,
+) -> Result<VncServersInfo, String> {
+    info!("🚀 Starting VNC servers for all monitors...");
+    
+    // Get all monitors
+    let monitors = match ScreenCapture::get_all_monitors() {
+        Ok(m) => m,
+        Err(e) => return Err(format!("Failed to get monitors: {}", e)),
+    };
+    
+    if monitors.is_empty() {
+        return Err("No monitors found".to_string());
+    }
+    
+    let mut server_infos = Vec::new();
+    let mut shared_audio_url = None;
+    
+    // Start VNC server for each monitor
+    for (idx, monitor_info) in monitors.iter().enumerate() {
+        let port = 5900 + idx as u16;
+        let audio_port = if enable_audio && idx == 0 { Some(6900) } else { None };
+        
+        info!("Starting VNC server for monitor {} on port {}", idx, port);
+        
+        match start_vnc_server(
+            app_handle.clone(),
+            Some(port),
+            Some(idx),
+            enable_audio && idx == 0, // Only enable audio for first monitor
+            audio_port,
+        ).await {
+            Ok(server_info) => {
+                if server_info.audio_url.is_some() {
+                    shared_audio_url = server_info.audio_url.clone();
+                }
+                server_infos.push(server_info);
+            }
+            Err(e) => {
+                warn!("Failed to start VNC server for monitor {}: {}", idx, e);
+            }
+        }
+    }
+    
+    if server_infos.is_empty() {
+        return Err("Failed to start any VNC servers".to_string());
+    }
+    
+    info!("✅ Started {} VNC server(s)", server_infos.len());
+    
+    Ok(VncServersInfo {
+        servers: server_infos,
+        audio_url: shared_audio_url,
+    })
+}
+
+/// Stop all VNC servers
 #[tauri::command]
 pub async fn stop_vnc_server(
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    info!("🛑 Stopping VNC server...");
+    info!("🛑 Stopping all VNC servers...");
     
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
     let mut state = state.lock()
         .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
-    match state.vnc_server.take() {
-        Some(vnc_server) => {
-            let mut vnc = vnc_server.lock()
-                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-            match vnc.stop().await {
-                Ok(_) => {
-                    state.vnc_registration = None;
-                    info!("✅ VNC server stopped");
-                    Ok(())
-                }
-                Err(e) => {
-                    error!("❌ Failed to stop VNC server: {}", e);
-                    Err(format!("Failed to stop VNC server: {}", e))
-                }
-            }
-        }
-        None => {
-            warn!("No VNC server running");
-            Err("No VNC server running".to_string())
+    if state.vnc_servers.is_empty() {
+        warn!("No VNC servers running");
+        return Err("No VNC servers running".to_string());
+    }
+
+    let mut errors = Vec::new();
+    let servers = std::mem::take(&mut state.vnc_servers);
+    
+    for vnc_server in servers {
+        let mut vnc = vnc_server.lock()
+            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+        if let Err(e) = vnc.stop().await {
+            errors.push(format!("Failed to stop VNC server: {}", e));
         }
     }
+    
+    state.vnc_registration = None;
+    
+    if !errors.is_empty() {
+        error!("❌ Some VNC servers failed to stop: {:?}", errors);
+        return Err(format!("Some servers failed to stop: {}", errors.join(", ")));
+    }
+    
+    info!("✅ All VNC servers stopped");
+    Ok(())
 }
 
 /// Get VNC server status
@@ -690,18 +789,19 @@ pub async fn get_vnc_status(
     let state = state.lock()
         .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
-    let (running, clients, audio_enabled) = match state.vnc_server.as_ref() {
-        Some(vnc_server) => {
-            let vnc = vnc_server.lock()
-                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-            (
-                vnc.is_running(),
-                vnc.get_client_count(),
-                vnc.get_config().enable_audio,
-            )
+    let mut running = false;
+    let mut total_clients = 0;
+    let mut audio_enabled = false;
+    
+    for vnc_server in &state.vnc_servers {
+        let vnc = vnc_server.lock()
+            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+        if vnc.is_running() {
+            running = true;
+            total_clients += vnc.get_client_count();
+            audio_enabled = audio_enabled || vnc.get_config().enable_audio;
         }
-        None => (false, 0, false),
-    };
+    }
 
     let registration_status = state.vnc_registration.as_ref().map(|reg| {
         RegistrationStatus {
@@ -714,7 +814,7 @@ pub async fn get_vnc_status(
 
     Ok(VncStatus {
         running,
-        clients,
+        clients: total_clients,
         audio_enabled,
         registration_status,
     })
@@ -732,20 +832,21 @@ pub async fn register_with_clever_service(
     let mut state = state.lock()
         .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
-    // Check if VNC server is running
-    let (vnc_port, audio_port) = match state.vnc_server.as_ref() {
-        Some(vnc_server) => {
-            let vnc = vnc_server.lock()
-                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-            if !vnc.is_running() {
-                return Err("VNC server is not running".to_string());
-            }
-            let config = vnc.get_config();
-            (config.port, config.audio_port)
-        }
-        None => {
+    // Check if VNC servers are running
+    if state.vnc_servers.is_empty() {
+        return Err("No VNC servers running".to_string());
+    }
+    
+    // Get the first VNC server's port and audio port for registration
+    let (vnc_port, audio_port) = {
+        let vnc_server = &state.vnc_servers[0];
+        let vnc = vnc_server.lock()
+            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+        if !vnc.is_running() {
             return Err("VNC server is not running".to_string());
         }
+        let config = vnc.get_config();
+        (config.port, config.audio_port)
     };
 
     // Get hostname
