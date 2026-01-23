@@ -1,6 +1,6 @@
 # Clever KVM
 
-A high-performance remote desktop system built with Tauri, featuring native WebM/VP8 encoding and ultra-low latency streaming.
+A high-performance VNC server built with Tauri for multi-monitor video wall systems, featuring native VNC (RFB 3.8) protocol support with separate audio streaming.
 
 ## Quick Start
 
@@ -32,66 +32,85 @@ npm run tauri dev
 
 ## Features
 
-🎥 **Advanced Video Streaming**
-- Native WebM + VP8 encoding with hardware acceleration
-- YUV420 color space optimization (50% better compression than RGB)
-- Ultra-low latency mode (<50ms end-to-end)
-- Adaptive quality (1-10 Mbps) and frame rates (15-60 FPS)
+🎥 **Multi-Monitor VNC Support**
+- Native VNC (RFB 3.8) protocol implementation
+- Individual VNC server per monitor with automatic port assignment
+- Exact display positioning and sizing preserved from system settings
+- Hardware-accelerated screen capture
 
-🎵 **Professional Audio**
-- Native Opus codec with WebM container
-- Multiple quality modes: High (320kbps), Balanced (256kbps), Low Latency (96kbps)
-- Perfect audio/video synchronization
+🎵 **Separate Audio Streaming**
+- RTSP audio streaming on dedicated port (6900)
+- Shared audio across all monitors
+- High-quality audio encoding
 
 🚀 **Performance**
-- Hardware acceleration (Intel Quick Sync, NVENC, VCE)
-- Multi-threaded encoding with SIMD optimizations
-- Zero external dependencies (no FFmpeg required)
+- Hardware acceleration for screen capture
+- Multi-threaded processing
+- Optimized for video wall deployments
 
 🖥️ **Desktop Control**
-- Multi-monitor support
-- Full keyboard/mouse/scroll control
+- Multi-monitor support with individual VNC streams
+- Full keyboard/mouse/scroll control per monitor
 - Real-time cursor capture
-- Screen scaling options
+- Exact monitor positioning and sizing
 
-🎛️ **VNC Server Mode** (NEW!)
+🎛️ **VNC Server Mode**
 - Native VNC (RFB 3.8) server for video wall integration
-- Separate audio streaming via RTSP
+- Multi-monitor support with automatic port assignment (5900, 5901, 5902, etc.)
+- Separate audio streaming via RTSP on port 6900
+- Exact display positioning and sizing
 - Auto-registration with CLEVER service
-- Multi-client support (up to 10 simultaneous connections)
+- Multi-client support (up to 10 simultaneous connections per monitor)
 - Compatible with all standard VNC clients
 
 ## VNC Server Mode
 
-CLT-CLEVER-KVM now includes a native VNC server for seamless integration with video wall systems.
+CLT-CLEVER-KVM provides a native VNC server for seamless integration with multi-monitor video wall systems.
 
 ### Features
 - Standard VNC (RFB 3.8) protocol
+- Multi-monitor support with individual VNC servers per display
 - Separate audio streaming via RTSP
+- Exact monitor positioning and sizing preserved
 - Auto-registration with clever-service
 - Multi-client support
 - Hardware-accelerated encoding
+
+### Port Assignment
+- **Monitor 1 (Primary)**: VNC on port 5900
+- **Monitor 2**: VNC on port 5901
+- **Monitor 3**: VNC on port 5902
+- **...and so on**
+- **Audio Stream**: Port 6900 (shared across all monitors)
 
 ### Usage
 ```bash
 # Start the application
 npm run tauri dev
 
-# In the UI, enable "VNC Server" and "Audio Stream"
-# VNC will be available at: vnc://your-ip:5900
-# Audio stream at: rtsp://your-ip:5901/audio
+# Start VNC servers for all monitors with audio
+# This will automatically start VNC on ports 5900, 5901, etc. for each monitor
+# Audio will be available on port 6900
+
+# Or start individual monitor VNC servers as needed
 ```
 
 ### Connecting with VNC Clients
 
-**TigerVNC:**
+**TigerVNC (Monitor 1):**
 ```bash
 vncviewer <ip-address>:5900
 ```
 
+**TigerVNC (Monitor 2):**
+```bash
+vncviewer <ip-address>:5901
+```
+
 **RealVNC:**
 ```bash
-vnc://<ip-address>:5900
+vnc://<ip-address>:5900  # Monitor 1
+vnc://<ip-address>:5901  # Monitor 2
 ```
 
 ### Integration with MediaMTX
@@ -99,11 +118,14 @@ vnc://<ip-address>:5900
 Configure MediaMTX to relay VNC + audio:
 ```yaml
 paths:
-  vnc_workstation_1:
+  vnc_workstation_1_screen1:
     source: vnc://192.168.1.100:5900
     sourceProtocol: vnc
+  vnc_workstation_1_screen2:
+    source: vnc://192.168.1.100:5901
+    sourceProtocol: vnc
   audio_workstation_1:
-    source: rtsp://192.168.1.100:5901/audio
+    source: rtsp://192.168.1.100:6900/audio
 ```
 
 For more details, see [VNC Integration Guide](docs/VNC_INTEGRATION.md).
