@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
-use crate::network::WebSocketServer;
 use crate::lib::DEFAULT_SERVER_PORT;
 use crate::vnc::{VncKvmServer, ScreencastRegistration};
 
@@ -29,10 +28,9 @@ pub struct MonitorInfo {
     pub position_y: i32,
 }
 
-/// Shared state between Tauri and WebSocket server
+/// Shared state for VNC server management
 pub struct ServerState {
     pub runtime: Runtime,
-    pub server_handle: Option<WebSocketServer>,
     pub port: u16,
     pub running: bool,
     pub options: ServerOptions,
@@ -47,7 +45,6 @@ impl ServerState {
                 .enable_all()
                 .build()
                 .expect("Failed to create Tokio runtime"),
-            server_handle: None,
             port: DEFAULT_SERVER_PORT,
             running: false,
             options: ServerOptions::default(),

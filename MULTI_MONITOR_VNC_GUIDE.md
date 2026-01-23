@@ -277,5 +277,4 @@ Connect each display to the corresponding VNC port, and all will have synchroniz
 
 For issues or questions, please refer to:
 - [VNC Integration Guide](docs/VNC_INTEGRATION.md)
-- [Implementation Summary](IMPLEMENTATION_SUMMARY.md)
-- [Security Summary](SECURITY_SUMMARY.md)
+- [Main README](README.md)

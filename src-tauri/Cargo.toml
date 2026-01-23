@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/CLTSG/CLT-CLEVER-KVM"
 homepage = "https://github.com/CLTSG/CLT-CLEVER-KVM"
 documentation = "https://github.com/CLTSG/CLT-CLEVER-KVM#readme"
-keywords = ["kvm", "remote-desktop", "tauri", "vp8", "streaming"]
+keywords = ["kvm", "vnc", "tauri", "video-wall", "streaming"]
 categories = ["multimedia", "network-programming"]
 edition = "2021"
 
