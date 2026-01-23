@@ -1,7 +1,6 @@
 <script setup>
 import { onMounted, computed } from "vue";
 import { useServer } from "./composables";
-import { presets } from "./constants";
 
 import {
   TabContainer,
@@ -22,11 +21,13 @@ const {
   settings,
   monitors,
   loadingMonitors,
+  vncInfo,
   checkServerStatus,
   startServer,
   stopServer,
   openUrl,
-  copyUrl
+  copyUrl,
+  saveSettings
 } = useServer();
 
 // The status checking is now automatic, but we can still call it manually if needed
@@ -35,23 +36,16 @@ onMounted(async () => {
   // await checkServerStatus();
 });
 
-function applyPreset(presetName) {
-  const preset = presets[presetName];
-  if (preset) {
-    Object.keys(preset).forEach(key => {
-      if (key in settings) {
-        settings[key] = preset[key];
-      }
-    });
-  }
-}
-
 function updateServerPort(value) {
   serverPort.value = value;
 }
 
 function updateSelectedMonitor(value) {
   settings.selectedMonitor = value;
+}
+
+function handleSettingsChanged() {
+  saveSettings();
 }
 
 // Define tabs based on server status
@@ -70,7 +64,8 @@ const tabs = computed(() => {
 <template>
   <main class="container">
     <div class="header">
-      <h1>Clever KVM</h1>
+      <h1>🖥️ Clever KVM - VNC Server</h1>
+      <p class="subtitle">Multi-Monitor VNC Server for Video Wall Systems</p>
     </div>
 
     <TabContainer :tabs="tabs" default-tab="status">
@@ -78,11 +73,11 @@ const tabs = computed(() => {
         <ServerStatus 
           :server-status="serverStatus"
           :server-url="serverUrl"
+          :vnc-info="vncInfo"
           :loading="loading"
           :error-message="errorMessage"
           :start-server="startServer"
           :stop-server="stopServer"
-          :open-url="openUrl"
           :copy-url="copyUrl"
         />
         
@@ -104,9 +99,9 @@ const tabs = computed(() => {
             :settings="settings"
             :monitors="monitors"
             :disabled="serverStatus"
-            @apply-preset="applyPreset"
             @update:server-port="updateServerPort"
             @update:selected-monitor="updateSelectedMonitor"
+            @settings-changed="handleSettingsChanged"
           />
         </div>
       </template>
@@ -148,6 +143,13 @@ h1 {
   font-size: 1.2rem;
   color: #7f8c8d;
   margin-bottom: 0;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: #7f8c8d;
+  margin: 0.5rem 0 0 0;
+  text-align: center;
 }
 
 .config-content h2 {

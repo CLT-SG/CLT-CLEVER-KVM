@@ -7,62 +7,22 @@
   
   <div v-if="showAdvancedSettings" class="advanced-settings" :class="{ disabled: disabled }">
     <div class="setting-group">
-      <h4>Codec Selection</h4>
+      <h4>VNC Audio Settings</h4>
       <label>
-        <input type="radio" v-model="settings.useVP8" :value="true" 
-               :disabled="disabled"
-               checked />
-        WebRTC VP8 (Optimized for real-time streaming)
+        <input type="checkbox" v-model="settings.enableAudio" :disabled="disabled" @change="$emit('settings-changed')" />
+        Enable Audio Streaming (via RTSP on port {{ settings.audioPort }})
       </label>
-    </div>
-    
-    <div class="setting-group">
-      <h4>Performance</h4>
-      <label>
-        <input type="checkbox" v-model="settings.hardwareAcceleration" :disabled="disabled" />
-        Hardware Acceleration (uses GPU encoding if available)
-      </label>
-      <label>
-        <input type="checkbox" v-model="settings.deltaEncoding" :disabled="disabled" />
-        Delta Encoding (only send changed screen parts)
-      </label>
-      <label>
-        <input type="checkbox" v-model="settings.adaptiveQuality" :disabled="disabled" />
-        Adaptive Quality (adjust based on network conditions)
-      </label>
-    </div>
-    
-    <div class="setting-group">
-      <h4>Bitrates & Quality</h4>
-      <div class="slider-group">
-        <label for="video-bitrate">Video Bitrate: {{ settings.videoBitrate }} kbps</label>
-        <input type="range" id="video-bitrate" v-model="settings.videoBitrate"
-               min="1000" max="12000" step="500" :disabled="disabled" />
-      </div>
       
-      <div class="slider-group">
-        <label for="audio-bitrate">Audio Bitrate: {{ settings.audioBitrate }} kbps</label>
-        <input type="range" id="audio-bitrate" v-model="settings.audioBitrate"
-               min="32" max="256" step="16" :disabled="disabled" />
-      </div>
-      
-      <div class="slider-group">
-        <label for="framerate">Framerate: {{ settings.framerate }} FPS</label>
-        <input type="range" id="framerate" v-model="settings.framerate"
-               min="15" max="60" step="5" :disabled="disabled" />
+      <div v-if="settings.enableAudio" class="slider-group">
+        <label for="audio-port">Audio Port:</label>
+        <input type="number" id="audio-port" v-model.number="settings.audioPort"
+               min="1024" max="65535" :disabled="disabled" @change="$emit('settings-changed')" />
       </div>
     </div>
     
-    <div class="setting-group">
-      <h4>Features</h4>
-      <label>
-        <input type="checkbox" v-model="settings.encryptionEnabled" :disabled="disabled" />
-        Enable Encryption (secure connection)
-      </label>
-      <label>
-        <input type="checkbox" v-model="settings.useWebRTC" :disabled="disabled" />
-        Enable WebRTC Audio
-      </label>
+    <div class="help-text">
+      <p><strong>Note:</strong> VNC protocol (RFB 3.8) is used for video streaming. Audio is streamed separately via RTSP.</p>
+      <p>Connect using any VNC client such as TigerVNC, RealVNC, or VNC Viewer.</p>
     </div>
   </div>
 </template>
@@ -77,6 +37,8 @@ defineProps({
     default: false
   }
 });
+
+defineEmits(['settings-changed']);
 
 const showAdvancedSettings = ref(false);
 </script>
@@ -130,6 +92,31 @@ const showAdvancedSettings = ref(false);
 
 .slider-group input[type="range"] {
   width: 100%;
+}
+
+.slider-group input[type="number"] {
+  width: 120px;
+  padding: 0.4rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.help-text {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #e7f3ff;
+  border-left: 3px solid #0066cc;
+  border-radius: 4px;
+}
+
+.help-text p {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+  color: #495057;
+}
+
+.help-text strong {
+  color: #0066cc;
 }
 
 h4 {

@@ -1,6 +1,8 @@
-# Clever KVM
+# Clever KVM - VNC Server
 
 A high-performance VNC server built with Tauri for multi-monitor video wall systems, featuring native VNC (RFB 3.8) protocol support with separate audio streaming.
+
+**Current Implementation:** This application is focused exclusively on VNC server functionality. Previous WebSocket/WebRTC streaming methods have been removed in favor of standard VNC protocol for better compatibility and integration with video wall systems.
 
 ## Quick Start
 

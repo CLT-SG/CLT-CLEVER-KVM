@@ -1,7 +1,19 @@
 <template>
   <div class="server-config" :class="{ disabled: disabled }">
+    <div class="form-group checkbox-group">
+      <label class="checkbox-label">
+        <input 
+          type="checkbox" 
+          v-model="settings.autoStart"
+          @change="$emit('settings-changed')"
+          :disabled="disabled"
+        />
+        <span>Auto-start VNC server on application launch</span>
+      </label>
+    </div>
+    
     <div class="form-group">
-      <label for="port">Port:</label>
+      <label for="port">VNC Port:</label>
       <input 
         id="port" 
         :value="serverPort" 
@@ -11,6 +23,7 @@
         max="65535"
         :disabled="disabled"
       />
+      <span class="help-text">Default: 5900</span>
     </div>
     
     <div class="form-group" v-if="monitors.length > 0">
@@ -27,21 +40,15 @@
       </select>
     </div>
     
-    <PresetSelector 
-      :settings="settings"
-      :disabled="disabled"
-      @apply-preset="$emit('apply-preset', $event)"
-    />
-    
     <AdvancedSettings 
       :settings="settings" 
       :disabled="disabled"
+      @settings-changed="$emit('settings-changed')"
     />
   </div>
 </template>
 
 <script setup>
-import PresetSelector from './PresetSelector.vue';
 import AdvancedSettings from './AdvancedSettings.vue';
 
 defineProps({
@@ -54,7 +61,7 @@ defineProps({
   }
 });
 
-defineEmits(['apply-preset', 'update:server-port', 'update:selected-monitor']);
+defineEmits(['update:server-port', 'update:selected-monitor', 'settings-changed']);
 </script>
 
 <style scoped>
@@ -70,7 +77,42 @@ defineEmits(['apply-preset', 'update:server-port', 'update:selected-monitor']);
 
 .form-group label {
   margin-right: 1rem;
-  min-width: 60px;
+  min-width: 100px;
+  font-weight: 500;
+}
+
+.checkbox-group {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background-color: #e7f3ff;
+  border-left: 3px solid #0066cc;
+  border-radius: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  margin: 0;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-right: 0.75rem;
+  cursor: pointer;
+}
+
+.checkbox-label span {
+  font-weight: 500;
+  color: #0066cc;
+}
+
+.help-text {
+  margin-left: 0.5rem;
+  font-size: 0.85rem;
+  color: #6c757d;
 }
 
 input[type="number"], select {
