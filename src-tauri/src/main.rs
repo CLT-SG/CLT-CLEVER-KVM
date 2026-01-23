@@ -1,10 +1,10 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! CLEVER KVM - Ultra-Low Latency Remote Desktop
+//! CLEVER KVM - VNC Server for Multi-Monitor Video Wall
 //! 
-//! A high-performance remote desktop system optimized for local networks
-//! with ultra-low latency streaming and advanced encoding capabilities.
+//! A high-performance VNC server implementation for multi-monitor setups
+//! with separate audio streaming and exact display positioning.
 
 // Use Microsoft's high-performance memory allocator for ultra-low latency
 #[cfg(feature = "mimalloc")]
@@ -33,7 +33,7 @@ fn main() {
     // Initialize logging first
     env_logger::init();
     
-    info!("🚀 Starting {} - Ultra-Low Latency Remote Desktop", APP_NAME);
+    info!("🚀 Starting {} - VNC Server for Multi-Monitor Video Wall", APP_NAME);
     
     // Run Tauri application
     tauri::Builder::default()
@@ -59,25 +59,17 @@ fn main() {
             get_system_info,
             check_firewall_status,
             start_vnc_server,
+            start_vnc_servers_all,
             stop_vnc_server,
             get_vnc_status,
             register_with_clever_service
         ])
         .setup(|app| {
             info!("✅ Tauri application initialized successfully");
-            info!("🎮 KVM application ready - use the interface to start streaming");
+            info!("🎮 VNC KVM application ready - use the interface to start VNC servers");
             
-            // Auto-start server on application launch
-            let app_handle = app.handle();
-            match start_server(app_handle.clone(), Some(9921), None) {
-                Ok(url) => {
-                    info!("🚀 Auto-started KVM server at: {}", url);
-                },
-                Err(e) => {
-                    log::warn!("Failed to auto-start server: {}", e);
-                    info!("You can manually start the server using the interface");
-                }
-            }
+            // Note: WebSocket/WebRTC server auto-start disabled - VNC mode only
+            // Use start_vnc_server or start_vnc_servers_all commands to start VNC servers
             
             Ok(())
         })

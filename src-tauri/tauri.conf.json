@@ -51,15 +51,6 @@
         "all": true
       }
     },
-    "plugins": {
-      "vnc": {
-        "defaultPort": 5900,
-        "audioPort": 5901,
-        "maxClients": 10,
-        "password": "",
-        "cleverServiceUrl": "http://localhost:8000"
-      }
-    },
     "windows": [
       {
         "title": "Clever KVM",

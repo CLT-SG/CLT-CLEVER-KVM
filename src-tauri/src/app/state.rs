@@ -36,7 +36,7 @@ pub struct ServerState {
     pub port: u16,
     pub running: bool,
     pub options: ServerOptions,
-    pub vnc_server: Option<Arc<Mutex<VncKvmServer>>>,
+    pub vnc_servers: Vec<Arc<Mutex<VncKvmServer>>>,
     pub vnc_registration: Option<ScreencastRegistration>,
 }
 
@@ -51,7 +51,7 @@ impl ServerState {
             port: DEFAULT_SERVER_PORT,
             running: false,
             options: ServerOptions::default(),
-            vnc_server: None,
+            vnc_servers: Vec::new(),
             vnc_registration: None,
         }
     }

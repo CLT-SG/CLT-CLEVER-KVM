@@ -1,7 +1,64 @@
-# VNC Server Implementation - Complete Summary
+# VNC Multi-Monitor Server Implementation - Updated Summary
 
 ## Overview
-Successfully implemented a native VNC (RFB 3.8) server with audio streaming capabilities for the CLT-CLEVER-KVM application, enabling seamless integration with the CLEVER video wall ecosystem.
+Successfully updated CLT-CLEVER-KVM to focus exclusively on VNC server mode with multi-monitor support. Each monitor gets its own VNC server with automatic port assignment (5900, 5901, etc.), and audio is centralized on port 6900.
+
+## Latest Changes (Current Session)
+
+### 1. Tauri v1 Compatibility Fix
+✅ **Issue**: `tauri.conf.json` had a 'plugins' property which is not supported in Tauri v1
+✅ **Solution**: Removed the plugins property from tauri.conf.json
+✅ **Result**: `npm run tauri dev` command now works without configuration errors
+
+### 2. Multi-Monitor VNC Support
+✅ **Updated State Management** (state.rs)
+- Changed from single VNC server to vector of servers: `Vec<Arc<Mutex<VncKvmServer>>>`
+- Supports multiple simultaneous VNC servers, one per monitor
+
+✅ **Enhanced VNC Server Configuration** (vnc/server.rs)
+- Audio port default changed from 5901 to 6900
+- Each monitor gets automatic port assignment starting at 5900
+
+✅ **New Commands** (commands.rs)
+- `start_vnc_server`: Start VNC for a single monitor (enhanced with monitor info)
+- `start_vnc_servers_all`: NEW - Start VNC servers for all monitors automatically
+- `stop_vnc_server`: Updated to stop all VNC servers
+- `get_vnc_status`: Updated to aggregate status from all servers
+- `register_with_clever_service`: Updated for multi-server support
+
+✅ **Enhanced VNC Server Info**
+```rust
+pub struct VncServerInfo {
+    pub vnc_url: String,
+    pub audio_url: Option<String>,
+    pub port: u16,
+    pub audio_port: Option<u16>,
+    pub clients_connected: usize,
+    pub monitor_id: usize,
+    pub monitor_name: String,
+    pub width: usize,
+    pub height: usize,
+    pub position_x: i32,
+    pub position_y: i32,
+}
+```
+
+### 3. Port Assignment Strategy
+✅ **VNC Ports**: 5900 (screen 1), 5901 (screen 2), 5902 (screen 3), etc.
+✅ **Audio Port**: 6900 (shared across all monitors)
+✅ **Exact Positioning**: Each VNC server preserves the exact monitor position and size from system settings
+
+### 4. Application Focus Shift
+✅ **Disabled WebSocket/WebRTC Server**
+- Removed auto-start of WebSocket server in main.rs
+- Application now focuses exclusively on VNC mode
+- Updated log messages to reflect VNC focus
+
+✅ **Updated Documentation**
+- README.md updated with multi-monitor VNC instructions
+- Clear port assignment documentation
+- MediaMTX integration examples updated
+- Removed focus on WebRTC/WebSocket streaming
 
 ## Implementation Statistics
 
@@ -126,39 +183,43 @@ Successfully implemented a native VNC (RFB 3.8) server with audio streaming capa
 - bytes 1.5: Buffer handling
 - crossbeam-channel 0.5: High-performance channels
 
-## Architecture
+## Architecture (Updated)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    CLT-CLEVER-KVM Application                │
+│              CLT-CLEVER-KVM Multi-Monitor VNC                │
 ├─────────────────────────────────────────────────────────────┤
 │  Tauri Backend (Rust)                                        │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  VNC Server Module (vnc/)                             │  │
-│  │  ├── server.rs    - RFB 3.8 protocol, multi-client   │  │
+│  │  ├── server.rs    - RFB 3.8, multi-server support   │  │
 │  │  ├── input.rs     - Keyboard/mouse handling          │  │
-│  │  ├── audio.rs     - Audio streaming (RTSP + RFB)     │  │
+│  │  ├── audio.rs     - Audio streaming (RTSP)           │  │
 │  │  ├── registration.rs - CLEVER service integration    │  │
 │  │  └── tests.rs     - Unit tests                       │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                               │
 │  Tauri Commands (app/commands.rs)                           │
-│  ├── start_vnc_server                                       │
-│  ├── stop_vnc_server                                        │
-│  ├── get_vnc_status                                         │
+│  ├── start_vnc_server        - Single monitor              │
+│  ├── start_vnc_servers_all   - All monitors (NEW)          │
+│  ├── stop_vnc_server         - Stop all servers            │
+│  ├── get_vnc_status           - Aggregate status           │
 │  └── register_with_clever_service                          │
+│                                                               │
+│  Server State (app/state.rs)                                │
+│  └── vnc_servers: Vec<VncKvmServer> - Multi-server support │
 ├─────────────────────────────────────────────────────────────┤
 │  Frontend (Vue.js)                                           │
 │  └── ServerControls.vue - VNC control UI                   │
 └─────────────────────────────────────────────────────────────┘
-                    │                        │
-       vnc://ip:5900│           rtsp://ip:5901/audio
-                    ▼                        ▼
-            ┌──────────────┐        ┌──────────────┐
-            │ VNC Clients  │        │   MediaMTX   │
-            │ - TigerVNC   │        │ Audio Relay  │
-            │ - RealVNC    │        └──────────────┘
-            └──────────────┘
+         │              │              │              │
+  Monitor 1      Monitor 2      Monitor 3      Audio
+vnc://ip:5900  vnc://ip:5901  vnc://ip:5902  rtsp://ip:6900
+         ▼              ▼              ▼              ▼
+  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+  │   VNC    │  │   VNC    │  │   VNC    │  │ MediaMTX │
+  │  Client  │  │  Client  │  │  Client  │  │  Audio   │
+  └──────────┘  └──────────┘  └──────────┘  └──────────┘
 ```
 
 ## Technical Highlights

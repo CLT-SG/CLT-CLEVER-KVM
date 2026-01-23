@@ -30,7 +30,7 @@ impl Default for VncServerConfig {
             port: 5900,
             monitor_id: 0,
             enable_audio: true,
-            audio_port: Some(5901),
+            audio_port: Some(6900),
             max_clients: 10,
             password: None,
         }
@@ -139,9 +139,10 @@ impl VncKvmServer {
         // Start audio stream if configured
         if let Some(audio_stream) = &self.audio_stream {
             let stream = audio_stream.clone();
-            tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
                 if let Ok(mut stream) = stream.lock() {
-                    if let Err(e) = stream.start_streaming().await {
+                    // Use block_on since start_streaming() is async but we're in blocking context
+                    if let Err(e) = tokio::runtime::Handle::current().block_on(stream.start_streaming()) {
                         error!("❌ Audio streaming error: {}", e);
                     }
                 }
@@ -153,6 +154,7 @@ impl VncKvmServer {
         let running = self.running.clone();
         let screen_capture = self.screen_capture.clone();
         let max_clients = self.config.max_clients;
+        let listener = listener.clone(); // Clone listener for the spawn
         
         tokio::spawn(async move {
             let mut client_id = 0;
@@ -179,8 +181,12 @@ impl VncKvmServer {
                 }
 
                 // Accept new connection (non-blocking check)
-                let listener_lock = listener.lock().unwrap();
-                match listener_lock.accept() {
+                let accept_result = {
+                    let listener_lock = listener.lock().unwrap();
+                    listener_lock.accept()
+                }; // Drop lock before match
+                
+                match accept_result {
                     Ok((stream, addr)) => {
                         client_id += 1;
                         info!("📥 New VNC client connected: {} (ID: {})", addr, client_id);
@@ -329,7 +335,7 @@ fn handle_vnc_client(
     // Step 7: Send server init message
     let (width, height) = {
         let capture = screen_capture.lock().unwrap();
-        (capture.width as u16, capture.height as u16)
+        (capture.width() as u16, capture.height() as u16)
     };
 
     // Framebuffer width and height
@@ -445,14 +451,13 @@ fn send_framebuffer_update(
     // Capture frame with minimal lock duration
     let (width, height, pixels) = {
         let mut capture = screen_capture.lock().unwrap();
-        let width = capture.width as u16;
-        let height = capture.height as u16;
+        let width = capture.width() as u16;
+        let height = capture.height() as u16;
         
         // Capture frame and immediately convert to owned data
-        match capture.capture_frame() {
+        match capture.capture_rgba() {
             Ok(frame) => {
-                let pixel_data = frame.to_vec();
-                (width, height, pixel_data)
+                (width, height, frame)
             }
             Err(e) => {
                 error!("Failed to capture frame: {}", e);
