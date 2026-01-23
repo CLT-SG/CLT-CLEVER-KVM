@@ -903,17 +903,18 @@ pub async fn register_with_clever_service(
 ) -> Result<ScreencastRegistration, String> {
     info!("📡 Registering with CLEVER service at {}", clever_url);
     
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-
-    // Check if VNC servers are running
-    if state.vnc_servers.is_empty() {
-        return Err("No VNC servers running".to_string());
-    }
-    
-    // Get the first VNC server's port and audio port for registration
+    // Get VNC port and audio port (drop state lock before async call)
     let (vnc_port, audio_port) = {
+        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+        let state = state.lock()
+            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+
+        // Check if VNC servers are running
+        if state.vnc_servers.is_empty() {
+            return Err("No VNC servers running".to_string());
+        }
+        
+        // Get the first VNC server's port and audio port for registration
         let vnc_server = &state.vnc_servers[0];
         let vnc = vnc_server.lock()
             .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
@@ -922,7 +923,7 @@ pub async fn register_with_clever_service(
         }
         let config = vnc.get_config();
         (config.port, config.audio_port)
-    };
+    }; // Drop state lock here before async call
 
     // Get hostname
     let hostname = gethostname::gethostname()
@@ -932,7 +933,12 @@ pub async fn register_with_clever_service(
     // Register with clever-service
     match register_vnc_with_clever_service(&clever_url, vnc_port, audio_port, &hostname).await {
         Ok(registration) => {
+            // Re-acquire state lock to store registration
+            let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+            let mut state = state.lock()
+                .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
             state.vnc_registration = Some(registration.clone());
+            
             info!("✅ Successfully registered with CLEVER service");
             Ok(registration)
         }
