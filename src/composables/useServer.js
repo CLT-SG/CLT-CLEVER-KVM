@@ -51,8 +51,19 @@ export function useServer() {
       serverStatus.value = status.running;
       
       if (status.running) {
-        // VNC server is running, store the status info
-        vncInfo.value = status;
+        // Update status info while preserving monitor details from start_vnc_server
+        if (vncInfo.value) {
+          // Merge status into existing vncInfo to preserve monitor details
+          vncInfo.value = {
+            ...vncInfo.value,
+            clients_connected: status.clients,
+            audio_enabled: status.audio_enabled,
+            registration_status: status.registration_status
+          };
+        } else {
+          // No existing vncInfo (e.g., after page reload), use status data
+          vncInfo.value = status;
+        }
         // Set a basic VNC URL (actual VNC URL is in vncInfo)
         serverUrl.value = "VNC Server Running";
       } else {

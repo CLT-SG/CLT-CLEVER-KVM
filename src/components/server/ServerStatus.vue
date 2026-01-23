@@ -25,7 +25,10 @@
       
       <div class="info-item">
         <span class="label">Monitor:</span>
-        <span class="value">{{ vncInfo.monitor_name || `Monitor ${vncInfo.monitor_id}` }} ({{ vncInfo.width }}x{{ vncInfo.height }})</span>
+        <span class="value">
+          {{ vncInfo.monitor_name || `Monitor ${vncInfo.monitor_id || 0}` }}
+          <span v-if="vncInfo.width && vncInfo.height"> ({{ vncInfo.width }}x{{ vncInfo.height }})</span>
+        </span>
       </div>
       
       <div class="info-item">
