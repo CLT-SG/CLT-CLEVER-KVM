@@ -154,6 +154,7 @@ impl VncKvmServer {
         let running = self.running.clone();
         let screen_capture = self.screen_capture.clone();
         let max_clients = self.config.max_clients;
+        let listener = listener.clone(); // Clone listener for the spawn
         
         tokio::spawn(async move {
             let mut client_id = 0;
@@ -180,8 +181,12 @@ impl VncKvmServer {
                 }
 
                 // Accept new connection (non-blocking check)
-                let listener_lock = listener.lock().unwrap();
-                match listener_lock.accept() {
+                let accept_result = {
+                    let listener_lock = listener.lock().unwrap();
+                    listener_lock.accept()
+                }; // Drop lock before match
+                
+                match accept_result {
                     Ok((stream, addr)) => {
                         client_id += 1;
                         info!("📥 New VNC client connected: {} (ID: {})", addr, client_id);
