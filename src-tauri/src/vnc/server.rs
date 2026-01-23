@@ -329,7 +329,7 @@ fn handle_vnc_client(
     // Step 7: Send server init message
     let (width, height) = {
         let capture = screen_capture.lock().unwrap();
-        (capture.width as u16, capture.height as u16)
+        (capture.width() as u16, capture.height() as u16)
     };
 
     // Framebuffer width and height
@@ -445,14 +445,13 @@ fn send_framebuffer_update(
     // Capture frame with minimal lock duration
     let (width, height, pixels) = {
         let mut capture = screen_capture.lock().unwrap();
-        let width = capture.width as u16;
-        let height = capture.height as u16;
+        let width = capture.width() as u16;
+        let height = capture.height() as u16;
         
         // Capture frame and immediately convert to owned data
-        match capture.capture_frame() {
+        match capture.capture_rgba() {
             Ok(frame) => {
-                let pixel_data = frame.to_vec();
-                (width, height, pixel_data)
+                (width, height, frame)
             }
             Err(e) => {
                 error!("Failed to capture frame: {}", e);
