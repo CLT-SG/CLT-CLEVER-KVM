@@ -791,12 +791,14 @@ pub async fn stop_vnc_server(
     let servers = std::mem::take(&mut state.vnc_servers);
     drop(state); // Release state lock while stopping servers
     
-    // Stop all servers in parallel for better performance
+    // Stop all servers in parallel using blocking tasks
+    // We use spawn_blocking because we're using std::sync::Mutex which is not Send across await points
     let stop_tasks: Vec<_> = servers.into_iter().map(|vnc_server| {
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             let mut vnc = vnc_server.lock()
                 .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-            vnc.stop().await
+            // Use block_on since stop() is async but we're in a blocking context
+            tokio::runtime::Handle::current().block_on(vnc.stop())
                 .map_err(|e| format!("Failed to stop VNC server: {}", e))
         })
     }).collect();
