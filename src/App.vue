@@ -59,7 +59,8 @@ const tabs = computed(() => {
 <template>
   <main class="container">
     <div class="header">
-      <h1>Clever KVM</h1>
+      <h1>🖥️ Clever KVM - VNC Server</h1>
+      <p class="subtitle">Multi-Monitor VNC Server for Video Wall Systems</p>
     </div>
 
     <TabContainer :tabs="tabs" default-tab="status">
@@ -136,6 +137,13 @@ h1 {
   font-size: 1.2rem;
   color: #7f8c8d;
   margin-bottom: 0;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: #7f8c8d;
+  margin: 0.5rem 0 0 0;
+  text-align: center;
 }
 
 .config-content h2 {
