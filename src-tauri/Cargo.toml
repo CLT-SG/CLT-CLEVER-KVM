@@ -49,6 +49,14 @@ parking_lot = "0.12" # High-performance locks (replaces std::sync::Mutex)
 rayon = "1.8" # Data parallelism for SIMD and multi-core processing
 mimalloc = { version = "0.1", optional = true } # Microsoft's high-performance allocator
 
+# VNC Server dependencies
+vnc = "0.4" # VNC/RFB protocol implementation
+cpal = "0.15" # Cross-platform audio capture
+bytes = "1.5" # Byte buffer manipulation
+crossbeam-channel = "0.5" # High-performance channels for audio streaming
+reqwest = { version = "0.11", features = ["json"] } # HTTP client for clever-service registration
+chrono = "0.4" # Date/time handling for registration timestamps
+
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!

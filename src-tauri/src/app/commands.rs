@@ -532,3 +532,237 @@ pub fn get_available_network_interfaces() -> Result<Vec<String>, String> {
         Ok(interfaces)
     }
 }
+
+// ============================================================================
+// VNC Server Commands
+// ============================================================================
+
+use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register_vnc_with_clever_service};
+use serde::Serialize;
+
+/// VNC server information returned to frontend
+#[derive(Debug, Serialize)]
+pub struct VncServerInfo {
+    pub vnc_url: String,
+    pub audio_url: Option<String>,
+    pub port: u16,
+    pub audio_port: Option<u16>,
+    pub clients_connected: usize,
+}
+
+/// VNC server status
+#[derive(Debug, Serialize)]
+pub struct VncStatus {
+    pub running: bool,
+    pub clients: usize,
+    pub audio_enabled: bool,
+    pub registration_status: Option<RegistrationStatus>,
+}
+
+/// Registration status
+#[derive(Debug, Serialize)]
+pub struct RegistrationStatus {
+    pub registered: bool,
+    pub id: Option<u64>,
+    pub vnc_url: Option<String>,
+    pub audio_url: Option<String>,
+}
+
+/// Start VNC server
+#[tauri::command]
+pub async fn start_vnc_server(
+    app_handle: tauri::AppHandle,
+    port: Option<u16>,
+    monitor: Option<usize>,
+    enable_audio: bool,
+    audio_port: Option<u16>,
+) -> Result<VncServerInfo, String> {
+    info!("🚀 Starting VNC server...");
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+
+    // Check if VNC server is already running
+    if let Some(ref vnc_server) = state.vnc_server {
+        let vnc = vnc_server.lock()
+            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+        if vnc.is_running() {
+            warn!("VNC server is already running");
+            return Err("VNC server is already running".to_string());
+        }
+    }
+
+    // Create VNC server configuration
+    let config = VncServerConfig {
+        port: port.unwrap_or(5900),
+        monitor_id: monitor.unwrap_or(0),
+        enable_audio,
+        audio_port: if enable_audio { Some(audio_port.unwrap_or(5901)) } else { None },
+        max_clients: 10,
+        password: None,
+    };
+
+    // Create and start VNC server
+    match VncKvmServer::new(config.clone()) {
+        Ok(mut vnc_server) => {
+            match vnc_server.start().await {
+                Ok(_) => {
+                    let local_ip = match local_ip() {
+                        Ok(ip) => ip.to_string(),
+                        Err(_) => "localhost".to_string(),
+                    };
+
+                    let vnc_url = format!("vnc://{}:{}", local_ip, config.port);
+                    let audio_url = vnc_server.get_audio_url();
+                    let clients_connected = vnc_server.get_client_count();
+                    
+                    // Store VNC server in state
+                    state.vnc_server = Some(Arc::new(Mutex::new(vnc_server)));
+
+                    info!("✅ VNC server started successfully");
+                    info!("   VNC URL: {}", vnc_url);
+                    if let Some(ref audio) = audio_url {
+                        info!("   Audio URL: {}", audio);
+                    }
+
+                    Ok(VncServerInfo {
+                        vnc_url,
+                        audio_url,
+                        port: config.port,
+                        audio_port: config.audio_port,
+                        clients_connected,
+                    })
+                }
+                Err(e) => {
+                    error!("❌ Failed to start VNC server: {}", e);
+                    Err(format!("Failed to start VNC server: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            error!("❌ Failed to create VNC server: {}", e);
+            Err(format!("Failed to create VNC server: {}", e))
+        }
+    }
+}
+
+/// Stop VNC server
+#[tauri::command]
+pub async fn stop_vnc_server(
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    info!("🛑 Stopping VNC server...");
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+
+    match state.vnc_server.take() {
+        Some(vnc_server) => {
+            let mut vnc = vnc_server.lock()
+                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+            match vnc.stop().await {
+                Ok(_) => {
+                    state.vnc_registration = None;
+                    info!("✅ VNC server stopped");
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("❌ Failed to stop VNC server: {}", e);
+                    Err(format!("Failed to stop VNC server: {}", e))
+                }
+            }
+        }
+        None => {
+            warn!("No VNC server running");
+            Err("No VNC server running".to_string())
+        }
+    }
+}
+
+/// Get VNC server status
+#[tauri::command]
+pub async fn get_vnc_status(
+    app_handle: tauri::AppHandle,
+) -> Result<VncStatus, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+
+    let (running, clients, audio_enabled) = match state.vnc_server.as_ref() {
+        Some(vnc_server) => {
+            let vnc = vnc_server.lock()
+                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+            (
+                vnc.is_running(),
+                vnc.get_client_count(),
+                vnc.get_config().enable_audio,
+            )
+        }
+        None => (false, 0, false),
+    };
+
+    let registration_status = state.vnc_registration.as_ref().map(|reg| {
+        RegistrationStatus {
+            registered: true,
+            id: Some(reg.id),
+            vnc_url: Some(reg.vnc_url.clone()),
+            audio_url: reg.audio_url.clone(),
+        }
+    });
+
+    Ok(VncStatus {
+        running,
+        clients,
+        audio_enabled,
+        registration_status,
+    })
+}
+
+/// Register with CLEVER service
+#[tauri::command]
+pub async fn register_with_clever_service(
+    app_handle: tauri::AppHandle,
+    clever_url: String,
+) -> Result<ScreencastRegistration, String> {
+    info!("📡 Registering with CLEVER service at {}", clever_url);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+
+    // Check if VNC server is running
+    let (vnc_port, audio_port) = match state.vnc_server.as_ref() {
+        Some(vnc_server) => {
+            let vnc = vnc_server.lock()
+                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+            if !vnc.is_running() {
+                return Err("VNC server is not running".to_string());
+            }
+            let config = vnc.get_config();
+            (config.port, config.audio_port)
+        }
+        None => {
+            return Err("VNC server is not running".to_string());
+        }
+    };
+
+    // Get hostname
+    let hostname = gethostname::gethostname()
+        .to_string_lossy()
+        .to_string();
+
+    // Register with clever-service
+    match register_vnc_with_clever_service(&clever_url, vnc_port, audio_port, &hostname).await {
+        Ok(registration) => {
+            state.vnc_registration = Some(registration.clone());
+            info!("✅ Successfully registered with CLEVER service");
+            Ok(registration)
+        }
+        Err(e) => {
+            error!("❌ Failed to register with CLEVER service: {}", e);
+            Err(format!("Failed to register: {}", e))
+        }
+    }
+}

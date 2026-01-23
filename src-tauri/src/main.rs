@@ -22,6 +22,7 @@ mod lib;
 mod network;
 mod streaming;
 mod system;
+mod vnc;
 
 use app::{commands::*, ServerState, APP_NAME};
 use log::info;
@@ -56,7 +57,11 @@ fn main() {
             get_network_interfaces,
             test_network_connectivity,
             get_system_info,
-            check_firewall_status
+            check_firewall_status,
+            start_vnc_server,
+            stop_vnc_server,
+            get_vnc_status,
+            register_with_clever_service
         ])
         .setup(|app| {
             info!("✅ Tauri application initialized successfully");
