@@ -28,8 +28,8 @@
     
     <div class="guide-section">
       <h3>🎵 Audio Streaming</h3>
-      <p>When audio is enabled, it streams separately via RTSP on port 6900.</p>
-      <p>Audio URL format: <code>rtsp://&lt;ip-address&gt;:6900/audio</code></p>
+      <p>When audio is enabled, it streams separately via RTSP on the configured audio port (default: 6900).</p>
+      <p>Audio URL format: <code>rtsp://&lt;ip-address&gt;:&lt;audio-port&gt;/audio</code></p>
       <p><strong>Note:</strong> Most VNC clients don't support audio. You'll need a separate RTSP client or use MediaMTX for integration.</p>
     </div>
     
@@ -52,7 +52,8 @@
     source: vnc://192.168.1.100:5900
     sourceProtocol: vnc
   workstation_1_audio:
-    source: rtsp://192.168.1.100:6900/audio</pre>
+    source: rtsp://192.168.1.100:&lt;audio-port&gt;/audio
+    # Default audio port is 6900, but check your settings</pre>
     </div>
     
     <div class="features-section">

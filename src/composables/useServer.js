@@ -154,8 +154,12 @@ export function useServer() {
   function openUrl() {
     const url = buildUrlWithParams();
     if (url) {
-      // For VNC URLs, we might want to show instructions instead of opening
-      alert(`VNC Server URL: ${url}\n\nUse a VNC client like TigerVNC or RealVNC to connect.`);
+      // Copy VNC URL to clipboard and show notification
+      navigator.clipboard.writeText(url).then(() => {
+        console.log(`VNC URL copied to clipboard: ${url}`);
+      }).catch(err => {
+        console.error('Failed to copy VNC URL:', err);
+      });
     }
   }
 

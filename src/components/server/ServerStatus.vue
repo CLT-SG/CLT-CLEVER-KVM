@@ -41,7 +41,7 @@
       <div class="connection-help">
         <p><strong>How to connect:</strong></p>
         <p>Use any VNC client (TigerVNC, RealVNC, etc.) with the address above.</p>
-        <p>Example: <code>vncviewer {{ vncInfo.vnc_url.replace('vnc://', '') }}</code></p>
+        <p v-if="vncInfo.vnc_url">Example: <code>vncviewer {{ vncInfo.vnc_url.replace('vnc://', '') || '' }}</code></p>
       </div>
     </div>
 
