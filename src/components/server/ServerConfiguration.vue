@@ -1,5 +1,17 @@
 <template>
   <div class="server-config" :class="{ disabled: disabled }">
+    <div class="form-group checkbox-group">
+      <label class="checkbox-label">
+        <input 
+          type="checkbox" 
+          v-model="settings.autoStart"
+          @change="$emit('settings-changed')"
+          :disabled="disabled"
+        />
+        <span>Auto-start VNC server on application launch</span>
+      </label>
+    </div>
+    
     <div class="form-group">
       <label for="port">VNC Port:</label>
       <input 
@@ -31,6 +43,7 @@
     <AdvancedSettings 
       :settings="settings" 
       :disabled="disabled"
+      @settings-changed="$emit('settings-changed')"
     />
   </div>
 </template>
@@ -48,7 +61,7 @@ defineProps({
   }
 });
 
-defineEmits(['update:server-port', 'update:selected-monitor']);
+defineEmits(['update:server-port', 'update:selected-monitor', 'settings-changed']);
 </script>
 
 <style scoped>
@@ -66,6 +79,34 @@ defineEmits(['update:server-port', 'update:selected-monitor']);
   margin-right: 1rem;
   min-width: 100px;
   font-weight: 500;
+}
+
+.checkbox-group {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background-color: #e7f3ff;
+  border-left: 3px solid #0066cc;
+  border-radius: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  margin: 0;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-right: 0.75rem;
+  cursor: pointer;
+}
+
+.checkbox-label span {
+  font-weight: 500;
+  color: #0066cc;
 }
 
 .help-text {

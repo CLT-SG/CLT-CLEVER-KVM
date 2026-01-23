@@ -25,8 +25,34 @@ export function useServer() {
   const settings = reactive({
     enableAudio: true,
     selectedMonitor: 0,
-    audioPort: 6900
+    audioPort: 6900,
+    autoStart: false
   });
+
+  // Load settings from localStorage
+  function loadSettings() {
+    try {
+      const savedSettings = localStorage.getItem('vnc-settings');
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        Object.assign(settings, parsed);
+      }
+    } catch (error) {
+      console.error("Failed to load settings from localStorage:", error);
+    }
+  }
+
+  // Save settings to localStorage
+  function saveSettings() {
+    try {
+      localStorage.setItem('vnc-settings', JSON.stringify(settings));
+    } catch (error) {
+      console.error("Failed to save settings to localStorage:", error);
+    }
+  }
+
+  // Load settings on initialization
+  loadSettings();
 
   async function loadMonitors() {
     loadingMonitors.value = true;
@@ -182,8 +208,18 @@ export function useServer() {
   }
 
   // Initialize monitoring when composable is created
-  checkServerStatus().then(() => {
+  checkServerStatus().then(async () => {
     startStatusMonitoring();
+    
+    // Auto-start VNC server if enabled and not already running
+    if (settings.autoStart && !serverStatus.value) {
+      console.log("Auto-starting VNC server...");
+      try {
+        await startServer();
+      } catch (error) {
+        console.error("Failed to auto-start VNC server:", error);
+      }
+    }
   });
 
   return {
@@ -203,6 +239,7 @@ export function useServer() {
     copyUrl,
     loadMonitors,
     startStatusMonitoring,
-    stopStatusMonitoring
+    stopStatusMonitoring,
+    saveSettings
   };
 }

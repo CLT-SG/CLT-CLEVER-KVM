@@ -9,14 +9,14 @@
     <div class="setting-group">
       <h4>VNC Audio Settings</h4>
       <label>
-        <input type="checkbox" v-model="settings.enableAudio" :disabled="disabled" />
+        <input type="checkbox" v-model="settings.enableAudio" :disabled="disabled" @change="$emit('settings-changed')" />
         Enable Audio Streaming (via RTSP on port {{ settings.audioPort }})
       </label>
       
       <div v-if="settings.enableAudio" class="slider-group">
         <label for="audio-port">Audio Port:</label>
         <input type="number" id="audio-port" v-model.number="settings.audioPort"
-               min="1024" max="65535" :disabled="disabled" />
+               min="1024" max="65535" :disabled="disabled" @change="$emit('settings-changed')" />
       </div>
     </div>
     
@@ -37,6 +37,8 @@ defineProps({
     default: false
   }
 });
+
+defineEmits(['settings-changed']);
 
 const showAdvancedSettings = ref(false);
 </script>

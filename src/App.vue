@@ -26,7 +26,8 @@ const {
   startServer,
   stopServer,
   openUrl,
-  copyUrl
+  copyUrl,
+  saveSettings
 } = useServer();
 
 // The status checking is now automatic, but we can still call it manually if needed
@@ -41,6 +42,10 @@ function updateServerPort(value) {
 
 function updateSelectedMonitor(value) {
   settings.selectedMonitor = value;
+}
+
+function handleSettingsChanged() {
+  saveSettings();
 }
 
 // Define tabs based on server status
@@ -96,6 +101,7 @@ const tabs = computed(() => {
             :disabled="serverStatus"
             @update:server-port="updateServerPort"
             @update:selected-monitor="updateSelectedMonitor"
+            @settings-changed="handleSettingsChanged"
           />
         </div>
       </template>
