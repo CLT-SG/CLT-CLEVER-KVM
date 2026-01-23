@@ -617,12 +617,24 @@ pub async fn start_vnc_server(
     if monitor_id >= monitors.len() {
         return Err(format!("Monitor {} not found", monitor_id));
     }
-    
     let monitor_info = &monitors[monitor_id];
+
+    // Calculate port with bounds checking to avoid collisions
+    let vnc_port = if let Some(p) = port {
+        p
+    } else {
+        let calculated_port = 5900 + monitor_id as u16;
+        // Ensure port is in valid range and not too high
+        if calculated_port > 5950 {
+            warn!("Monitor ID {} results in port {} which may be too high, using 5900", monitor_id, calculated_port);
+            return Err(format!("Too many monitors (max 50 supported for automatic port assignment)"));
+        }
+        calculated_port
+    };
 
     // Create VNC server configuration
     let config = VncServerConfig {
-        port: port.unwrap_or(5900 + monitor_id as u16),
+        port: vnc_port,
         monitor_id,
         enable_audio,
         audio_port: if enable_audio { Some(audio_port.unwrap_or(6900)) } else { None },
@@ -703,9 +715,16 @@ pub async fn start_vnc_servers_all(
     
     let mut server_infos = Vec::new();
     let mut shared_audio_url = None;
+    let mut errors = Vec::new();
     
     // Start VNC server for each monitor
-    for (idx, monitor_info) in monitors.iter().enumerate() {
+    for (idx, _monitor_info) in monitors.iter().enumerate() {
+        // Ensure port doesn't exceed safe range
+        if idx >= 50 {
+            warn!("Skipping monitor {} - too many monitors (max 50 supported)", idx);
+            continue;
+        }
+        
         let port = 5900 + idx as u16;
         let audio_port = if enable_audio && idx == 0 { Some(6900) } else { None };
         
@@ -725,16 +744,27 @@ pub async fn start_vnc_servers_all(
                 server_infos.push(server_info);
             }
             Err(e) => {
-                warn!("Failed to start VNC server for monitor {}: {}", idx, e);
+                error!("❌ Failed to start VNC server for monitor {}: {}", idx, e);
+                errors.push(format!("Monitor {}: {}", idx, e));
             }
         }
     }
     
     if server_infos.is_empty() {
-        return Err("Failed to start any VNC servers".to_string());
+        let error_msg = if !errors.is_empty() {
+            format!("Failed to start any VNC servers. Errors: {}", errors.join("; "))
+        } else {
+            "Failed to start any VNC servers".to_string()
+        };
+        return Err(error_msg);
     }
     
-    info!("✅ Started {} VNC server(s)", server_infos.len());
+    if !errors.is_empty() {
+        warn!("⚠️  Started {} VNC server(s) but {} failed: {}", 
+              server_infos.len(), errors.len(), errors.join("; "));
+    } else {
+        info!("✅ Started {} VNC server(s)", server_infos.len());
+    }
     
     Ok(VncServersInfo {
         servers: server_infos,
@@ -758,17 +788,42 @@ pub async fn stop_vnc_server(
         return Err("No VNC servers running".to_string());
     }
 
-    let mut errors = Vec::new();
     let servers = std::mem::take(&mut state.vnc_servers);
+    drop(state); // Release state lock while stopping servers
     
-    for vnc_server in servers {
-        let mut vnc = vnc_server.lock()
-            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-        if let Err(e) = vnc.stop().await {
-            errors.push(format!("Failed to stop VNC server: {}", e));
+    // Stop all servers in parallel for better performance
+    let stop_tasks: Vec<_> = servers.into_iter().map(|vnc_server| {
+        tokio::spawn(async move {
+            let mut vnc = vnc_server.lock()
+                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
+            vnc.stop().await
+                .map_err(|e| format!("Failed to stop VNC server: {}", e))
+        })
+    }).collect();
+    
+    let results = futures_util::future::join_all(stop_tasks).await;
+    
+    let mut errors = Vec::new();
+    for (idx, result) in results.into_iter().enumerate() {
+        match result {
+            Ok(Ok(())) => {
+                info!("✅ VNC server {} stopped successfully", idx);
+            }
+            Ok(Err(e)) => {
+                error!("❌ VNC server {} failed to stop: {}", idx, e);
+                errors.push(e);
+            }
+            Err(e) => {
+                error!("❌ VNC server {} task failed: {}", idx, e);
+                errors.push(format!("Task failed: {}", e));
+            }
         }
     }
     
+    // Re-acquire state lock to update registration
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
     state.vnc_registration = None;
     
     if !errors.is_empty() {
