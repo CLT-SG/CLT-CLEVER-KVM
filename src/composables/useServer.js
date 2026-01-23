@@ -26,7 +26,7 @@ export function useServer() {
     enableAudio: true,
     selectedMonitor: 0,
     audioPort: 6900,
-    autoStart: false
+    autoStart: true
   });
 
   // Load settings from localStorage
