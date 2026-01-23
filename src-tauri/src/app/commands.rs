@@ -5,7 +5,6 @@ use local_ip_address::local_ip;
 
 use crate::app::{ServerState, ServerOptions, MonitorInfo};
 use crate::core::ScreenCapture;
-use crate::network::WebSocketServer;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {

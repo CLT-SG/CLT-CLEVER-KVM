@@ -75,8 +75,8 @@
         "icons/icon.ico"
       ],
       "category": "Utility",
-      "shortDescription": "A powerful KVM solution for remote desktop control",
-      "longDescription": "Clever KVM is a cross-platform KVM (Keyboard, Video, Mouse) solution that enables remote desktop control with high-quality video streaming using VP8 encoding.",
+      "shortDescription": "A high-performance VNC server for video wall systems",
+      "longDescription": "Clever KVM is a VNC server for multi-monitor video wall systems, providing native VNC (RFB 3.8) protocol support with separate audio streaming.",
       "copyright": "© 2025 Clever Technologies",
       "publisher": "Clever Technologies",
       "externalBin": [],

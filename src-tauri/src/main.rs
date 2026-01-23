@@ -16,11 +16,8 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 // Module declarations
 mod app;
-mod audio;
 mod core;
 mod lib;
-mod network;
-mod streaming;
 mod system;
 mod vnc;
 
@@ -59,9 +56,6 @@ fn main() {
         .setup(|app| {
             info!("✅ Tauri application initialized successfully");
             info!("🎮 VNC KVM application ready - use the interface to start VNC servers");
-            
-            // Note: WebSocket/WebRTC server auto-start disabled - VNC mode only
-            // Use start_vnc_server or start_vnc_servers_all commands to start VNC servers
             
             Ok(())
         })
