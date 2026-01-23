@@ -15,6 +15,7 @@ src/
 │   │   ├── index.js          # Server components export
 │   │   ├── ServerStatus.vue      # Server status display
 │   │   ├── ServerConfiguration.vue # Server configuration form
+│   │   ├── ServerControls.vue    # VNC server controls
 │   │   ├── ConnectionOptions.vue  # Connection settings
 │   │   ├── AdvancedSettings.vue   # Advanced server settings
 │   │   ├── PresetSelector.vue     # Configuration presets
