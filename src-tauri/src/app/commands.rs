@@ -592,14 +592,16 @@ pub async fn start_vnc_server(
 ) -> Result<VncServerInfo, String> {
     info!("🚀 Starting VNC server...");
     
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-
     let monitor_id = monitor.unwrap_or(0);
     
-    // Check if VNC server for this monitor is already running
-    for vnc_server in &state.vnc_servers {
+    // Check if VNC server for this monitor is already running and get monitor info
+    let monitor_info = {
+        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+        let state = state.lock()
+            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+
+        // Check if VNC server for this monitor is already running
+        for vnc_server in &state.vnc_servers {
         let vnc = vnc_server.lock()
             .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
         if vnc.is_running() && vnc.get_config().monitor_id == monitor_id {
@@ -617,7 +619,18 @@ pub async fn start_vnc_server(
     if monitor_id >= monitors.len() {
         return Err(format!("Monitor {} not found", monitor_id));
     }
-    let monitor_info = &monitors[monitor_id];
+    
+    // Extract the data we need before dropping the lock
+    let monitor_name = monitors[monitor_id].name.clone();
+    let monitor_width = monitors[monitor_id].width;
+    let monitor_height = monitors[monitor_id].height;
+    let monitor_position_x = monitors[monitor_id].position_x;
+    let monitor_position_y = monitors[monitor_id].position_y;
+    
+    (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_position_y)
+}; // Drop state lock here before async operations
+
+let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_position_y) = monitor_info;
 
     // Calculate port with bounds checking to avoid collisions
     let vnc_port = if let Some(p) = port {
@@ -656,14 +669,19 @@ pub async fn start_vnc_server(
                     let audio_url = vnc_server.get_audio_url();
                     let clients_connected = vnc_server.get_client_count();
                     
-                    // Store VNC server in state
-                    state.vnc_servers.push(Arc::new(Mutex::new(vnc_server)));
+                    // Store VNC server in state (acquire lock again after async operation)
+                    {
+                        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+                        let mut state = state.lock()
+                            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+                        state.vnc_servers.push(Arc::new(Mutex::new(vnc_server)));
+                    }
 
                     info!("✅ VNC server started successfully");
                     info!("   VNC URL: {}", vnc_url);
                     info!("   Monitor: {} ({}x{}) at ({}, {})", 
-                          monitor_info.name, monitor_info.width, monitor_info.height,
-                          monitor_info.position_x, monitor_info.position_y);
+                          monitor_name, monitor_width, monitor_height,
+                          monitor_position_x, monitor_position_y);
                     if let Some(ref audio) = audio_url {
                         info!("   Audio URL: {}", audio);
                     }
@@ -675,11 +693,11 @@ pub async fn start_vnc_server(
                         audio_port: config.audio_port,
                         clients_connected,
                         monitor_id,
-                        monitor_name: monitor_info.name.clone(),
-                        width: monitor_info.width,
-                        height: monitor_info.height,
-                        position_x: monitor_info.position_x,
-                        position_y: monitor_info.position_y,
+                        monitor_name: monitor_name.clone(),
+                        width: monitor_width,
+                        height: monitor_height,
+                        position_x: monitor_position_x,
+                        position_y: monitor_position_y,
                     })
                 }
                 Err(e) => {
