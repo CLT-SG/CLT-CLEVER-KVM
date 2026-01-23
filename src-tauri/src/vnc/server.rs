@@ -139,9 +139,10 @@ impl VncKvmServer {
         // Start audio stream if configured
         if let Some(audio_stream) = &self.audio_stream {
             let stream = audio_stream.clone();
-            tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
                 if let Ok(mut stream) = stream.lock() {
-                    if let Err(e) = stream.start_streaming().await {
+                    // Use block_on since start_streaming() is async but we're in blocking context
+                    if let Err(e) = tokio::runtime::Handle::current().block_on(stream.start_streaming()) {
                         error!("❌ Audio streaming error: {}", e);
                     }
                 }
