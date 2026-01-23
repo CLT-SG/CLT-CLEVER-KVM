@@ -797,17 +797,18 @@ pub async fn stop_vnc_server(
 ) -> Result<(), String> {
     info!("🛑 Stopping all VNC servers...");
     
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    let servers = {
+        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+        let mut state = state.lock()
+            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
 
-    if state.vnc_servers.is_empty() {
-        warn!("No VNC servers running");
-        return Err("No VNC servers running".to_string());
-    }
+        if state.vnc_servers.is_empty() {
+            warn!("No VNC servers running");
+            return Err("No VNC servers running".to_string());
+        }
 
-    let servers = std::mem::take(&mut state.vnc_servers);
-    drop(state); // Release state lock while stopping servers
+        std::mem::take(&mut state.vnc_servers)
+    }; // Drop state lock here before async operations
     
     // Stop all servers in parallel using blocking tasks
     // We use spawn_blocking because we're using std::sync::Mutex which is not Send across await points
