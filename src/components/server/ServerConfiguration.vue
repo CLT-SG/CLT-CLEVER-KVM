@@ -1,7 +1,7 @@
 <template>
   <div class="server-config" :class="{ disabled: disabled }">
     <div class="form-group">
-      <label for="port">Port:</label>
+      <label for="port">VNC Port:</label>
       <input 
         id="port" 
         :value="serverPort" 
@@ -11,6 +11,7 @@
         max="65535"
         :disabled="disabled"
       />
+      <span class="help-text">Default: 5900</span>
     </div>
     
     <div class="form-group" v-if="monitors.length > 0">
@@ -27,12 +28,6 @@
       </select>
     </div>
     
-    <PresetSelector 
-      :settings="settings"
-      :disabled="disabled"
-      @apply-preset="$emit('apply-preset', $event)"
-    />
-    
     <AdvancedSettings 
       :settings="settings" 
       :disabled="disabled"
@@ -41,7 +36,6 @@
 </template>
 
 <script setup>
-import PresetSelector from './PresetSelector.vue';
 import AdvancedSettings from './AdvancedSettings.vue';
 
 defineProps({
@@ -54,7 +48,7 @@ defineProps({
   }
 });
 
-defineEmits(['apply-preset', 'update:server-port', 'update:selected-monitor']);
+defineEmits(['update:server-port', 'update:selected-monitor']);
 </script>
 
 <style scoped>
@@ -70,7 +64,14 @@ defineEmits(['apply-preset', 'update:server-port', 'update:selected-monitor']);
 
 .form-group label {
   margin-right: 1rem;
-  min-width: 60px;
+  min-width: 100px;
+  font-weight: 500;
+}
+
+.help-text {
+  margin-left: 0.5rem;
+  font-size: 0.85rem;
+  color: #6c757d;
 }
 
 input[type="number"], select {

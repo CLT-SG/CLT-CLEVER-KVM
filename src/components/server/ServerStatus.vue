@@ -2,15 +2,46 @@
   <div class="server-status">
     <div class="status-section">
       <div class="status-indicator" :class="{ active: serverStatus }"></div>
-      <p class="status-text">{{ serverStatus ? 'Running' : 'Stopped' }}</p>
+      <p class="status-text">{{ serverStatus ? 'VNC Server Running' : 'VNC Server Stopped' }}</p>
     </div>
     
-    <div v-if="serverStatus" class="server-info">
-      <p>Server URL:</p>
-      <div class="url-display">
-        <span class="url">{{ displayUrl }}</span>
-        <button class="icon-button" @click="openUrl" title="Open in browser">🌐</button>
-        <button class="icon-button" @click="copyUrl" title="Copy URL">📋</button>
+    <div v-if="serverStatus && vncInfo" class="server-info">
+      <h4>VNC Connection Information</h4>
+      <div class="info-item">
+        <span class="label">VNC URL:</span>
+        <div class="url-display">
+          <code class="url">{{ vncInfo.vnc_url }}</code>
+          <button class="icon-button" @click="copyUrl" title="Copy VNC URL">📋</button>
+        </div>
+      </div>
+      
+      <div v-if="vncInfo.audio_url" class="info-item">
+        <span class="label">Audio URL:</span>
+        <div class="url-display">
+          <code class="url">{{ vncInfo.audio_url }}</code>
+          <button class="icon-button" @click="copyAudioUrl" title="Copy Audio URL">📋</button>
+        </div>
+      </div>
+      
+      <div class="info-item">
+        <span class="label">Monitor:</span>
+        <span class="value">{{ vncInfo.monitor_name || `Monitor ${vncInfo.monitor_id}` }} ({{ vncInfo.width }}x{{ vncInfo.height }})</span>
+      </div>
+      
+      <div class="info-item">
+        <span class="label">Port:</span>
+        <span class="value">{{ vncInfo.port }}</span>
+      </div>
+      
+      <div v-if="vncInfo.clients_connected !== undefined" class="info-item">
+        <span class="label">Connected Clients:</span>
+        <span class="value">{{ vncInfo.clients_connected }}</span>
+      </div>
+      
+      <div class="connection-help">
+        <p><strong>How to connect:</strong></p>
+        <p>Use any VNC client (TigerVNC, RealVNC, etc.) with the address above.</p>
+        <p>Example: <code>vncviewer {{ vncInfo.vnc_url.replace('vnc://', '') }}</code></p>
       </div>
     </div>
 
@@ -21,7 +52,7 @@
         :disabled="loading"
         class="primary-button"
       >
-        {{ loading ? 'Starting...' : 'Start Server' }}
+        {{ loading ? 'Starting...' : 'Start VNC Server' }}
       </button>
       <button 
         v-else 
@@ -29,7 +60,7 @@
         :disabled="loading"
         class="danger-button"
       >
-        {{ loading ? 'Stopping...' : 'Stop Server' }}
+        {{ loading ? 'Stopping...' : 'Stop VNC Server' }}
       </button>
     </div>
 
@@ -38,35 +69,27 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
-
 const props = defineProps({
   serverStatus: Boolean,
   serverUrl: String,
+  vncInfo: Object,
   loading: Boolean,
   errorMessage: String,
   startServer: Function,
   stopServer: Function,
-  openUrl: Function,
   copyUrl: Function
 });
 
-// Computed property to display the KVM URL
-const displayUrl = computed(() => {
-  if (!props.serverUrl) return '';
-  
-  let url = props.serverUrl;
-  // Ensure the displayed URL includes /kvm
-  if (!url.endsWith('/kvm')) {
-    url = url.replace(/\/$/, '') + '/kvm';
+function copyAudioUrl() {
+  if (props.vncInfo && props.vncInfo.audio_url) {
+    navigator.clipboard.writeText(props.vncInfo.audio_url);
   }
-  return url;
-});
+}
 </script>
 
 <style scoped>
 .server-status {
-  max-width: 600px;
+  max-width: 700px;
   margin: 0 auto;
 }
 
@@ -97,24 +120,53 @@ const displayUrl = computed(() => {
 
 .server-info {
   margin-bottom: 2rem;
-  padding: 1rem;
+  padding: 1.5rem;
   background-color: #f8f9fa;
-  border-radius: 4px;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.server-info h4 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+.info-item {
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.info-item .label {
+  font-weight: 600;
+  min-width: 150px;
+  color: #495057;
+}
+
+.info-item .value {
+  color: #212529;
 }
 
 .url-display {
   display: flex;
   align-items: center;
-  background-color: #ecf0f1;
+  background-color: #ffffff;
   padding: 0.5rem;
   border-radius: 4px;
-  margin-top: 0.5rem;
+  border: 1px solid #ced4da;
+  flex: 1;
 }
 
 .url {
   flex: 1;
-  font-family: monospace;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
   word-break: break-all;
+  background-color: #ffffff;
+  padding: 0.25rem;
 }
 
 .icon-button {
@@ -124,11 +176,37 @@ const displayUrl = computed(() => {
   font-size: 1.2rem;
   margin-left: 0.5rem;
   padding: 0.25rem;
+  transition: background-color 0.2s;
 }
 
 .icon-button:hover {
-  background-color: #dfe6e9;
+  background-color: #e9ecef;
   border-radius: 4px;
+}
+
+.connection-help {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #e7f3ff;
+  border-left: 3px solid #0066cc;
+  border-radius: 4px;
+}
+
+.connection-help p {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+.connection-help strong {
+  color: #0066cc;
+}
+
+.connection-help code {
+  background-color: #ffffff;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
 }
 
 .actions {
@@ -139,33 +217,35 @@ const displayUrl = computed(() => {
 }
 
 .primary-button {
-  background-color: #3498db;
+  background-color: #28a745;
   color: white;
   border: none;
   padding: 0.75rem 2rem;
   border-radius: 4px;
   cursor: pointer;
   font-size: 1rem;
-  min-width: 140px;
+  min-width: 180px;
+  font-weight: 600;
 }
 
-.primary-button:hover {
-  background-color: #2980b9;
+.primary-button:hover:not(:disabled) {
+  background-color: #218838;
 }
 
 .danger-button {
-  background-color: #e74c3c;
+  background-color: #dc3545;
   color: white;
   border: none;
   padding: 0.75rem 2rem;
   border-radius: 4px;
   cursor: pointer;
   font-size: 1rem;
-  min-width: 140px;
+  min-width: 180px;
+  font-weight: 600;
 }
 
-.danger-button:hover {
-  background-color: #c0392b;
+.danger-button:hover:not(:disabled) {
+  background-color: #c82333;
 }
 
 button:disabled {
@@ -174,8 +254,12 @@ button:disabled {
 }
 
 .error {
-  color: #e74c3c;
+  color: #dc3545;
   text-align: center;
-  margin: 0;
+  margin: 1rem 0;
+  padding: 1rem;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
 }
 </style>

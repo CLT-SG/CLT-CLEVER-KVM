@@ -4,11 +4,12 @@ import { invoke } from "@tauri-apps/api/tauri";
 export function useServer() {
   const serverStatus = ref(false);
   const serverUrl = ref("");
-  const serverPort = ref(9921);
+  const serverPort = ref(5900); // VNC default port
   const loading = ref(false);
   const errorMessage = ref("");
   const monitors = ref([]);
   const loadingMonitors = ref(false);
+  const vncInfo = ref(null);
 
   // Status check interval
   let statusCheckInterval = null;
@@ -20,22 +21,11 @@ export function useServer() {
     }
   });
 
-  // Server settings
+  // VNC Server settings
   const settings = reactive({
-    deltaEncoding: true,
-    adaptiveQuality: true,
-    encryptionEnabled: false,
-    useWebRTC: true,
-    useVP8: true,
-    hardwareAcceleration: false,
+    enableAudio: true,
     selectedMonitor: 0,
-    audioBitrate: 128,
-    videoBitrate: 4000,
-    framerate: 30
-  });
-
-  const selectedCodec = computed(() => {
-    return 'vp8'; // Only WebRTC VP8 is supported
+    audioPort: 6900
   });
 
   async function loadMonitors() {
@@ -57,29 +47,26 @@ export function useServer() {
 
   async function checkServerStatus() {
     try {
-      const status = await invoke("get_server_status");
-      serverStatus.value = status;
+      const status = await invoke("get_vnc_status");
+      serverStatus.value = status.running;
       
-      if (status) {
-        try {
-          const url = await invoke("get_server_url");
-          serverUrl.value = url;
-        } catch (urlError) {
-          console.warn("Failed to get server URL:", urlError);
-          // If we can get status but not URL, something might be wrong
-          serverStatus.value = false;
-          serverUrl.value = "";
-        }
+      if (status.running) {
+        // VNC server is running, store the status info
+        vncInfo.value = status;
+        // Set a basic VNC URL (actual VNC URL is in vncInfo)
+        serverUrl.value = "VNC Server Running";
       } else {
         serverUrl.value = "";
+        vncInfo.value = null;
       }
       
       await loadMonitors();
     } catch (error) {
-      console.error("Failed to check server status:", error);
-      errorMessage.value = `Failed to check server status: ${error}`;
+      console.error("Failed to check VNC status:", error);
+      errorMessage.value = `Failed to check VNC status: ${error}`;
       serverStatus.value = false;
       serverUrl.value = "";
+      vncInfo.value = null;
     }
   }
 
@@ -108,25 +95,15 @@ export function useServer() {
     errorMessage.value = "";
     
     try {
-      const codec = selectedCodec.value;
-      
-      const url = await invoke("start_server", { 
+      const info = await invoke("start_vnc_server", { 
         port: serverPort.value,
-        options: {
-          deltaEncoding: settings.deltaEncoding,
-          adaptiveQuality: settings.adaptiveQuality,
-          encryption: settings.encryptionEnabled,
-          webrtc: settings.useWebRTC,
-          vp8: true, // Always use VP8 via WebRTC
-          hardwareAcceleration: settings.hardwareAcceleration,
-          monitor: settings.selectedMonitor,
-          audioBitrate: settings.audioBitrate * 1000,
-          videoBitrate: settings.videoBitrate * 1000,
-          framerate: settings.framerate
-        }
+        monitor: settings.selectedMonitor,
+        enableAudio: settings.enableAudio,
+        audioPort: settings.enableAudio ? settings.audioPort : null
       });
       
-      serverUrl.value = url;
+      vncInfo.value = info;
+      serverUrl.value = info.vnc_url;
       serverStatus.value = true;
       
       // Double-check the server status after starting
@@ -135,10 +112,11 @@ export function useServer() {
       }, 1000);
       
     } catch (error) {
-      console.error("Failed to start server:", error);
-      errorMessage.value = `Failed to start server: ${error}`;
+      console.error("Failed to start VNC server:", error);
+      errorMessage.value = `Failed to start VNC server: ${error}`;
       serverStatus.value = false;
       serverUrl.value = "";
+      vncInfo.value = null;
     } finally {
       loading.value = false;
     }
@@ -149,9 +127,10 @@ export function useServer() {
     errorMessage.value = "";
     
     try {
-      await invoke("stop_server");
+      await invoke("stop_vnc_server");
       serverStatus.value = false;
       serverUrl.value = "";
+      vncInfo.value = null;
       
       // Double-check the server status after stopping
       setTimeout(async () => {
@@ -159,49 +138,24 @@ export function useServer() {
       }, 1000);
       
     } catch (error) {
-      console.error("Failed to stop server:", error);
-      errorMessage.value = `Failed to stop server: ${error}`;
+      console.error("Failed to stop VNC server:", error);
+      errorMessage.value = `Failed to stop VNC server: ${error}`;
     } finally {
       loading.value = false;
     }
   }
 
   function buildUrlWithParams() {
-    if (!serverUrl.value) return "";
+    if (!vncInfo.value || !vncInfo.value.vnc_url) return "";
     
-    let url = serverUrl.value;
-    // Ensure the URL ends with /kvm for the KVM client
-    if (!url.endsWith('/kvm')) {
-      url = url.replace(/\/$/, '') + '/kvm';
-    }
-    
-    const params = [];
-    
-    if (settings.useWebRTC) {
-      params.push('audio=true');
-    }
-    
-    if (settings.encryptionEnabled) {
-      params.push('encryption=true');
-    }
-    
-    params.push(`codec=${selectedCodec.value}`);
-    
-    if (settings.selectedMonitor > 0) {
-      params.push(`monitor=${settings.selectedMonitor}`);
-    }
-    
-    if (params.length > 0) {
-      url += (url.includes('?') ? ';' : '?') + params.join(';');
-    }
-    
-    return url;
+    return vncInfo.value.vnc_url;
   }
 
   function openUrl() {
     const url = buildUrlWithParams();
     if (url) {
-      window.open(url, '_blank');
+      // For VNC URLs, we might want to show instructions instead of opening
+      alert(`VNC Server URL: ${url}\n\nUse a VNC client like TigerVNC or RealVNC to connect.`);
     }
   }
 
@@ -226,7 +180,7 @@ export function useServer() {
     settings,
     monitors,
     loadingMonitors,
-    selectedCodec,
+    vncInfo,
     checkServerStatus,
     startServer,
     stopServer,

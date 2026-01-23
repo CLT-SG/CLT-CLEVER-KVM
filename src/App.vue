@@ -1,7 +1,6 @@
 <script setup>
 import { onMounted, computed } from "vue";
 import { useServer } from "./composables";
-import { presets } from "./constants";
 
 import {
   TabContainer,
@@ -22,6 +21,7 @@ const {
   settings,
   monitors,
   loadingMonitors,
+  vncInfo,
   checkServerStatus,
   startServer,
   stopServer,
@@ -34,17 +34,6 @@ onMounted(async () => {
   // Initial check is now handled by the composable
   // await checkServerStatus();
 });
-
-function applyPreset(presetName) {
-  const preset = presets[presetName];
-  if (preset) {
-    Object.keys(preset).forEach(key => {
-      if (key in settings) {
-        settings[key] = preset[key];
-      }
-    });
-  }
-}
 
 function updateServerPort(value) {
   serverPort.value = value;
@@ -78,11 +67,11 @@ const tabs = computed(() => {
         <ServerStatus 
           :server-status="serverStatus"
           :server-url="serverUrl"
+          :vnc-info="vncInfo"
           :loading="loading"
           :error-message="errorMessage"
           :start-server="startServer"
           :stop-server="stopServer"
-          :open-url="openUrl"
           :copy-url="copyUrl"
         />
         
@@ -104,7 +93,6 @@ const tabs = computed(() => {
             :settings="settings"
             :monitors="monitors"
             :disabled="serverStatus"
-            @apply-preset="applyPreset"
             @update:server-port="updateServerPort"
             @update:selected-monitor="updateSelectedMonitor"
           />
