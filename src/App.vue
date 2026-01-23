@@ -7,6 +7,7 @@ import {
   TabContainer,
   ServerStatus,
   ServerConfiguration,
+  ServerControls,
   ConnectionOptions,
   LogViewer,
   UpdaterDialog,
@@ -58,6 +59,7 @@ function updateSelectedMonitor(value) {
 const tabs = computed(() => {
   const baseTabs = [
     { id: 'status', label: 'Server Status' },
+    { id: 'vnc', label: 'VNC Server' },
     { id: 'config', label: 'Configuration' },
     { id: 'options', label: 'Connection Options' },
     { id: 'logs', label: 'Logs' }
@@ -91,6 +93,10 @@ const tabs = computed(() => {
           <h3>Application Updates</h3>
           <UpdateChecker />
         </div>
+      </template>
+
+      <template #vnc>
+        <ServerControls />
       </template>
 
       <template #config>
