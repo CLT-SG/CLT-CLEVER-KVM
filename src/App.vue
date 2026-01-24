@@ -71,7 +71,7 @@ const tabs = computed(() => {
 <template>
   <main class="container">
     <div class="header">
-      <h1>🖥️ Clever KVM - VNC Server</h1>
+      <h1>Clever KVM - VNC Server</h1>
       <p class="subtitle">Multi-Monitor VNC Server for Video Wall Systems</p>
     </div>
 
@@ -99,7 +99,7 @@ const tabs = computed(() => {
         <div class="config-content">
           <h2>Server Configuration</h2>
           <div v-if="serverStatus" class="config-warning">
-            <p>⚠️ Server is currently running. Stop the server to modify these settings.</p>
+            <p><strong>⚠ Warning:</strong> Server is currently running. Stop the server to modify these settings.</p>
           </div>
           <ServerConfiguration 
             :server-port="serverPort"

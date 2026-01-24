@@ -11,7 +11,7 @@
         <span class="label">VNC URL:</span>
         <div class="url-display">
           <code class="url">{{ vncInfo.vnc_url }}</code>
-          <button class="icon-button" @click="copyUrl" title="Copy VNC URL">📋</button>
+          <button class="copy-button" @click="copyUrl" title="Copy VNC URL">Copy</button>
         </div>
       </div>
       
@@ -19,7 +19,7 @@
         <span class="label">Audio URL:</span>
         <div class="url-display">
           <code class="url">{{ vncInfo.audio_url }}</code>
-          <button class="icon-button" @click="copyAudioUrl" title="Copy Audio URL">📋</button>
+          <button class="copy-button" @click="copyAudioUrl" title="Copy Audio URL">Copy</button>
         </div>
       </div>
       
@@ -172,19 +172,21 @@ function copyAudioUrl() {
   padding: 0.25rem;
 }
 
-.icon-button {
-  background: none;
+.copy-button {
+  background-color: #007bff;
+  color: white;
   border: none;
   cursor: pointer;
-  font-size: 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 500;
   margin-left: 0.5rem;
-  padding: 0.25rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
   transition: background-color 0.2s;
 }
 
-.icon-button:hover {
-  background-color: #e9ecef;
-  border-radius: 4px;
+.copy-button:hover {
+  background-color: #0056b3;
 }
 
 .connection-help {

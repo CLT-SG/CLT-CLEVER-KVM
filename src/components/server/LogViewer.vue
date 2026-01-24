@@ -2,10 +2,10 @@
   <div class="log-viewer">
     <div class="log-toggle">
       <button @click="toggleLogs" class="text-button">
-        {{ showLogs ? '⬆️ Hide Logs' : '⬇️ Show Logs' }}
+        {{ showLogs ? '▲ Hide Logs' : '▼ Show Logs' }}
       </button>
       <button v-if="showLogs" @click="refreshLogs" class="text-button refresh">
-        🔄 Refresh
+        Refresh
       </button>
     </div>
     
