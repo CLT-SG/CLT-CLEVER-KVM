@@ -629,8 +629,8 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
 
     // Get hostname for URL generation (before creating VNC server)
     let hostname = gethostname::gethostname()
-        .to_string_lossy()
-        .to_string();
+        .into_string()
+        .unwrap_or_else(|_| "localhost".into());
 
     // Calculate port with bounds checking to avoid collisions
     let vnc_port = if let Some(p) = port {

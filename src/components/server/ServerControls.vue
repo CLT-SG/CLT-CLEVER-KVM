@@ -454,12 +454,6 @@ code.info-value {
   font-weight: 600;
 }
 
-.status-registered::before {
-  content: "✓ ";
-  font-weight: bold;
-  margin-right: 0.25rem;
-}
-
 .copy-btn {
   padding: 0.4rem 0.75rem;
   background: var(--primary-color, #007bff);

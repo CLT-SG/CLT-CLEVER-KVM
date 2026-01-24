@@ -99,7 +99,7 @@ const tabs = computed(() => {
         <div class="config-content">
           <h2>Server Configuration</h2>
           <div v-if="serverStatus" class="config-warning">
-            <p><strong>⚠ Warning:</strong> Server is currently running. Stop the server to modify these settings.</p>
+            <p><strong>Warning:</strong> Server is currently running. Stop the server to modify these settings.</p>
           </div>
           <ServerConfiguration 
             :server-port="serverPort"
