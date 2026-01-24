@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use log::{debug, error, info, warn};
 use local_ip_address::local_ip;
+use serde::Serialize;
 
 use crate::app::{ServerState, ServerOptions, MonitorInfo};
 use crate::core::ScreenCapture;
@@ -408,7 +409,7 @@ pub fn get_available_network_interfaces() -> Result<Vec<String>, String> {
 // MediaMTX Server Discovery Commands
 // ============================================================================
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use std::time::Duration;
 
 /// MediaMTX server information
@@ -532,7 +533,6 @@ async fn test_mediamtx_connection(ip: &str, port: u16) -> bool {
 // ============================================================================
 
 use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register_vnc_with_clever_service};
-use serde::Serialize;
 
 /// VNC server information returned to frontend
 #[derive(Debug, Serialize, Clone)]
