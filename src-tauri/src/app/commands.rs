@@ -627,6 +627,11 @@ pub async fn start_vnc_server(
 
 let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_position_y) = monitor_info;
 
+    // Get hostname for URL generation (before creating VNC server)
+    let hostname = gethostname::gethostname()
+        .into_string()
+        .unwrap_or_else(|_| "localhost".into());
+
     // Calculate port with bounds checking to avoid collisions
     let vnc_port = if let Some(p) = port {
         p
@@ -648,6 +653,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
         audio_port: if enable_audio { Some(audio_port.unwrap_or(6900)) } else { None },
         max_clients: 10,
         password: None,
+        hostname: Some(hostname.clone()),
     };
 
     // Create and start VNC server
@@ -655,11 +661,6 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
         Ok(mut vnc_server) => {
             match vnc_server.start().await {
                 Ok(_) => {
-                    // Get hostname for URL generation
-                    let hostname = gethostname::gethostname()
-                        .to_string_lossy()
-                        .to_string();
-                    
                     // Get local IP as fallback
                     let local_ip = match local_ip() {
                         Ok(ip) => ip.to_string(),

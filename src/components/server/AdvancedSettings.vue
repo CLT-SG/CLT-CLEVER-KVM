@@ -1,7 +1,7 @@
 <template>
   <div class="advanced-toggle">
     <button @click="showAdvancedSettings = !showAdvancedSettings" class="text-button">
-      {{ showAdvancedSettings ? '⬆️ Hide Advanced Settings' : '⬇️ Show Advanced Settings' }}
+      {{ showAdvancedSettings ? '▲ Hide Advanced Settings' : '▼ Show Advanced Settings' }}
     </button>
   </div>
   
@@ -30,7 +30,7 @@
             :disabled="disabled || scanningMediaMtx"
             title="Manually scan for MediaMTX servers"
           >
-            {{ scanningMediaMtx ? '🔍 Scanning...' : '🔍 Scan' }}
+            {{ scanningMediaMtx ? 'Scanning...' : 'Scan' }}
           </button>
         </div>
         <span class="help-text" v-if="mediamtxServers.length > 0">

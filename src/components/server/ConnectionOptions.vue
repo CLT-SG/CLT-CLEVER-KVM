@@ -3,7 +3,7 @@
     <h2>VNC Connection Guide</h2>
     
     <div class="guide-section">
-      <h3>🖥️ Using VNC Clients</h3>
+      <h3>Using VNC Clients</h3>
       <p>Connect to the VNC server using any standard VNC client:</p>
       
       <div class="client-examples">
@@ -27,14 +27,15 @@
     </div>
     
     <div class="guide-section">
-      <h3>🎵 Audio Streaming</h3>
+      <h3>Audio Streaming</h3>
       <p>When audio is enabled, it streams separately via RTSP on the configured audio port (default: 6900).</p>
-      <p>Audio URL format: <code>rtsp://&lt;ip-address&gt;:&lt;audio-port&gt;/audio</code></p>
+      <p>Audio URL format: <code>rtsp://&lt;hostname&gt;:&lt;audio-port&gt;/audio</code></p>
+      <p><em>Example:</em> <code>rtsp://workstation-1:6900/audio</code></p>
       <p><strong>Note:</strong> Most VNC clients don't support audio. You'll need a separate RTSP client or use MediaMTX for integration.</p>
     </div>
     
     <div class="guide-section">
-      <h3>🔧 Multi-Monitor Support</h3>
+      <h3>Multi-Monitor Support</h3>
       <p>Each monitor gets its own VNC server with automatic port assignment:</p>
       <ul>
         <li><strong>Monitor 1 (Primary):</strong> Port 5900</li>
@@ -45,7 +46,7 @@
     </div>
     
     <div class="guide-section">
-      <h3>🎛️ Integration with MediaMTX</h3>
+      <h3>Integration with MediaMTX</h3>
       <p>For video wall deployments, configure MediaMTX to relay VNC streams:</p>
       <pre class="code-block">paths:
   workstation_1_screen1:
@@ -57,7 +58,7 @@
     </div>
     
     <div class="features-section">
-      <h3>✨ Features</h3>
+      <h3>Features</h3>
       <ul>
         <li><strong>Standard VNC Protocol:</strong> RFB 3.8 compatible with all VNC clients</li>
         <li><strong>Multi-Client Support:</strong> Up to 10 simultaneous connections per monitor</li>

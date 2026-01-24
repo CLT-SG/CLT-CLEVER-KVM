@@ -22,6 +22,7 @@ pub struct VncServerConfig {
     pub audio_port: Option<u16>,
     pub max_clients: usize,
     pub password: Option<String>,
+    pub hostname: Option<String>,
 }
 
 impl Default for VncServerConfig {
@@ -33,6 +34,7 @@ impl Default for VncServerConfig {
             audio_port: Some(6900),
             max_clients: 10,
             password: None,
+            hostname: None,
         }
     }
 }
@@ -77,7 +79,16 @@ impl VncKvmServer {
             match config.audio_port {
                 Some(audio_port) => {
                     info!("🎵 Initializing audio stream on port {}", audio_port);
-                    match SeparateAudioStream::new(audio_port) {
+                    // Use hostname if available, otherwise fall back to IP-based URL
+                    let stream_result = if let Some(ref hostname) = config.hostname {
+                        info!("Using hostname '{}' for audio stream URL", hostname);
+                        SeparateAudioStream::new_with_hostname(audio_port, hostname)
+                    } else {
+                        info!("No hostname provided, using IP address for audio stream URL");
+                        SeparateAudioStream::new(audio_port)
+                    };
+                    
+                    match stream_result {
                         Ok(stream) => {
                             info!("✅ Audio stream initialized");
                             Some(Arc::new(Mutex::new(stream)))

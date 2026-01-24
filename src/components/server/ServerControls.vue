@@ -1,6 +1,6 @@
 <template>
   <div class="vnc-controls">
-    <h3>🖥️ VNC Server</h3>
+    <h3>VNC Server</h3>
     
     <div class="vnc-settings">
       <div class="setting-row">
@@ -67,18 +67,18 @@
         :class="{ 'btn-primary': !vncRunning, 'btn-danger': vncRunning }"
         class="vnc-toggle-btn"
       >
-        {{ vncRunning ? '🛑 Stop VNC Server' : '🚀 Start VNC Server' }}
+        {{ vncRunning ? 'Stop VNC Server' : 'Start VNC Server' }}
       </button>
     </div>
     
     <div v-if="vncRunning" class="vnc-info">
-      <h4>📊 VNC Server Status</h4>
+      <h4>VNC Server Status</h4>
       <div class="info-grid">
         <div class="info-item">
           <span class="info-label">VNC URL:</span>
           <code class="info-value">{{ vncInfo?.vnc_url }}</code>
           <button @click="copyToClipboard(vncInfo?.vnc_url)" class="copy-btn" title="Copy to clipboard">
-            📋
+            Copy
           </button>
         </div>
         
@@ -86,7 +86,7 @@
           <span class="info-label">Audio URL:</span>
           <code class="info-value">{{ vncInfo.audio_url }}</code>
           <button @click="copyToClipboard(vncInfo.audio_url)" class="copy-btn" title="Copy to clipboard">
-            📋
+            Copy
           </button>
         </div>
         
@@ -97,7 +97,7 @@
         
         <div class="info-item" v-if="vncStatus?.registration_status?.registered">
           <span class="info-label">Registration Status:</span>
-          <span class="info-value status-registered">✅ Registered (ID: {{ vncStatus.registration_status.id }})</span>
+          <span class="info-value status-registered">Registered (ID: {{ vncStatus.registration_status.id }})</span>
         </div>
       </div>
       
@@ -107,21 +107,21 @@
           :disabled="registering || (vncStatus?.registration_status?.registered)"
           class="btn-secondary"
         >
-          {{ vncStatus?.registration_status?.registered ? '✅ Registered' : '📡 Register with CLEVER Service' }}
+          {{ vncStatus?.registration_status?.registered ? 'Registered' : 'Register with CLEVER Service' }}
         </button>
         
         <button @click="refreshStatus" class="btn-secondary">
-          🔄 Refresh Status
+          Refresh Status
         </button>
       </div>
     </div>
 
     <div v-if="error" class="error-message">
-      ⚠️ {{ error }}
+      {{ error }}
     </div>
 
     <div v-if="successMessage" class="success-message">
-      ✅ {{ successMessage }}
+      {{ successMessage }}
     </div>
   </div>
 </template>
@@ -455,17 +455,19 @@ code.info-value {
 }
 
 .copy-btn {
-  padding: 4px 8px;
+  padding: 0.4rem 0.75rem;
   background: var(--primary-color, #007bff);
+  color: white;
   border: none;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
-  transition: opacity 0.2s;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
 }
 
 .copy-btn:hover {
-  opacity: 0.8;
+  background-color: #0056b3;
 }
 
 .error-message {
