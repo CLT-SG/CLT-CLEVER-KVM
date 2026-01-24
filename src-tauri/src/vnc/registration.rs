@@ -36,8 +36,8 @@ pub async fn register_vnc_with_clever_service(
     let local_ip = match local_ip_address::local_ip() {
         Ok(ip) => ip.to_string(),
         Err(e) => {
-            warn!("Failed to get local IP: {}, using hostname as fallback", e);
-            hostname.to_string()
+            warn!("Failed to get local IP: {}, using localhost as fallback", e);
+            "127.0.0.1".to_string()
         }
     };
 
