@@ -64,6 +64,8 @@ npm run tauri dev
 - Auto-registration with CLEVER service
 - Multi-client support (up to 10 simultaneous connections per monitor)
 - Compatible with all standard display clients
+- **MediaMTX Auto-Discovery**: Automatically scans local network for MediaMTX servers on port 9997
+- Manual and automatic MediaMTX server configuration
 
 ## Display Server Configuration
 

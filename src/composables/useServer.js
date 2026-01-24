@@ -26,7 +26,9 @@ export function useServer() {
     enableAudio: true,
     selectedMonitor: 0,
     audioPort: 6900,
-    autoStart: true
+    autoStart: true,
+    mediamtxUrl: '',
+    mediamtxAutoScan: true
   });
 
   // Load settings from localStorage
@@ -53,6 +55,33 @@ export function useServer() {
 
   // Load settings on initialization
   loadSettings();
+
+  // MediaMTX scanning state
+  const scanningMediaMtx = ref(false);
+  const mediamtxServers = ref([]);
+
+  async function scanMediaMtxServers() {
+    scanningMediaMtx.value = true;
+    try {
+      const servers = await invoke("scan_mediamtx_servers");
+      mediamtxServers.value = servers;
+      
+      // Auto-select first found server if auto-scan is enabled and no URL is set
+      if (settings.mediamtxAutoScan && servers.length > 0 && !settings.mediamtxUrl) {
+        settings.mediamtxUrl = servers[0].url;
+        saveSettings();
+        console.log("Auto-selected MediaMTX server:", settings.mediamtxUrl);
+      }
+      
+      return servers;
+    } catch (error) {
+      console.error("Failed to scan for MediaMTX servers:", error);
+      mediamtxServers.value = [];
+      return [];
+    } finally {
+      scanningMediaMtx.value = false;
+    }
+  }
 
   async function loadMonitors() {
     loadingMonitors.value = true;
@@ -211,6 +240,16 @@ export function useServer() {
   checkServerStatus().then(async () => {
     startStatusMonitoring();
     
+    // Auto-scan for MediaMTX servers if enabled
+    if (settings.mediamtxAutoScan) {
+      console.log("Auto-scanning for MediaMTX servers...");
+      try {
+        await scanMediaMtxServers();
+      } catch (error) {
+        console.error("Failed to scan for MediaMTX servers:", error);
+      }
+    }
+    
     // Auto-start VNC server if enabled and not already running
     if (settings.autoStart && !serverStatus.value) {
       console.log("Auto-starting VNC server...");
@@ -240,6 +279,9 @@ export function useServer() {
     loadMonitors,
     startStatusMonitoring,
     stopStatusMonitoring,
-    saveSettings
+    saveSettings,
+    scanningMediaMtx,
+    mediamtxServers,
+    scanMediaMtxServers
   };
 }

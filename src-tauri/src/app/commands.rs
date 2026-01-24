@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use log::{debug, error, info, warn};
 use local_ip_address::local_ip;
+use serde::Serialize;
 
 use crate::app::{ServerState, ServerOptions, MonitorInfo};
 use crate::core::ScreenCapture;
@@ -405,11 +406,133 @@ pub fn get_available_network_interfaces() -> Result<Vec<String>, String> {
 }
 
 // ============================================================================
+// MediaMTX Server Discovery Commands
+// ============================================================================
+
+use std::net::SocketAddr;
+use std::time::Duration;
+
+/// MediaMTX server information
+#[derive(Debug, Serialize, Clone)]
+pub struct MediaMtxServer {
+    pub ip: String,
+    pub port: u16,
+    pub url: String,
+}
+
+/// Scan local network for MediaMTX servers on port 9997
+#[tauri::command]
+pub async fn scan_mediamtx_servers() -> Result<Vec<MediaMtxServer>, String> {
+    info!("🔍 Scanning local network for MediaMTX servers on port 9997...");
+    
+    // Get the local IP to determine the subnet
+    let local_ip = match get_network_ip() {
+        Some(ip) => ip,
+        None => {
+            warn!("Could not determine local IP address, scanning localhost only");
+            // Try localhost
+            if test_mediamtx_connection("127.0.0.1", 9997).await {
+                info!("✅ Found MediaMTX server on localhost:9997");
+                return Ok(vec![MediaMtxServer {
+                    ip: "127.0.0.1".to_string(),
+                    port: 9997,
+                    url: "http://127.0.0.1:9997".to_string(),
+                }]);
+            }
+            return Ok(vec![]);
+        }
+    };
+    
+    info!("Local IP detected: {}", local_ip);
+    
+    // Parse the IP to get subnet
+    let parts: Vec<&str> = local_ip.split('.').collect();
+    if parts.len() != 4 {
+        return Err("Invalid IP address format".to_string());
+    }
+    
+    let subnet_base = format!("{}.{}.{}", parts[0], parts[1], parts[2]);
+    info!("Scanning subnet: {}.0/24 for MediaMTX servers", subnet_base);
+    
+    let mut servers = Vec::new();
+    let port = 9997;
+    
+    // Test localhost first
+    if test_mediamtx_connection("127.0.0.1", port).await {
+        info!("✅ Found MediaMTX server on localhost:9997");
+        servers.push(MediaMtxServer {
+            ip: "127.0.0.1".to_string(),
+            port,
+            url: "http://127.0.0.1:9997".to_string(),
+        });
+    }
+    
+    // Scan the subnet in parallel using tokio
+    let mut tasks = Vec::new();
+    
+    for i in 1..=254 {
+        let ip = format!("{}.{}", subnet_base, i);
+        
+        // Skip scanning our own IP if we already found localhost
+        if ip == local_ip && servers.iter().any(|s| s.ip == "127.0.0.1") {
+            continue;
+        }
+        
+        let task = tokio::spawn(async move {
+            if test_mediamtx_connection(&ip, port).await {
+                Some(MediaMtxServer {
+                    ip: ip.clone(),
+                    port,
+                    url: format!("http://{}:{}", ip, port),
+                })
+            } else {
+                None
+            }
+        });
+        
+        tasks.push(task);
+    }
+    
+    // Wait for all tasks to complete
+    let results = futures_util::future::join_all(tasks).await;
+    
+    for result in results {
+        if let Ok(Some(server)) = result {
+            info!("✅ Found MediaMTX server at {}", server.url);
+            servers.push(server);
+        }
+    }
+    
+    if servers.is_empty() {
+        info!("❌ No MediaMTX servers found on the network");
+    } else {
+        info!("✅ Found {} MediaMTX server(s)", servers.len());
+    }
+    
+    Ok(servers)
+}
+
+/// Test if a MediaMTX server is running at the given address
+async fn test_mediamtx_connection(ip: &str, port: u16) -> bool {
+    let addr = match format!("{}:{}", ip, port).parse::<SocketAddr>() {
+        Ok(addr) => addr,
+        Err(_) => return false,
+    };
+    
+    // Try to connect with a short timeout
+    let result = tokio::time::timeout(
+        Duration::from_millis(200),
+        tokio::net::TcpStream::connect(addr)
+    ).await;
+    
+    result.is_ok() && result.unwrap().is_ok()
+}
+
+// ============================================================================
 // VNC Server Commands
 // ============================================================================
 
 use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register_vnc_with_clever_service};
-use serde::Serialize;
 
 /// VNC server information returned to frontend
 #[derive(Debug, Serialize, Clone)]

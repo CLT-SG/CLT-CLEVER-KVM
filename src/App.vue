@@ -27,7 +27,10 @@ const {
   stopServer,
   openUrl,
   copyUrl,
-  saveSettings
+  saveSettings,
+  scanningMediaMtx,
+  mediamtxServers,
+  scanMediaMtxServers
 } = useServer();
 
 // The status checking is now automatic, but we can still call it manually if needed
@@ -46,6 +49,10 @@ function updateSelectedMonitor(value) {
 
 function handleSettingsChanged() {
   saveSettings();
+}
+
+async function handleScanMediaMtx() {
+  await scanMediaMtxServers();
 }
 
 // Define tabs based on server status
@@ -99,9 +106,12 @@ const tabs = computed(() => {
             :settings="settings"
             :monitors="monitors"
             :disabled="serverStatus"
+            :scanningMediaMtx="scanningMediaMtx"
+            :mediamtxServers="mediamtxServers"
             @update:server-port="updateServerPort"
             @update:selected-monitor="updateSelectedMonitor"
             @settings-changed="handleSettingsChanged"
+            @scan-mediamtx="handleScanMediaMtx"
           />
         </div>
       </template>

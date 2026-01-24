@@ -47,6 +47,7 @@ fn main() {
             test_network_connectivity,
             get_system_info,
             check_firewall_status,
+            scan_mediamtx_servers,
             start_vnc_server,
             start_vnc_servers_all,
             stop_vnc_server,
