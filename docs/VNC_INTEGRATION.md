@@ -128,6 +128,33 @@ rtsp://mediamtx:8554/workstation_1_video
 rtsp://mediamtx:8554/workstation_1_audio
 ```
 
+#### MediaMTX Auto-Discovery
+
+CLT-CLEVER-KVM includes an automatic MediaMTX server discovery feature that scans your local network for MediaMTX servers running on port 9997.
+
+**Automatic Scanning:**
+1. Open Advanced Settings in the Configuration tab
+2. Enable "Auto-scan network for MediaMTX server on port 9997"
+3. The application will automatically scan your local subnet (e.g., 192.168.1.0/24) on startup
+4. Found servers will be listed in the MediaMTX URL dropdown
+
+**Manual Configuration:**
+1. Open Advanced Settings in the Configuration tab
+2. Enter the MediaMTX server URL manually in the "MediaMTX URL" field
+3. Format: `http://<ip-address>:9997` or `http://<hostname>:9997`
+
+**Manual Scanning:**
+- Click the "🔍 Scan" button to trigger a manual network scan
+- The scan checks all hosts in your subnet with a 200ms timeout per host
+- Found servers are displayed in a dropdown for easy selection
+
+**How It Works:**
+- Detects your local network subnet automatically
+- Scans all IP addresses in the subnet (1-254) in parallel
+- Tests TCP connection to port 9997 on each host
+- Returns list of responsive MediaMTX servers
+- Auto-selects the first found server when auto-scan is enabled
+
 ## Configuration
 
 ### Default Settings
