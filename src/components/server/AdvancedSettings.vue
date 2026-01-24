@@ -7,6 +7,51 @@
   
   <div v-if="showAdvancedSettings" class="advanced-settings" :class="{ disabled: disabled }">
     <div class="setting-group">
+      <h4>MediaMTX Server Configuration</h4>
+      <label>
+        <input type="checkbox" v-model="settings.mediamtxAutoScan" :disabled="disabled" @change="handleAutoScanChange" />
+        Auto-scan network for MediaMTX server on port 9997
+      </label>
+      
+      <div class="mediamtx-url-group">
+        <label for="mediamtx-url">MediaMTX URL:</label>
+        <div class="url-input-group">
+          <input 
+            type="text" 
+            id="mediamtx-url" 
+            v-model="settings.mediamtxUrl"
+            placeholder="http://192.168.1.100:9997 (auto-detected or manual)"
+            :disabled="disabled" 
+            @change="$emit('settings-changed')" 
+          />
+          <button 
+            class="scan-button" 
+            @click="handleManualScan" 
+            :disabled="disabled || scanningMediaMtx"
+            title="Manually scan for MediaMTX servers"
+          >
+            {{ scanningMediaMtx ? '🔍 Scanning...' : '🔍 Scan' }}
+          </button>
+        </div>
+        <span class="help-text" v-if="mediamtxServers.length > 0">
+          Found {{ mediamtxServers.length }} MediaMTX server(s) on the network
+        </span>
+        <div v-if="mediamtxServers.length > 1" class="server-list">
+          <label>Available servers:</label>
+          <select 
+            v-model="settings.mediamtxUrl" 
+            @change="$emit('settings-changed')"
+            :disabled="disabled"
+          >
+            <option v-for="server in mediamtxServers" :key="server.ip" :value="server.url">
+              {{ server.url }} ({{ server.ip }})
+            </option>
+          </select>
+        </div>
+      </div>
+    </div>
+    
+    <div class="setting-group">
       <h4>VNC Audio Settings</h4>
       <label>
         <input type="checkbox" v-model="settings.enableAudio" :disabled="disabled" @change="$emit('settings-changed')" />
@@ -23,24 +68,45 @@
     <div class="help-text">
       <p><strong>Note:</strong> VNC protocol (RFB 3.8) is used for video streaming. Audio is streamed separately via RTSP.</p>
       <p>Connect using any VNC client such as TigerVNC, RealVNC, or VNC Viewer.</p>
+      <p><strong>MediaMTX:</strong> MediaMTX is an optional streaming server that can relay VNC streams for video wall deployments.</p>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue';
+import { invoke } from '@tauri-apps/api/tauri';
 
-defineProps({
+const props = defineProps({
   settings: Object,
   disabled: {
     type: Boolean,
     default: false
+  },
+  scanningMediaMtx: {
+    type: Boolean,
+    default: false
+  },
+  mediamtxServers: {
+    type: Array,
+    default: () => []
   }
 });
 
-defineEmits(['settings-changed']);
+const emit = defineEmits(['settings-changed', 'scan-mediamtx']);
 
 const showAdvancedSettings = ref(false);
+
+async function handleManualScan() {
+  emit('scan-mediamtx');
+}
+
+function handleAutoScanChange() {
+  emit('settings-changed');
+  if (props.settings.mediamtxAutoScan) {
+    emit('scan-mediamtx');
+  }
+}
 </script>
 
 <style scoped>
@@ -79,6 +145,68 @@ const showAdvancedSettings = ref(false);
 
 .setting-group input[type="checkbox"] {
   margin-right: 0.5rem;
+}
+
+.mediamtx-url-group {
+  margin-top: 0.75rem;
+  margin-left: 1.5rem;
+}
+
+.mediamtx-url-group > label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.url-input-group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.url-input-group input[type="text"] {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.scan-button {
+  padding: 0.5rem 1rem;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.scan-button:hover:not(:disabled) {
+  background-color: #2980b9;
+}
+
+.scan-button:disabled {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+}
+
+.server-list {
+  margin-top: 0.5rem;
+}
+
+.server-list label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.server-list select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
 }
 
 .slider-group {

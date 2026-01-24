@@ -43,7 +43,10 @@
     <AdvancedSettings 
       :settings="settings" 
       :disabled="disabled"
+      :scanningMediaMtx="scanningMediaMtx"
+      :mediamtxServers="mediamtxServers"
       @settings-changed="$emit('settings-changed')"
+      @scan-mediamtx="$emit('scan-mediamtx')"
     />
   </div>
 </template>
@@ -58,10 +61,18 @@ defineProps({
   disabled: {
     type: Boolean,
     default: false
+  },
+  scanningMediaMtx: {
+    type: Boolean,
+    default: false
+  },
+  mediamtxServers: {
+    type: Array,
+    default: () => []
   }
 });
 
-defineEmits(['update:server-port', 'update:selected-monitor', 'settings-changed']);
+defineEmits(['update:server-port', 'update:selected-monitor', 'settings-changed', 'scan-mediamtx']);
 </script>
 
 <style scoped>
