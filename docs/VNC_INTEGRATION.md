@@ -29,7 +29,7 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
 │         clever-service Registration             │
 └─────────────────────────────────────────────────┘
            │                        │
-           │ vnc://ip:5900         │ rtsp://ip:5901/audio
+           │ vnc://hostname:5900   │ rtsp://hostname:5901/audio
            ▼                        ▼
     ┌──────────────┐        ┌──────────────┐
     │ VNC Clients  │        │   MediaMTX   │
@@ -38,6 +38,8 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
     │ - VNC Viewer │        └──────────────┘
     └──────────────┘
 ```
+
+**Note**: As of version 3.0, URLs use hostname instead of IP addresses for improved stability and integration with video wall systems.
 
 ## Quick Start
 
@@ -68,32 +70,48 @@ console.log('Audio URL:', vncInfo.audio_url);
 
 ### 2. Connecting with VNC Clients
 
+**Important**: As of version 3.0, VNC and audio URLs use hostname instead of IP addresses. This provides better stability and integration with video wall systems.
+
 #### TigerVNC
 ```bash
-vncviewer <ip-address>:5900
+vncviewer <hostname>:5900
 ```
 
 #### RealVNC
 ```bash
-vnc://<ip-address>:5900
+vnc://<hostname>:5900
 ```
 
 #### VNC Viewer (GUI)
-Open VNC Viewer and enter: `<ip-address>:5900`
+Open VNC Viewer and enter: `<hostname>:5900`
+
+**Note**: You can also use IP addresses for backward compatibility, but hostname-based URLs are recommended.
 
 ### 3. Audio Stream Integration
 
-The audio stream is available via RTSP:
+The audio stream is available via RTSP using hostname:
 ```
-rtsp://<ip-address>:5901/audio
+rtsp://<hostname>:5901/audio
 ```
 
 #### MediaMTX Configuration
 
-Configure MediaMTX to relay the audio stream:
+Configure MediaMTX to relay the audio stream using hostname:
 
 ```yaml
 # mediamtx.yml
+paths:
+  workstation_1_video:
+    source: vnc://workstation-1:5900
+    sourceProtocol: vnc
+    
+  workstation_1_audio:
+    source: rtsp://workstation-1:5901/audio
+    sourceProtocol: rtsp
+```
+
+**Legacy IP-based configuration** (still supported):
+```yaml
 paths:
   workstation_1_video:
     source: vnc://192.168.1.100:5900
@@ -170,7 +188,19 @@ The registration API endpoint:
 POST http://clever-service:8000/api/screencasts/register
 ```
 
-Payload:
+Payload (Version 3.0+):
+```json
+{
+  "vnc_url": "vnc://workstation-1:5900",
+  "audio_url": "rtsp://workstation-1:5901/audio",
+  "hostname": "workstation-1",
+  "unique_id": "workstation-1",
+  "fallback_ip": "192.168.1.100",
+  "type": "vnc-kvm"
+}
+```
+
+**Legacy payload format** (still supported):
 ```json
 {
   "vnc_url": "vnc://192.168.1.100:5900",

@@ -99,25 +99,40 @@ npm run tauri dev
 
 ### Connecting with Display Clients
 
+**Note**: As of version 3.0, URLs use hostname instead of IP addresses for improved stability.
+
 **TigerVNC (Monitor 1):**
 ```bash
-vncviewer <ip-address>:5900
+vncviewer <hostname>:5900
 ```
 
 **TigerVNC (Monitor 2):**
 ```bash
-vncviewer <ip-address>:5901
+vncviewer <hostname>:5901
 ```
 
 **RealVNC or compatible clients:**
 ```bash
-vnc://<ip-address>:5900  # Monitor 1
-vnc://<ip-address>:5901  # Monitor 2
+vnc://<hostname>:5900  # Monitor 1
+vnc://<hostname>:5901  # Monitor 2
 ```
 
 ### Integration with MediaMTX
 
-Configure MediaMTX to relay display streams + audio:
+Configure MediaMTX to relay display streams + audio using hostname:
+```yaml
+paths:
+  display_workstation_1_screen1:
+    source: vnc://workstation-1:5900
+    sourceProtocol: vnc
+  display_workstation_1_screen2:
+    source: vnc://workstation-1:5901
+    sourceProtocol: vnc
+  audio_workstation_1:
+    source: rtsp://workstation-1:6900/audio
+```
+
+**Legacy IP-based configuration** (still supported):
 ```yaml
 paths:
   display_workstation_1_screen1:
