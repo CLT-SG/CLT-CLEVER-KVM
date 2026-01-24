@@ -52,17 +52,19 @@ vncviewer <ip-address>:5900
 vncviewer <ip-address>:5901
 
 # Monitor 3
-vncviewer <ip-address>:5902
+vncviewer <hostname>:5902
 ```
 
 ### Using RealVNC
 
+**Note**: As of version 3.0, URLs use hostname instead of IP addresses.
+
 ```bash
 # Monitor 1
-vnc://<ip-address>:5900
+vnc://<hostname>:5900
 
 # Monitor 2
-vnc://<ip-address>:5901
+vnc://<hostname>:5901
 ```
 
 ## Audio Streaming
@@ -70,37 +72,54 @@ vnc://<ip-address>:5901
 Audio is available on port **6900** and is shared across all monitors:
 
 ```
-rtsp://<ip-address>:6900/audio
+rtsp://<hostname>:6900/audio
 ```
 
 ### Example with VLC
 
 ```bash
-vlc rtsp://<ip-address>:6900/audio
+vlc rtsp://<hostname>:6900/audio
 ```
 
 ## MediaMTX Integration
 
-Configure MediaMTX to relay VNC streams and audio:
+Configure MediaMTX to relay VNC streams and audio using hostname:
 
 ```yaml
 paths:
   # Monitor 1
   vnc_screen1:
-    source: vnc://192.168.1.100:5900
+    source: vnc://workstation-1:5900
     sourceProtocol: vnc
     
   # Monitor 2
   vnc_screen2:
-    source: vnc://192.168.1.100:5901
+    source: vnc://workstation-1:5901
     sourceProtocol: vnc
     
   # Monitor 3
   vnc_screen3:
-    source: vnc://192.168.1.100:5902
+    source: vnc://workstation-1:5902
     sourceProtocol: vnc
     
   # Shared audio
+  audio_stream:
+    source: rtsp://workstation-1:6900/audio
+    sourceProtocol: rtsp
+```
+
+**Legacy IP-based configuration** (still supported):
+```yaml
+paths:
+  vnc_screen1:
+    source: vnc://192.168.1.100:5900
+    sourceProtocol: vnc
+  vnc_screen2:
+    source: vnc://192.168.1.100:5901
+    sourceProtocol: vnc
+  vnc_screen3:
+    source: vnc://192.168.1.100:5902
+    sourceProtocol: vnc
   audio_stream:
     source: rtsp://192.168.1.100:6900/audio
     sourceProtocol: rtsp
@@ -131,8 +150,8 @@ Response:
 {
   "servers": [
     {
-      "vnc_url": "vnc://192.168.1.100:5900",
-      "audio_url": "rtsp://192.168.1.100:6900/audio",
+      "vnc_url": "vnc://workstation-1:5900",
+      "audio_url": "rtsp://workstation-1:6900/audio",
       "port": 5900,
       "audio_port": 6900,
       "clients_connected": 0,
@@ -141,10 +160,11 @@ Response:
       "width": 1920,
       "height": 1080,
       "position_x": 0,
-      "position_y": 0
+      "position_y": 0,
+      "hostname": "workstation-1"
     },
     {
-      "vnc_url": "vnc://192.168.1.100:5901",
+      "vnc_url": "vnc://workstation-1:5901",
       "audio_url": null,
       "port": 5901,
       "audio_port": null,
@@ -154,10 +174,11 @@ Response:
       "width": 1920,
       "height": 1080,
       "position_x": 1920,
-      "position_y": 0
+      "position_y": 0,
+      "hostname": "workstation-1"
     }
   ],
-  "audio_url": "rtsp://192.168.1.100:6900/audio"
+  "audio_url": "rtsp://workstation-1:6900/audio"
 }
 ```
 

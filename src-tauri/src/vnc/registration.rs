@@ -14,6 +14,7 @@ pub struct ScreencastRegistration {
     pub vnc_url: String,
     pub audio_url: Option<String>,
     pub hostname: String,
+    pub unique_id: String,
     pub registered_at: String,
 }
 
@@ -26,18 +27,24 @@ pub async fn register_vnc_with_clever_service(
 ) -> Result<ScreencastRegistration> {
     info!("📡 Registering VNC server with clever-service at {}", clever_service_url);
 
-    // Get local IP address
+    // Use hostname as unique identifier for URLs instead of IP address
+    // This allows the system to use hostname-based resolution which is more stable
+    // and works with mediamtx stream routing
+    let unique_id = hostname.to_string();
+    
+    // Get local IP address as fallback for backward compatibility
     let local_ip = match local_ip_address::local_ip() {
         Ok(ip) => ip.to_string(),
         Err(e) => {
-            warn!("Failed to get local IP: {}, using localhost", e);
-            "localhost".to_string()
+            warn!("Failed to get local IP: {}, using localhost as fallback", e);
+            "127.0.0.1".to_string()
         }
     };
 
-    // Build VNC and audio URLs
-    let vnc_url = format!("vnc://{}:{}", local_ip, vnc_port);
-    let audio_url = audio_port.map(|port| format!("rtsp://{}:{}/audio", local_ip, port));
+    // Build VNC and audio URLs using hostname instead of IP address
+    // This allows mediamtx and other services to use unique identifiers
+    let vnc_url = format!("vnc://{}:{}", hostname, vnc_port);
+    let audio_url = audio_port.map(|port| format!("rtsp://{}:{}/audio", hostname, port));
 
     // Build registration payload
     #[derive(Serialize)]
@@ -45,6 +52,8 @@ pub async fn register_vnc_with_clever_service(
         vnc_url: String,
         audio_url: Option<String>,
         hostname: String,
+        unique_id: String,
+        fallback_ip: String,
         r#type: String,
     }
 
@@ -52,6 +61,8 @@ pub async fn register_vnc_with_clever_service(
         vnc_url: vnc_url.clone(),
         audio_url: audio_url.clone(),
         hostname: hostname.to_string(),
+        unique_id: unique_id.clone(),
+        fallback_ip: local_ip.clone(),
         r#type: "vnc-kvm".to_string(),
     };
 
@@ -75,14 +86,17 @@ pub async fn register_vnc_with_clever_service(
                             vnc_url: vnc_url.clone(),
                             audio_url: audio_url.clone(),
                             hostname: hostname.to_string(),
+                            unique_id: unique_id.clone(),
                             registered_at: chrono::Utc::now().to_rfc3339(),
                         };
                         
                         info!("✅ Successfully registered with clever-service (ID: {})", resp.id);
+                        info!("   Unique ID: {}", unique_id);
                         info!("   VNC URL: {}", vnc_url);
                         if let Some(ref audio) = audio_url {
                             info!("   Audio URL: {}", audio);
                         }
+                        info!("   Fallback IP: {}", local_ip);
                         
                         Ok(registration)
                     }
@@ -147,9 +161,10 @@ mod tests {
     fn test_screencast_registration_serialization() {
         let registration = ScreencastRegistration {
             id: 123,
-            vnc_url: "vnc://192.168.1.100:5900".to_string(),
-            audio_url: Some("rtsp://192.168.1.100:5901/audio".to_string()),
-            hostname: "test-host".to_string(),
+            vnc_url: "vnc://workstation-1:5900".to_string(),
+            audio_url: Some("rtsp://workstation-1:5901/audio".to_string()),
+            hostname: "workstation-1".to_string(),
+            unique_id: "workstation-1".to_string(),
             registered_at: "2024-01-01T00:00:00Z".to_string(),
         };
 

@@ -425,6 +425,7 @@ pub struct VncServerInfo {
     pub height: usize,
     pub position_x: i32,
     pub position_y: i32,
+    pub hostname: String,
 }
 
 /// VNC servers information for multi-monitor setup
@@ -531,12 +532,19 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
         Ok(mut vnc_server) => {
             match vnc_server.start().await {
                 Ok(_) => {
+                    // Get hostname for URL generation
+                    let hostname = gethostname::gethostname()
+                        .to_string_lossy()
+                        .to_string();
+                    
+                    // Get local IP as fallback
                     let local_ip = match local_ip() {
                         Ok(ip) => ip.to_string(),
-                        Err(_) => "localhost".to_string(),
+                        Err(_) => hostname.clone(),
                     };
 
-                    let vnc_url = format!("vnc://{}:{}", local_ip, config.port);
+                    // Use hostname in VNC URL instead of IP address
+                    let vnc_url = format!("vnc://{}:{}", hostname, config.port);
                     let audio_url = vnc_server.get_audio_url();
                     let clients_connected = vnc_server.get_client_count();
                     
@@ -549,6 +557,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
                     }
 
                     info!("✅ VNC server started successfully");
+                    info!("   Hostname: {}", hostname);
                     info!("   VNC URL: {}", vnc_url);
                     info!("   Monitor: {} ({}x{}) at ({}, {})", 
                           monitor_name, monitor_width, monitor_height,
@@ -556,6 +565,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
                     if let Some(ref audio) = audio_url {
                         info!("   Audio URL: {}", audio);
                     }
+                    info!("   Fallback IP: {}", local_ip);
 
                     Ok(VncServerInfo {
                         vnc_url,
@@ -569,6 +579,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
                         height: monitor_height,
                         position_x: monitor_position_x,
                         position_y: monitor_position_y,
+                        hostname: hostname.clone(),
                     })
                 }
                 Err(e) => {
