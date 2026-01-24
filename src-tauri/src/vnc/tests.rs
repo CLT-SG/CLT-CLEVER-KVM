@@ -76,6 +76,21 @@ mod audio_tests {
     }
 
     #[test]
+    fn test_separate_audio_stream_with_hostname() {
+        let result = SeparateAudioStream::new_with_hostname(5901, "workstation-1");
+        assert!(result.is_ok());
+        
+        if let Ok(stream) = result {
+            let url = stream.get_stream_url();
+            assert!(url.contains("workstation-1"));
+            assert!(url.contains("5901"));
+            assert!(url.contains("rtsp://"));
+            assert!(url.ends_with("/audio"));
+            assert!(!stream.is_running());
+        }
+    }
+
+    #[test]
     fn test_rfb_audio_extension_creation() {
         let result = RfbAudioExtension::new(48000, 2);
         assert!(result.is_ok());
@@ -259,9 +274,10 @@ mod registration_tests {
     fn test_screencast_registration_serialization() {
         let registration = ScreencastRegistration {
             id: 123,
-            vnc_url: "vnc://192.168.1.100:5900".to_string(),
-            audio_url: Some("rtsp://192.168.1.100:5901/audio".to_string()),
-            hostname: "test-host".to_string(),
+            vnc_url: "vnc://workstation-1:5900".to_string(),
+            audio_url: Some("rtsp://workstation-1:5901/audio".to_string()),
+            hostname: "workstation-1".to_string(),
+            unique_id: "workstation-1".to_string(),
             registered_at: "2024-01-01T00:00:00Z".to_string(),
         };
 
@@ -270,9 +286,9 @@ mod registration_tests {
         
         if let Ok(json_str) = json {
             assert!(json_str.contains("123"));
-            assert!(json_str.contains("vnc://192.168.1.100:5900"));
-            assert!(json_str.contains("rtsp://192.168.1.100:5901/audio"));
-            assert!(json_str.contains("test-host"));
+            assert!(json_str.contains("vnc://workstation-1:5900"));
+            assert!(json_str.contains("rtsp://workstation-1:5901/audio"));
+            assert!(json_str.contains("workstation-1"));
         }
     }
 
@@ -280,9 +296,10 @@ mod registration_tests {
     fn test_screencast_registration_deserialization() {
         let json_str = r#"{
             "id": 456,
-            "vnc_url": "vnc://10.0.0.1:5900",
-            "audio_url": "rtsp://10.0.0.1:5901/audio",
-            "hostname": "workstation-1",
+            "vnc_url": "vnc://workstation-2:5900",
+            "audio_url": "rtsp://workstation-2:5901/audio",
+            "hostname": "workstation-2",
+            "unique_id": "workstation-2",
             "registered_at": "2024-01-01T12:00:00Z"
         }"#;
         
@@ -291,9 +308,10 @@ mod registration_tests {
         
         if let Ok(reg) = registration {
             assert_eq!(reg.id, 456);
-            assert_eq!(reg.vnc_url, "vnc://10.0.0.1:5900");
-            assert_eq!(reg.audio_url, Some("rtsp://10.0.0.1:5901/audio".to_string()));
-            assert_eq!(reg.hostname, "workstation-1");
+            assert_eq!(reg.vnc_url, "vnc://workstation-2:5900");
+            assert_eq!(reg.audio_url, Some("rtsp://workstation-2:5901/audio".to_string()));
+            assert_eq!(reg.hostname, "workstation-2");
+            assert_eq!(reg.unique_id, "workstation-2");
         }
     }
 
@@ -301,9 +319,10 @@ mod registration_tests {
     fn test_screencast_registration_without_audio() {
         let registration = ScreencastRegistration {
             id: 789,
-            vnc_url: "vnc://192.168.1.200:5900".to_string(),
+            vnc_url: "vnc://workstation-3:5900".to_string(),
             audio_url: None,
-            hostname: "test-host-2".to_string(),
+            hostname: "workstation-3".to_string(),
+            unique_id: "workstation-3".to_string(),
             registered_at: "2024-01-02T00:00:00Z".to_string(),
         };
 
@@ -312,7 +331,7 @@ mod registration_tests {
         
         if let Ok(json_str) = json {
             assert!(json_str.contains("789"));
-            assert!(json_str.contains("vnc://192.168.1.200:5900"));
+            assert!(json_str.contains("vnc://workstation-3:5900"));
             assert!(json_str.contains("null") || json_str.contains("audio_url"));
         }
     }

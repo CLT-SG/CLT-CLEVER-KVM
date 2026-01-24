@@ -24,7 +24,7 @@ impl SeparateAudioStream {
     pub fn new(port: u16) -> Result<Self> {
         info!("🎵 Creating separate audio stream on port {}", port);
         
-        // Get local IP for stream URL
+        // Get local IP for stream URL as fallback
         let local_ip = match local_ip_address::local_ip() {
             Ok(ip) => {
                 info!("Using local IP for audio stream: {}", ip);
@@ -37,6 +37,19 @@ impl SeparateAudioStream {
         };
 
         let stream_url = format!("rtsp://{}:{}/audio", local_ip, port);
+        
+        Ok(Self {
+            port,
+            running: Arc::new(RwLock::new(false)),
+            stream_url,
+        })
+    }
+
+    /// Create a new separate audio stream with hostname
+    pub fn new_with_hostname(port: u16, hostname: &str) -> Result<Self> {
+        info!("🎵 Creating separate audio stream on port {} with hostname {}", port, hostname);
+        
+        let stream_url = format!("rtsp://{}:{}/audio", hostname, port);
         
         Ok(Self {
             port,
