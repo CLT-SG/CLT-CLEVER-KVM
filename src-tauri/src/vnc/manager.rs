@@ -18,6 +18,7 @@ use crate::core::ScreenCapture;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VncServerInfo {
     pub vnc_url: String,
+    pub websockify_url: String,
     pub audio_url: Option<String>,
     pub monitor_id: usize,
     pub monitor_name: String,
@@ -132,12 +133,14 @@ impl VncServerManager {
         
         // Store VNC server
         let vnc_url = format!("vnc://{}:{}", self.hostname, vnc_port);
+        let websockify_url = format!("ws://{}:{}/websockify", self.hostname, vnc_port);
         let clients_connected = vnc_server.get_client_count();
         
         self.vnc_servers.insert(key, Arc::new(Mutex::new(vnc_server)));
         
         Ok(VncServerInfo {
             vnc_url,
+            websockify_url,
             audio_url,
             monitor_id,
             monitor_name: monitor.name.clone(),
@@ -225,6 +228,7 @@ impl VncServerManager {
                     
                     servers.push(VncServerInfo {
                         vnc_url: format!("vnc://{}:{}", self.hostname, config.port),
+                        websockify_url: format!("ws://{}:{}/websockify", self.hostname, config.port),
                         audio_url: audio_url.clone(),
                         monitor_id,
                         monitor_name: monitor.name.clone(),

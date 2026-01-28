@@ -538,6 +538,7 @@ use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register
 #[derive(Debug, Serialize, Clone)]
 pub struct VncServerInfo {
     pub vnc_url: String,
+    pub websockify_url: String,
     pub audio_url: Option<String>,
     pub port: u16,
     pub audio_port: Option<u16>,
@@ -669,6 +670,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
 
                     // Use hostname in VNC URL instead of IP address
                     let vnc_url = format!("vnc://{}:{}", hostname, config.port);
+                    let websockify_url = format!("ws://{}:{}/websockify", hostname, config.port);
                     let audio_url = vnc_server.get_audio_url();
                     let clients_connected = vnc_server.get_client_count();
                     
@@ -683,6 +685,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
                     info!("✅ VNC server started successfully");
                     info!("   Hostname: {}", hostname);
                     info!("   VNC URL: {}", vnc_url);
+                    info!("   WebSockify URL: {}", websockify_url);
                     info!("   Monitor: {} ({}x{}) at ({}, {})", 
                           monitor_name, monitor_width, monitor_height,
                           monitor_position_x, monitor_position_y);
@@ -693,6 +696,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
 
                     Ok(VncServerInfo {
                         vnc_url,
+                        websockify_url,
                         audio_url,
                         port: config.port,
                         audio_port: config.audio_port,
