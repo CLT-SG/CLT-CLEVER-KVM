@@ -139,12 +139,15 @@ impl WebSocketAudioStreamer {
             // Try to receive audio data with timeout
             match audio_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(audio_data) => {
-                    // Broadcast to all clients
-                    // We need to handle this differently since we can't use retain_mut with async
-                    let mut clients_guard = clients.write();
+                    // Get the list of clients (take ownership temporarily to avoid holding lock across await)
+                    let mut clients_list = {
+                        let mut clients_guard = clients.write();
+                        std::mem::take(&mut *clients_guard)
+                    };
+                    
                     let mut indices_to_remove = Vec::new();
                     
-                    for (idx, client) in clients_guard.iter_mut().enumerate() {
+                    for (idx, client) in clients_list.iter_mut().enumerate() {
                         // Try to send, mark for removal if send fails
                         if let Err(e) = client.send(Message::Binary(audio_data.clone())).await {
                             debug!("Client {} disconnected: {}", idx, e);
@@ -154,7 +157,13 @@ impl WebSocketAudioStreamer {
                     
                     // Remove disconnected clients (in reverse order to maintain indices)
                     for idx in indices_to_remove.into_iter().rev() {
-                        clients_guard.remove(idx);
+                        clients_list.remove(idx);
+                    }
+                    
+                    // Put the clients list back
+                    {
+                        let mut clients_guard = clients.write();
+                        *clients_guard = clients_list;
                     }
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
@@ -192,7 +201,7 @@ impl WebSocketAudioStreamer {
         info!("🎵 Audio config: {:?}", config);
         
         // Create Opus encoder (48kHz, stereo, low delay)
-        let encoder = Encoder::new(48000, Channels::Stereo, Application::LowDelay)
+        let mut encoder = Encoder::new(48000, Channels::Stereo, Application::LowDelay)
             .context("Failed to create Opus encoder")?;
         
         // Get channel sender for audio data
