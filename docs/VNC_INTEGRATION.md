@@ -104,12 +104,34 @@ const vncInfo = await invoke('start_vnc_server', {
 });
 
 console.log('VNC URL:', vncInfo.vnc_url);
+console.log('WebSockify URL:', vncInfo.websockify_url);
 console.log('Audio URL:', vncInfo.audio_url);
 ```
 
 ### 2. Connecting with VNC Clients
 
 **Important**: VNC and audio URLs use hostname for better stability.
+
+#### NoVNC (Browser-based VNC Client)
+
+NoVNC requires a WebSocket connection through websockify. Use the websockify URL:
+
+```
+ws://<hostname>:5900/websockify
+```
+
+Example NoVNC connection:
+```javascript
+// NoVNC connection in browser
+const rfb = new RFB(targetElement, 'ws://workstation-1:5900/websockify', {
+  credentials: { password: '' }
+});
+```
+
+Or using the NoVNC HTML interface:
+```
+http://novnc-server/vnc.html?host=<hostname>&port=5900&path=websockify
+```
 
 #### TigerVNC
 ```bash
@@ -136,6 +158,56 @@ Audio is encoded using Opus codec:
 - **Channels**: 2 (stereo)
 - **Encoding**: Opus (low-latency mode)
 - **Format**: Binary WebSocket messages
+
+### 4. NoVNC Setup and Configuration
+
+#### WebSocket Proxy Requirements
+
+NoVNC requires a WebSocket-to-TCP proxy (websockify) to connect to the native VNC server. The CLT-CLEVER-KVM application provides VNC servers on standard TCP ports (5900+), and you need websockify to bridge the WebSocket connection from the browser to the TCP VNC port.
+
+**Option 1: Using websockify directly**
+
+Install and run websockify:
+```bash
+# Install websockify
+pip install websockify
+
+# Run websockify to proxy port 5900 (Monitor 0)
+websockify --web=/usr/share/novnc 6080 localhost:5900
+
+# Access NoVNC at:
+# http://localhost:6080/vnc.html?host=localhost&port=6080
+```
+
+**Option 2: Using clever-node relay**
+
+The clever-node server can act as a WebSocket relay:
+```javascript
+// clever-node handles the websockify path
+// Connect to: ws://clever-node:5900/websockify
+```
+
+**Option 3: Nginx as WebSocket proxy**
+
+Configure Nginx to proxy WebSocket connections:
+```nginx
+location /websockify {
+    proxy_pass http://localhost:5900;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+#### Multi-Monitor NoVNC Setup
+
+For multiple monitors, each monitor has its own VNC port:
+- Monitor 0: `ws://hostname:5900/websockify`
+- Monitor 1: `ws://hostname:5901/websockify`
+- Monitor 2: `ws://hostname:5902/websockify`
+
+All monitors share the same audio stream:
+- Audio: `ws://hostname:6900/audio`
 
 #### Browser Integration
 
@@ -503,6 +575,7 @@ Returns:
 ```typescript
 interface VncServerInfo {
   vnc_url: string;           // VNC connection URL (e.g., vnc://hostname:5900)
+  websockify_url: string;    // WebSocket URL for NoVNC (e.g., ws://hostname:5900/websockify)
   audio_url?: string;        // Audio WebSocket URL (e.g., ws://hostname:6900/audio)
   monitor_id: number;        // Monitor index (0-based)
   monitor_name: string;      // Monitor display name
