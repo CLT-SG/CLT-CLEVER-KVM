@@ -16,6 +16,7 @@ pub mod audio;
 pub mod audio_websocket;
 pub mod registration;
 pub mod manager;
+pub mod websockify;
 
 #[cfg(test)]
 mod tests;
