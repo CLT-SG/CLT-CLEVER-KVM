@@ -1,6 +1,7 @@
 use xcap::Monitor;
 use log::{info, warn};
 use std::sync::Mutex;
+use anyhow::Result;
 
 // For delta encoding
 #[derive(Clone)]
@@ -54,12 +55,12 @@ impl ScreenCapture {
         self.height
     }
 
-    pub fn new(monitor_index: Option<usize>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(monitor_index: Option<usize>) -> Result<Self> {
         // Get all monitors
-        let monitors = Monitor::all().map_err(|e| format!("Failed to get monitors: {:?}", e))?;
+        let monitors = Monitor::all().map_err(|e| anyhow::anyhow!("Failed to get monitors: {:?}", e))?;
         
         if monitors.is_empty() {
-            return Err("No monitors found".into());
+            return Err(anyhow::anyhow!("No monitors found"));
         }
         
         // Determine which monitor to capture
@@ -76,7 +77,7 @@ impl ScreenCapture {
         };
         
         let monitor = monitors.into_iter().nth(monitor_index)
-            .ok_or_else(|| format!("Monitor index {} not found", monitor_index))?;
+            .ok_or_else(|| anyhow::anyhow!("Monitor index {} not found", monitor_index))?;
         
         let width = monitor.width() as usize;
         let height = monitor.height() as usize;
@@ -116,8 +117,8 @@ impl ScreenCapture {
     }
 
     // Get a list of all available monitors
-    pub fn get_all_monitors() -> Result<Vec<MonitorInfo>, Box<dyn std::error::Error>> {
-        let monitors = Monitor::all().map_err(|e| format!("Failed to get monitors: {:?}", e))?;
+    pub fn get_all_monitors() -> Result<Vec<MonitorInfo>> {
+        let monitors = Monitor::all().map_err(|e| anyhow::anyhow!("Failed to get monitors: {:?}", e))?;
         let mut monitor_infos = Vec::new();
         
         for (idx, monitor) in monitors.iter().enumerate() {
@@ -139,10 +140,10 @@ impl ScreenCapture {
     }
 
     // Enhanced capture_raw method with scaling support for high DPI screens
-    pub fn capture_raw(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    pub fn capture_raw(&mut self) -> Result<Vec<u8>> {
         // Capture screen using xcap
         let image = self.monitor.capture_image()
-            .map_err(|e| format!("Failed to capture screen: {:?}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to capture screen: {:?}", e))?;
         
         // Convert to raw RGBA bytes
         let rgba_buffer = image.into_raw();
@@ -153,7 +154,7 @@ impl ScreenCapture {
         Ok(rgba_buffer)
     }
 
-    pub fn capture_rgba(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    pub fn capture_rgba(&mut self) -> Result<Vec<u8>> {
         // For xcap, capture_raw already returns RGBA
         self.capture_raw()
     }
