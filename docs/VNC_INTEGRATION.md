@@ -727,3 +727,82 @@ For issues, questions, or contributions:
 ## License
 
 This VNC server implementation is part of CLT-CLEVER-KVM and is licensed under the MIT License.
+
+## TLS/WSS Support
+
+For secure WebSocket connections (required by modern browsers in secure contexts):
+
+### Overview
+
+CLT-CLEVER-KVM supports secure WebSocket URLs (wss://) for NoVNC and audio streaming. This is **required** for:
+- NoVNC in HTTPS contexts
+- Modern browser security policies  
+- Production deployments
+- Enterprise environments
+
+### Configuration
+
+1. **Enable TLS URLs in CLT-CLEVER-KVM:**
+
+```typescript
+// From frontend
+await invoke('set_use_tls_urls', { useTls: true });
+```
+
+This changes URL generation:
+- `ws://hostname:6900/audio` → `wss://hostname:6900/audio`
+- `ws://hostname:5900/websockify` → `wss://hostname:5900/websockify`
+
+2. **Set up TLS termination at reverse proxy level** (industry standard approach)
+
+### Quick Setup Examples
+
+#### Nginx
+```nginx
+server {
+    listen 443 ssl;
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+    
+    location /audio {
+        proxy_pass http://localhost:6900;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    
+    location /websockify {
+        proxy_pass http://localhost:5900;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+#### Caddy (Automatic HTTPS)
+```
+your-domain.com {
+    reverse_proxy /audio localhost:6900
+    reverse_proxy /websockify localhost:5900
+}
+```
+
+### Complete TLS Setup Guide
+
+See **[TLS_SETUP.md](./TLS_SETUP.md)** for comprehensive documentation including:
+- Detailed configuration for Nginx, Caddy, HAProxy
+- Let's Encrypt certificate setup
+- Self-signed certificates for development
+- Troubleshooting guide
+- Security best practices
+- Performance tuning
+
+### Why Reverse Proxy?
+
+We use TLS termination at the reverse proxy (industry standard) because:
+- ✅ **Performance**: Proxies are optimized for TLS
+- ✅ **Certificate Management**: Centralized certificate handling
+- ✅ **Flexibility**: Easy to update TLS configurations
+- ✅ **Standard Practice**: Used by AWS, Cloudflare, Google Cloud
+- ✅ **Separation of Concerns**: Application handles logic, proxy handles TLS
