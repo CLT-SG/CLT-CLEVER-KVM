@@ -18,6 +18,7 @@ use anyhow::{Result, Context};
 use log::{info, warn, error, debug};
 use tokio::net::TcpListener;
 use crossbeam_channel::{unbounded, Sender, Receiver};
+use futures_util::SinkExt;
 
 /// WebSocket audio streamer for low-latency audio transmission
 pub struct WebSocketAudioStreamer {
@@ -139,19 +140,22 @@ impl WebSocketAudioStreamer {
             match audio_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(audio_data) => {
                     // Broadcast to all clients
-                    let mut clients = clients.write();
-                    clients.retain_mut(|client| {
-                        // Try to send, remove client if send fails
-                        match futures_util::executor::block_on(
-                            async { client.send(Message::Binary(audio_data.clone())).await }
-                        ) {
-                            Ok(_) => true,
-                            Err(e) => {
-                                debug!("Client disconnected: {}", e);
-                                false
-                            }
+                    // We need to handle this differently since we can't use retain_mut with async
+                    let mut clients_guard = clients.write();
+                    let mut indices_to_remove = Vec::new();
+                    
+                    for (idx, client) in clients_guard.iter_mut().enumerate() {
+                        // Try to send, mark for removal if send fails
+                        if let Err(e) = client.send(Message::Binary(audio_data.clone())).await {
+                            debug!("Client {} disconnected: {}", idx, e);
+                            indices_to_remove.push(idx);
                         }
-                    });
+                    }
+                    
+                    // Remove disconnected clients (in reverse order to maintain indices)
+                    for idx in indices_to_remove.into_iter().rev() {
+                        clients_guard.remove(idx);
+                    }
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     // Normal timeout, continue
