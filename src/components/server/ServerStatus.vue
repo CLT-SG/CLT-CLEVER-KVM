@@ -15,12 +15,22 @@
         </div>
       </div>
       
+      <div v-if="vncInfo.websockify_url" class="info-item">
+        <span class="label">WebSocket URL:</span>
+        <div class="url-display">
+          <code class="url">{{ vncInfo.websockify_url }}</code>
+          <button class="copy-button" @click="copyWebsockifyUrl" title="Copy WebSocket URL">Copy</button>
+        </div>
+        <span class="url-note">For NoVNC browser-based clients</span>
+      </div>
+      
       <div v-if="vncInfo.audio_url" class="info-item">
         <span class="label">Audio URL:</span>
         <div class="url-display">
           <code class="url">{{ vncInfo.audio_url }}</code>
           <button class="copy-button" @click="copyAudioUrl" title="Copy Audio URL">Copy</button>
         </div>
+        <span class="url-note">Shared WebSocket audio stream (Opus encoded)</span>
       </div>
       
       <div class="info-item">
@@ -43,8 +53,11 @@
       
       <div class="connection-help">
         <p><strong>How to connect:</strong></p>
-        <p>Use any VNC client (TigerVNC, RealVNC, etc.) with the address above.</p>
-        <p v-if="vncInfo.vnc_url">Example: <code>vncviewer {{ vncInfo.vnc_url.replace('vnc://', '') || '' }}</code></p>
+        <ul>
+          <li><strong>Desktop VNC clients:</strong> Use the VNC URL with TigerVNC, RealVNC, etc.</li>
+          <li v-if="vncInfo.websockify_url"><strong>Browser (NoVNC):</strong> Use the WebSocket URL</li>
+          <li v-if="vncInfo.audio_url"><strong>Audio:</strong> Separate WebSocket stream on port 6900</li>
+        </ul>
       </div>
     </div>
 
@@ -86,6 +99,12 @@ const props = defineProps({
 function copyAudioUrl() {
   if (props.vncInfo && props.vncInfo.audio_url) {
     navigator.clipboard.writeText(props.vncInfo.audio_url);
+  }
+}
+
+function copyWebsockifyUrl() {
+  if (props.vncInfo && props.vncInfo.websockify_url) {
+    navigator.clipboard.writeText(props.vncInfo.websockify_url);
   }
 }
 </script>
@@ -163,6 +182,15 @@ function copyAudioUrl() {
   flex: 1;
 }
 
+.url-note {
+  display: block;
+  margin-top: 0.25rem;
+  margin-left: 150px;
+  font-size: 0.8rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
 .url {
   flex: 1;
   font-family: 'Courier New', monospace;
@@ -202,16 +230,14 @@ function copyAudioUrl() {
   font-size: 0.9rem;
 }
 
-.connection-help strong {
-  color: #0066cc;
+.connection-help ul {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+  font-size: 0.9rem;
 }
 
-.connection-help code {
-  background-color: #ffffff;
-  padding: 0.2rem 0.4rem;
-  border-radius: 3px;
-  font-family: 'Courier New', monospace;
-  font-size: 0.85rem;
+.connection-help li {
+  margin: 0.5rem 0;
 }
 
 .actions {
