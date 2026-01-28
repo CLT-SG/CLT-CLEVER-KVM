@@ -9,35 +9,39 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
 ### Optimized Low-Latency Design
 
 ```
-┌─────────────────────────────────────┐
-│  CLT-CLEVER-KVM (Tauri/Rust)       │
-│                                     │
-│  ┌──────────────────────────────┐  │
-│  │  Monitor 1 (5900)            │  │
-│  │  - VNC Server (RFB 3.8)      │  │
-│  │  - Position: OS-defined      │  │
-│  └──────────────────────────────┘  │
-│                                     │
-│  ┌──────────────────────────────┐  │
-│  │  Audio WebSocket (6900)      │  │
-│  │  - cpal audio capture        │  │
-│  │  - Opus encoding (48kHz)     │  │
-│  │  - Binary WebSocket          │  │
-│  └──────────────────────────────┘  │
-└─────────────────────────────────────┘
-         ↓ (VNC + WS)
-┌─────────────────────────────────────┐
-│      clever-node (Node.js)          │
-│      - NoVNC WebSocket proxy        │
-│      - Audio WebSocket relay        │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  CLT-CLEVER-KVM (Tauri/Rust)                           │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐ │
+│  │  VNC Servers (Multi-Monitor)                      │ │
+│  │  ┌────────────────┐  ┌────────────────┐          │ │
+│  │  │ Monitor 0      │  │ Monitor 1      │  ...     │ │
+│  │  │ Port: 5900     │  │ Port: 5901     │          │ │
+│  │  │ RFB 3.8        │  │ RFB 3.8        │          │ │
+│  │  └────────────────┘  └────────────────┘          │ │
+│  └───────────────────────────────────────────────────┘ │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐ │
+│  │  Shared Audio WebSocket (Port 6900)               │ │
+│  │  - Single streamer for all monitors               │ │
+│  │  - cpal audio capture (system audio)              │ │
+│  │  - Opus encoding (48kHz stereo, low-latency)      │ │
+│  │  - Binary WebSocket protocol                      │ │
+│  └───────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+         ↓ (VNC: 5900+, WebSocket: 6900)
+┌─────────────────────────────────────────────────────────┐
+│      clever-node (Node.js) - Optional Relay             │
+│      - NoVNC WebSocket proxy                            │
+│      - Audio WebSocket relay                            │
+└─────────────────────────────────────────────────────────┘
          ↓ (Browser WebSocket)
-┌─────────────────────────────────────┐
-│    Browser (NoVNC Client)           │
-│    - NoVNC for video/input          │
-│    - Web Audio API for audio        │
-│    - Cursor: Local rendering        │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│    Browser (NoVNC Client)                               │
+│    - NoVNC for video/input                              │
+│    - Web Audio API for audio                            │
+│    - Native cursor rendering (planned)                  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ## Performance Metrics
@@ -51,7 +55,8 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
 
 - **Standard VNC Protocol**: Implements RFB 3.8 protocol for compatibility with all standard VNC clients
 - **Multi-Monitor Support**: Automatic port allocation (5900, 5901, 5902...) for multiple monitors
-- **WebSocket Audio Streaming**: Low-latency Opus-encoded audio over WebSocket
+- **Shared Audio Streaming**: Single WebSocket audio stream on port 6900 shared across all monitors
+- **WebSocket Audio**: Low-latency Opus-encoded audio over WebSocket (5-30ms latency)
 - **Multi-Client Support**: Handle up to 10 simultaneous VNC client connections per monitor
 - **Auto-Registration**: Automatically registers with clever-service API for video wall integration
 - **Input Control**: Full keyboard and mouse control with VNC key code translation
@@ -224,14 +229,16 @@ The VNC server uses these default settings (configurable in `tauri.conf.json`):
 
 ### Port Configuration
 
-- **VNC Port** (default: 5900): TCP port for VNC connections
-- **Audio Port** (default: 5901): TCP port for RTSP audio stream
+- **VNC Ports**: Starting at 5900 for the first monitor, incrementing by 1 for each additional monitor (5900, 5901, 5902, etc.)
+- **Audio Port** (default: 6900): Single shared WebSocket port for audio streaming across all monitors
 
-Standard VNC ports:
-- 5900: Display :0
-- 5901: Display :1
-- 5902: Display :2
+Standard VNC port mapping:
+- 5900: Monitor 0 (Display :0)
+- 5901: Monitor 1 (Display :1)
+- 5902: Monitor 2 (Display :2)
 - etc.
+
+**Important**: All monitors share the same audio stream on port 6900 since system audio is identical across displays.
 
 ### Monitor Selection
 
@@ -266,7 +273,7 @@ Payload (Version 3.0+):
 ```json
 {
   "vnc_url": "vnc://workstation-1:5900",
-  "audio_url": "rtsp://workstation-1:5901/audio",
+  "audio_url": "ws://workstation-1:6900/audio",
   "hostname": "workstation-1",
   "unique_id": "workstation-1",
   "fallback_ip": "192.168.1.100",
@@ -278,7 +285,7 @@ Payload (Version 3.0+):
 ```json
 {
   "vnc_url": "vnc://192.168.1.100:5900",
-  "audio_url": "rtsp://192.168.1.100:5901/audio",
+  "audio_url": "ws://192.168.1.100:6900/audio",
   "hostname": "workstation-1",
   "type": "vnc-kvm"
 }
@@ -425,10 +432,24 @@ netstat -ano | findstr :5900
 
 ### Audio Stream Not Available
 
-**Issue**: RTSP audio URL returns 404
+**Issue**: WebSocket audio connection fails
 - **Check**: Audio is enabled in VNC server settings
-- **Check**: Audio port is not blocked by firewall
-- **Solution**: Verify audio_port is set and audio stream is started
+- **Check**: Audio port 6900 is not blocked by firewall
+- **Check**: System audio loopback is configured (see note below)
+- **Solution**: Verify audio streaming is enabled and network is accessible
+
+**System Audio Loopback Configuration:**
+
+The audio streamer captures system audio input. To stream system audio output (what you hear), you need to configure audio loopback:
+
+- **Linux (PulseAudio)**: Use monitor devices
+  ```bash
+  pactl load-module module-loopback
+  ```
+  
+- **Windows**: Use WASAPI loopback mode or third-party tools like VB-Audio Virtual Cable
+
+- **macOS**: Use BlackHole or similar virtual audio device
 
 ### High Latency
 
@@ -474,18 +495,24 @@ await invoke('start_vnc_server', {
   port?: number,           // VNC port (default: 5900)
   monitor?: number,        // Monitor index (default: 0)
   enableAudio: boolean,    // Enable audio stream
-  audioPort?: number,      // Audio port (default: 5901)
+  audioPort?: number,      // Audio port (default: 6900, shared across all monitors)
 }): Promise<VncServerInfo>
 ```
 
 Returns:
 ```typescript
 interface VncServerInfo {
-  vnc_url: string;
-  audio_url?: string;
-  port: number;
-  audio_port?: number;
-  clients_connected: number;
+  vnc_url: string;           // VNC connection URL (e.g., vnc://hostname:5900)
+  audio_url?: string;        // Audio WebSocket URL (e.g., ws://hostname:6900/audio)
+  monitor_id: number;        // Monitor index (0-based)
+  monitor_name: string;      // Monitor display name
+  position_x: number;        // Monitor X position
+  position_y: number;        // Monitor Y position
+  width: number;             // Monitor width in pixels
+  height: number;            // Monitor height in pixels
+  vnc_port: number;          // VNC port number
+  audio_port?: number;       // Audio port number (6900 when audio is enabled)
+  clients_connected: number; // Number of connected VNC clients
 }
 ```
 
@@ -562,8 +589,12 @@ interface ScreencastRegistration {
 
 4. **Test Audio**
    ```bash
-   # Play audio stream with VLC
-   vlc rtsp://localhost:5901/audio
+   # Connect to WebSocket audio stream
+   # Use a WebSocket client or browser to connect to:
+   ws://localhost:6900/audio
+   
+   # The stream delivers Opus-encoded audio frames
+   # that need to be decoded for playback
    ```
 
 ### Unit Tests
