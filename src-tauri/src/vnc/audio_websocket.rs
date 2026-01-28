@@ -2,6 +2,7 @@
 //! 
 //! Implements low-latency audio streaming over WebSocket with Opus encoding.
 //! Replaces the previous RTSP-based audio architecture for reduced latency.
+//! Supports both plain WebSocket (ws://) and secure WebSocket (wss://) connections.
 //!
 //! # Architecture Notes
 //! 
@@ -19,22 +20,37 @@ use log::{info, warn, error, debug};
 use tokio::net::TcpListener;
 use crossbeam_channel::{unbounded, Sender, Receiver};
 use futures_util::SinkExt;
+use native_tls::{Identity, TlsAcceptor};
+use tokio_native_tls::TlsAcceptor as TokioTlsAcceptor;
 
 /// WebSocket audio streamer for low-latency audio transmission
 pub struct WebSocketAudioStreamer {
     port: u16,
     clients: Arc<RwLock<Vec<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>>>>,
+    tls_clients: Arc<RwLock<Vec<tokio_tungstenite::WebSocketStream<tokio_native_tls::TlsStream<tokio::net::TcpStream>>>>>,
     running: Arc<RwLock<bool>>,
     stream_url: String,
     audio_tx: Option<Sender<Vec<u8>>>,
     listener_handle: Option<tokio::task::JoinHandle<()>>,
     broadcaster_handle: Option<tokio::task::JoinHandle<()>>,
+    use_tls: bool,
+    tls_acceptor: Option<TokioTlsAcceptor>,
 }
 
 impl WebSocketAudioStreamer {
     /// Create a new WebSocket audio streamer
     pub fn new(port: u16, hostname: Option<String>) -> Result<Self> {
-        info!("🎵 Creating WebSocket audio streamer on port {}", port);
+        Self::new_with_tls(port, hostname, false, None)
+    }
+    
+    /// Create a new WebSocket audio streamer with optional TLS support
+    pub fn new_with_tls(
+        port: u16,
+        hostname: Option<String>,
+        use_tls: bool,
+        tls_cert_key: Option<(String, String)>,
+    ) -> Result<Self> {
+        info!("🎵 Creating WebSocket audio streamer on port {} (TLS: {})", port, use_tls);
         
         let host = hostname.unwrap_or_else(|| {
             gethostname::gethostname()
@@ -42,17 +58,51 @@ impl WebSocketAudioStreamer {
                 .unwrap_or_else(|_| "localhost".into())
         });
         
-        let stream_url = format!("ws://{}:{}/audio", host, port);
+        let protocol = if use_tls { "wss" } else { "ws" };
+        let stream_url = format!("{}://{}:{}/audio", protocol, host, port);
+        
+        // Set up TLS acceptor if TLS is enabled
+        let tls_acceptor = if use_tls {
+            let (cert_pem, key_pem) = tls_cert_key
+                .ok_or_else(|| anyhow::anyhow!("TLS enabled but no certificate provided"))?;
+            
+            // Create PKCS#12 identity from PEM cert and key
+            let identity = Self::create_identity(&cert_pem, &key_pem)?;
+            let acceptor = TlsAcceptor::new(identity)
+                .context("Failed to create TLS acceptor")?;
+            
+            Some(TokioTlsAcceptor::from(acceptor))
+        } else {
+            None
+        };
         
         Ok(Self {
             port,
             clients: Arc::new(RwLock::new(Vec::new())),
+            tls_clients: Arc::new(RwLock::new(Vec::new())),
             running: Arc::new(RwLock::new(false)),
             stream_url,
             audio_tx: None,
             listener_handle: None,
             broadcaster_handle: None,
+            use_tls,
+            tls_acceptor,
         })
+    }
+    
+    /// Create a PKCS#12 identity from PEM certificate and key
+    fn create_identity(cert_pem: &str, key_pem: &str) -> Result<Identity> {
+        // Parse PEM to create identity
+        // Note: native-tls requires PKCS#12 format, but we can create it from PEM
+        let cert_data = cert_pem.as_bytes();
+        let key_data = key_pem.as_bytes();
+        
+        // For simplicity, we'll use a helper to convert PEM to PKCS#12
+        // In production, you might want to use a library like openssl for this
+        let identity = Identity::from_pkcs8(cert_data, key_data)
+            .context("Failed to create identity from PEM")?;
+        
+        Ok(identity)
     }
     
     /// Start the WebSocket audio streamer

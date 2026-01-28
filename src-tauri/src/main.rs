@@ -19,6 +19,7 @@ mod app;
 mod core;
 mod lib;
 mod system;
+mod tls;
 mod vnc;
 
 use app::{commands::*, ServerState, APP_NAME};
