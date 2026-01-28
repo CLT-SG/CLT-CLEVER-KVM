@@ -5,8 +5,8 @@
 //! 2. RFB audio extension (optional)
 
 use anyhow::Result;
-use log::{info, warn, error};
-use std::sync::{Arc, Mutex};
+use log::{info, warn};
+use std::sync::Arc;
 use parking_lot::RwLock;
 
 use super::server::VncClient;
@@ -103,6 +103,7 @@ impl SeparateAudioStream {
     }
 
     /// Check if the stream is running
+    #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
         let running = self.running.read();
         *running
@@ -117,12 +118,14 @@ impl Drop for SeparateAudioStream {
 
 /// RFB Audio Extension implementation (optional)
 /// Implements Replit-style audio extension for VNC
+#[allow(dead_code)]
 pub struct RfbAudioExtension {
     enabled: bool,
     sample_rate: u32,
     channels: u16,
 }
 
+#[allow(dead_code)]
 impl RfbAudioExtension {
     /// Create a new RFB audio extension
     pub fn new(sample_rate: u32, channels: u16) -> Result<Self> {

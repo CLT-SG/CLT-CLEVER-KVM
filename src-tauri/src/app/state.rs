@@ -30,9 +30,11 @@ pub struct MonitorInfo {
 
 /// Shared state for VNC server management
 pub struct ServerState {
+    #[allow(dead_code)]
     pub runtime: Runtime,
     pub port: u16,
     pub running: bool,
+    #[allow(dead_code)]
     pub options: ServerOptions,
     pub vnc_servers: Vec<Arc<Mutex<VncKvmServer>>>,
     pub vnc_registration: Option<ScreencastRegistration>,

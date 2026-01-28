@@ -101,7 +101,7 @@
         "entitlements": null
       },
       "deb": {
-        "depends": ["libwebkit2gtk-4.0-37", "libgtk-3-0", "ffmpeg", "libavcodec59", "libavformat59", "libavutil57", "libswscale6", "libswresample4"]
+        "depends": ["libwebkit2gtk-4.0-37", "libgtk-3-0", "ffmpeg"]
       },
       "appimage": {
         "bundleMediaFramework": false

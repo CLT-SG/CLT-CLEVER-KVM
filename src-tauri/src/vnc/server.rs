@@ -21,6 +21,7 @@ pub struct VncServerConfig {
     pub enable_audio: bool,
     pub audio_port: Option<u16>,
     pub max_clients: usize,
+    #[allow(dead_code)]
     pub password: Option<String>,
     pub hostname: Option<String>,
 }
@@ -41,6 +42,7 @@ impl Default for VncServerConfig {
 
 /// VNC client connection information
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct VncClient {
     pub id: usize,
     pub address: String,
