@@ -313,11 +313,6 @@ impl WebSocketAudioStreamer {
         *self.running.read()
     }
     
-    /// Get the WebSocket stream URL
-    pub fn get_stream_url(&self) -> String {
-        self.stream_url.clone()
-    }
-    
     /// Get the number of connected clients
     pub fn get_client_count(&self) -> usize {
         self.clients.read().len()

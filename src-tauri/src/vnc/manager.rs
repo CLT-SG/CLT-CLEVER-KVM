@@ -62,6 +62,11 @@ impl VncServerManager {
         self.use_tls_urls = use_tls;
     }
     
+    /// Get current TLS URL setting
+    pub fn get_use_tls_urls(&self) -> bool {
+        self.use_tls_urls
+    }
+    
     /// Start a VNC server for a specific monitor
     pub async fn start_vnc_server(
         &mut self,

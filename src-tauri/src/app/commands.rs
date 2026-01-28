@@ -982,3 +982,22 @@ pub fn set_use_tls_urls(
         Err("VNC manager not initialized".to_string())
     }
 }
+
+/// Get current TLS URL setting
+#[tauri::command]
+pub fn get_use_tls_urls(
+    app_handle: tauri::AppHandle,
+) -> Result<bool, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    // Get TLS setting from VNC manager if it exists
+    if let Some(manager) = &state.vnc_manager {
+        let manager_guard = manager.read();
+        Ok(manager_guard.get_use_tls_urls())
+    } else {
+        // Default to false if manager not initialized
+        Ok(false)
+    }
+}
