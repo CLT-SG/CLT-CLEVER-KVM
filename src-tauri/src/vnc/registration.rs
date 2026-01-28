@@ -44,7 +44,7 @@ pub async fn register_vnc_with_clever_service(
     // Build VNC and audio URLs using hostname instead of IP address
     // This allows mediamtx and other services to use unique identifiers
     let vnc_url = format!("vnc://{}:{}", hostname, vnc_port);
-    let audio_url = audio_port.map(|port| format!("rtsp://{}:{}/audio", hostname, port));
+    let audio_url = audio_port.map(|port| format!("ws://{}:{}/audio", hostname, port));
 
     // Build registration payload
     #[derive(Serialize)]
