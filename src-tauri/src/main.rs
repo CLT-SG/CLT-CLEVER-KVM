@@ -52,7 +52,8 @@ fn main() {
             start_vnc_servers_all,
             stop_vnc_server,
             get_vnc_status,
-            register_with_clever_service
+            register_with_clever_service,
+            set_use_tls_urls
         ])
         .setup(|_app| {
             info!("✅ Tauri application initialized successfully");

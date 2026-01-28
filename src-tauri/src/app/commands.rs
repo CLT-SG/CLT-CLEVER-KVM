@@ -959,3 +959,26 @@ pub async fn register_with_clever_service(
         }
     }
 }
+
+/// Enable or disable TLS URLs (wss:// instead of ws://)
+#[tauri::command]
+pub fn set_use_tls_urls(
+    app_handle: tauri::AppHandle,
+    use_tls: bool,
+) -> Result<(), String> {
+    info!("🔒 Setting TLS URLs to: {}", use_tls);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    // Update VNC manager if it exists
+    if let Some(manager) = &state.vnc_manager {
+        let mut manager_guard = manager.write();
+        manager_guard.set_use_tls_urls(use_tls);
+        info!("✅ TLS URL setting updated");
+        Ok(())
+    } else {
+        Err("VNC manager not initialized".to_string())
+    }
+}

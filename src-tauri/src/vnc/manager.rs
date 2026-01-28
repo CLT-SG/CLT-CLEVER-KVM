@@ -36,6 +36,7 @@ pub struct VncServerManager {
     vnc_servers: HashMap<String, Arc<Mutex<VncKvmServer>>>,
     audio_streamer: Option<Arc<Mutex<WebSocketAudioStreamer>>>,
     hostname: String,
+    use_tls_urls: bool, // Flag to generate wss:// URLs instead of ws://
 }
 
 impl VncServerManager {
@@ -51,7 +52,14 @@ impl VncServerManager {
             vnc_servers: HashMap::new(),
             audio_streamer: None,
             hostname,
+            use_tls_urls: false, // Default to non-TLS URLs
         })
+    }
+    
+    /// Enable or disable TLS URLs (wss:// instead of ws://)
+    pub fn set_use_tls_urls(&mut self, use_tls: bool) {
+        info!("🔒 Setting TLS URLs: {}", use_tls);
+        self.use_tls_urls = use_tls;
     }
     
     /// Start a VNC server for a specific monitor
@@ -112,9 +120,12 @@ impl VncServerManager {
         // Start shared audio streamer if enabled and not already running
         let audio_url = if let Some(audio_port) = audio_port {
             if self.audio_streamer.is_none() {
-                // Create and start the shared audio streamer
-                let mut audio_streamer = WebSocketAudioStreamer::new(audio_port, Some(self.hostname.clone()))
-                    .context("Failed to create audio streamer")?;
+                // Create and start the shared audio streamer with TLS URL support
+                let mut audio_streamer = WebSocketAudioStreamer::new_with_tls_url(
+                    audio_port,
+                    Some(self.hostname.clone()),
+                    self.use_tls_urls
+                ).context("Failed to create audio streamer")?;
                 
                 audio_streamer.start().await
                     .context("Failed to start audio streamer")?;
@@ -126,14 +137,15 @@ impl VncServerManager {
             
             // Get URL from the shared audio streamer
             self.audio_streamer.as_ref()
-                .map(|streamer| streamer.lock().get_stream_url())
+                .map(|streamer| streamer.lock().get_stream_url().to_string())
         } else {
             None
         };
         
         // Store VNC server
         let vnc_url = format!("vnc://{}:{}", self.hostname, vnc_port);
-        let websockify_url = format!("ws://{}:{}/websockify", self.hostname, vnc_port);
+        let ws_protocol = if self.use_tls_urls { "wss" } else { "ws" };
+        let websockify_url = format!("{}://{}:{}/websockify", ws_protocol, self.hostname, vnc_port);
         let clients_connected = vnc_server.get_client_count();
         
         self.vnc_servers.insert(key, Arc::new(Mutex::new(vnc_server)));
@@ -224,11 +236,13 @@ impl VncServerManager {
                 if let Some(monitor) = monitors.get(monitor_id) {
                     // Get URL from the shared audio streamer
                     let audio_url = self.audio_streamer.as_ref()
-                        .map(|streamer| streamer.lock().get_stream_url());
+                        .map(|streamer| streamer.lock().get_stream_url().to_string());
+                    
+                    let ws_protocol = if self.use_tls_urls { "wss" } else { "ws" };
                     
                     servers.push(VncServerInfo {
                         vnc_url: format!("vnc://{}:{}", self.hostname, config.port),
-                        websockify_url: format!("ws://{}:{}/websockify", self.hostname, config.port),
+                        websockify_url: format!("{}://{}:{}/websockify", ws_protocol, self.hostname, config.port),
                         audio_url: audio_url.clone(),
                         monitor_id,
                         monitor_name: monitor.name.clone(),
