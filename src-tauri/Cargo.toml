@@ -63,6 +63,11 @@ rcgen = "0.12" # Self-signed certificate generation
 dirs = "5.0" # Platform-specific directories
 time = "0.3" # Time/date handling for certificate validity
 
+# Structured logging
+tracing = "0.1" # Structured logging framework
+tracing-subscriber = { version = "0.3", features = ["env-filter"] } # Log formatting and filtering
+tracing-appender = "0.2" # File-based logging with rotation
+
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!
