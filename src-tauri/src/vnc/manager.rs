@@ -206,7 +206,7 @@ impl VncServerManager {
     pub fn get_status(&self) -> Vec<VncServerInfo> {
         let mut servers = Vec::new();
         
-        for (key, vnc_server) in &self.vnc_servers {
+        for (_key, vnc_server) in &self.vnc_servers {
             let server = vnc_server.lock();
             
             if !server.is_running() {
@@ -225,7 +225,7 @@ impl VncServerManager {
                     
                     servers.push(VncServerInfo {
                         vnc_url: format!("vnc://{}:{}", self.hostname, config.port),
-                        audio_url,
+                        audio_url: audio_url.clone(),
                         monitor_id,
                         monitor_name: monitor.name.clone(),
                         position_x: monitor.position_x,

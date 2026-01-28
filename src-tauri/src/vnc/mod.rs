@@ -21,7 +21,5 @@ pub mod manager;
 mod tests;
 
 pub use server::{VncKvmServer, VncServerConfig};
-pub use audio::SeparateAudioStream;
-pub use audio_websocket::WebSocketAudioStreamer;
 pub use manager::VncServerManager;
 pub use registration::{register_vnc_with_clever_service, ScreencastRegistration};
