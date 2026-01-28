@@ -12,6 +12,7 @@ use serde::{Serialize, Deserialize};
 
 use super::server::{VncKvmServer, VncServerConfig};
 use super::audio_websocket::WebSocketAudioStreamer;
+use super::websockify::WebsockifyProxy;
 use crate::core::ScreenCapture;
 
 /// Information about a VNC server instance
@@ -34,9 +35,11 @@ pub struct VncServerInfo {
 /// Manager for multiple VNC servers and audio streamers
 pub struct VncServerManager {
     vnc_servers: HashMap<String, Arc<Mutex<VncKvmServer>>>,
+    websockify_proxies: HashMap<String, Arc<Mutex<WebsockifyProxy>>>,
     audio_streamer: Option<Arc<Mutex<WebSocketAudioStreamer>>>,
     hostname: String,
     use_tls_urls: bool, // Flag to generate wss:// URLs instead of ws://
+    websockify_base_port: u16, // Base port for websockify proxies (default: 6080)
 }
 
 impl VncServerManager {
@@ -50,9 +53,11 @@ impl VncServerManager {
         
         Ok(Self {
             vnc_servers: HashMap::new(),
+            websockify_proxies: HashMap::new(),
             audio_streamer: None,
             hostname,
             use_tls_urls: false, // Default to non-TLS URLs
+            websockify_base_port: 6080, // Default websockify base port
         })
     }
     
@@ -122,6 +127,22 @@ impl VncServerManager {
         
         info!("✅ VNC server started on port {}", vnc_port);
         
+        // Start websockify proxy for this VNC server
+        let websockify_port = self.websockify_base_port + monitor_id as u16;
+        let mut websockify_proxy = WebsockifyProxy::new(
+            websockify_port,
+            "localhost".to_string(),
+            vnc_port
+        );
+        
+        websockify_proxy.start().await
+            .context("Failed to start websockify proxy")?;
+        
+        info!("✅ Websockify proxy started on port {} → VNC port {}", websockify_port, vnc_port);
+        
+        // Store websockify proxy
+        self.websockify_proxies.insert(key.clone(), Arc::new(Mutex::new(websockify_proxy)));
+        
         // Start shared audio streamer if enabled and not already running
         let audio_url = if let Some(audio_port) = audio_port {
             if self.audio_streamer.is_none() {
@@ -150,7 +171,8 @@ impl VncServerManager {
         // Store VNC server
         let vnc_url = format!("vnc://{}:{}", self.hostname, vnc_port);
         let ws_protocol = if self.use_tls_urls { "wss" } else { "ws" };
-        let websockify_url = format!("{}://{}:{}/websockify", ws_protocol, self.hostname, vnc_port);
+        // Use websockify port for WebSocket URL
+        let websockify_url = format!("{}://{}:{}/", ws_protocol, self.hostname, websockify_port);
         let clients_connected = vnc_server.get_client_count();
         
         self.vnc_servers.insert(key, Arc::new(Mutex::new(vnc_server)));
@@ -187,6 +209,14 @@ impl VncServerManager {
             warn!("VNC server for monitor {} not found", monitor_id);
         }
         
+        // Stop websockify proxy if exists
+        if let Some(websockify_proxy) = self.websockify_proxies.remove(&key) {
+            let mut proxy = websockify_proxy.lock();
+            proxy.stop().await
+                .context("Failed to stop websockify proxy")?;
+            info!("✅ Websockify proxy stopped for monitor {}", monitor_id);
+        }
+        
         // If no more VNC servers are running, stop the shared audio streamer
         if self.vnc_servers.is_empty() {
             if let Some(audio_streamer) = self.audio_streamer.take() {
@@ -208,6 +238,14 @@ impl VncServerManager {
             let mut server = vnc_server.lock();
             if let Err(e) = server.stop().await {
                 error!("Failed to stop VNC server: {}", e);
+            }
+        }
+        
+        // Stop all websockify proxies
+        for (_, websockify_proxy) in self.websockify_proxies.drain() {
+            let mut proxy = websockify_proxy.lock();
+            if let Err(e) = proxy.stop().await {
+                error!("Failed to stop websockify proxy: {}", e);
             }
         }
         
@@ -244,10 +282,11 @@ impl VncServerManager {
                         .map(|streamer| streamer.lock().get_stream_url().to_string());
                     
                     let ws_protocol = if self.use_tls_urls { "wss" } else { "ws" };
+                    let websockify_port = self.websockify_base_port + monitor_id as u16;
                     
                     servers.push(VncServerInfo {
                         vnc_url: format!("vnc://{}:{}", self.hostname, config.port),
-                        websockify_url: format!("{}://{}:{}/websockify", ws_protocol, self.hostname, config.port),
+                        websockify_url: format!("{}://{}:{}/", ws_protocol, self.hostname, websockify_port),
                         audio_url: audio_url.clone(),
                         monitor_id,
                         monitor_name: monitor.name.clone(),
