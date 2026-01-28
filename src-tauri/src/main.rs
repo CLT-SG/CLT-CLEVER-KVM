@@ -24,7 +24,6 @@ mod vnc;
 use app::{commands::*, ServerState, APP_NAME};
 use log::info;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
 
 fn main() {
     // Initialize logging first
@@ -54,7 +53,7 @@ fn main() {
             get_vnc_status,
             register_with_clever_service
         ])
-        .setup(|app| {
+        .setup(|_app| {
             info!("✅ Tauri application initialized successfully");
             info!("🎮 VNC KVM application ready - use the interface to start VNC servers");
             

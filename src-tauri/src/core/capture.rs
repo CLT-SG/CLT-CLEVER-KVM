@@ -1,10 +1,10 @@
 use xcap::Monitor;
-use std::hash::Hash;
 use log::{info, warn};
 use std::sync::Mutex;
 
 // For delta encoding
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct ScreenTile {
     pub data: Vec<u8>,
     pub hash: u64,
@@ -19,7 +19,9 @@ pub struct MonitorInfo {
     pub height: usize,
     pub position_x: i32,
     pub position_y: i32,
+    #[allow(dead_code)]
     pub scale_factor: f64,  // Added for HiDPI displays
+    #[allow(dead_code)]
     pub rotation: i32,      // 0, 90, 180, 270 degrees
 }
 
@@ -27,13 +29,18 @@ pub struct ScreenCapture {
     monitor: Monitor,
     width: usize,
     height: usize,
+    #[allow(dead_code)]
     tile_size: usize,
+    #[allow(dead_code)]
     tiles: Vec<ScreenTile>,
     previous_frame: Option<Vec<u8>>,
     // Track quality based on network conditions
+    #[allow(dead_code)]
     adaptive_quality: Mutex<u8>,
     // Monitor info
+    #[allow(dead_code)]
     monitor_id: String,
+    #[allow(dead_code)]
     is_primary: bool,
 }
 
@@ -151,25 +158,30 @@ impl ScreenCapture {
         self.capture_raw()
     }
 
+    #[allow(dead_code)]
     pub fn dimensions(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 
+    #[allow(dead_code)]
     pub fn tile_dimensions(&self) -> (usize, usize, usize) {
         let tiles_x = (self.width + self.tile_size - 1) / self.tile_size;
         let tiles_y = (self.height + self.tile_size - 1) / self.tile_size;
         (tiles_x, tiles_y, self.tile_size)
     }
 
+    #[allow(dead_code)]
     pub fn update_quality(&self, quality: u8) {
         let mut current_quality = self.adaptive_quality.lock().unwrap();
         *current_quality = quality.clamp(1, 100);
     }
     
+    #[allow(dead_code)]
     pub fn get_monitor_id(&self) -> &str {
         &self.monitor_id
     }
     
+    #[allow(dead_code)]
     pub fn is_primary(&self) -> bool {
         self.is_primary
     }

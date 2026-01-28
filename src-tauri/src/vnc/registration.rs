@@ -119,6 +119,7 @@ pub async fn register_vnc_with_clever_service(
 }
 
 /// Unregister from clever-service
+#[allow(dead_code)]
 pub async fn unregister_from_clever_service(
     clever_service_url: &str,
     registration_id: u64,

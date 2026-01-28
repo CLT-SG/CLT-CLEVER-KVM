@@ -124,6 +124,7 @@ pub struct TouchPoint {
     pub pressure: Option<f32>,
 }
 
+#[allow(dead_code)]
 pub struct InputHandler {
     enigo: Enigo,
     // Monitor positions and dimensions for multi-monitor support
@@ -134,6 +135,7 @@ pub struct InputHandler {
     key_repeat_interval: Duration,
 }
 
+#[allow(dead_code)]
 impl InputHandler {
     pub fn new() -> Self {
         Self {
