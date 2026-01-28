@@ -55,20 +55,22 @@
       <h4>VNC Audio Settings</h4>
       <label>
         <input type="checkbox" v-model="settings.enableAudio" :disabled="disabled" @change="$emit('settings-changed')" />
-        Enable Audio Streaming (via RTSP on port {{ settings.audioPort }})
+        Enable Audio Streaming (via WebSocket on port {{ settings.audioPort }})
       </label>
       
       <div v-if="settings.enableAudio" class="slider-group">
         <label for="audio-port">Audio Port:</label>
         <input type="number" id="audio-port" v-model.number="settings.audioPort"
                min="1024" max="65535" :disabled="disabled" @change="$emit('settings-changed')" />
+        <span class="help-text-inline">Shared across all monitors</span>
       </div>
     </div>
     
     <div class="help-text">
-      <p><strong>Note:</strong> VNC protocol (RFB 3.8) is used for video streaming. Audio is streamed separately via RTSP.</p>
+      <p><strong>Note:</strong> VNC protocol (RFB 3.8) is used for video streaming. Audio is streamed separately via WebSocket (Opus encoded).</p>
       <p>Connect using any VNC client such as TigerVNC, RealVNC, or VNC Viewer.</p>
-      <p><strong>MediaMTX:</strong> MediaMTX is an optional streaming server that can relay VNC streams for video wall deployments.</p>
+      <p><strong>Audio:</strong> All monitors share a single audio stream on port 6900 since system audio is the same across all displays.</p>
+      <p><strong>MediaMTX:</strong> MediaMTX is an optional streaming server that can relay VNC streams for video wall deployments (deprecated for audio).</p>
     </div>
   </div>
 </template>
@@ -227,6 +229,13 @@ function handleAutoScanChange() {
   padding: 0.4rem;
   border: 1px solid #ddd;
   border-radius: 4px;
+}
+
+.help-text-inline {
+  margin-left: 0.5rem;
+  font-size: 0.85rem;
+  color: #666;
+  font-style: italic;
 }
 
 .help-text {

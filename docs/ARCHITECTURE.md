@@ -72,12 +72,13 @@ CLT-CLEVER-KVM is a high-performance, multi-monitor VNC server application built
 
 **Responsibilities:**
 - Manage multiple VNC server instances (one per monitor)
-- Coordinate audio streamers with VNC servers
+- Manage shared audio streamer for all monitors
 - Handle automatic port allocation
 - Provide unified status reporting
 
 **Key Features:**
-- Port allocation: VNC starts at 5900+n, Audio at 6900+n
+- Port allocation: VNC starts at 5900+n, Audio shared on 6900
+- Single shared audio streamer for all monitors (since audio is system-wide)
 - Monitor detection and configuration
 - Lifecycle management (start/stop/status)
 
@@ -242,14 +243,16 @@ VNC Server Parser
 
 ### Port Allocation Strategy
 
-Each monitor gets its own VNC server and audio streamer:
+Each monitor gets its own VNC server but all share a single audio stream:
 
 | Monitor | VNC Port | Audio Port | URL Pattern |
 |---------|----------|------------|-------------|
 | 0       | 5900     | 6900       | vnc://host:5900, ws://host:6900/audio |
-| 1       | 5901     | 6901       | vnc://host:5901, ws://host:6901/audio |
-| 2       | 5902     | 6902       | vnc://host:5902, ws://host:6902/audio |
-| N       | 5900+N   | 6900+N     | vnc://host:5900+N, ws://host:6900+N/audio |
+| 1       | 5901     | 6900       | vnc://host:5901, ws://host:6900/audio |
+| 2       | 5902     | 6900       | vnc://host:5902, ws://host:6900/audio |
+| N       | 5900+N   | 6900       | vnc://host:5900+N, ws://host:6900/audio |
+
+**Note:** All monitors share port 6900 for audio since system audio is the same across all displays.
 
 ### Monitor Configuration
 
@@ -362,7 +365,7 @@ VncServerConfig {
     port: 5900,              // VNC port
     monitor_id: 0,           // Monitor index
     enable_audio: true,      // Enable audio streaming
-    audio_port: Some(6900),  // Audio WebSocket port
+    audio_port: Some(6900),  // Shared audio WebSocket port (all monitors use 6900)
     max_clients: 10,         // Max concurrent clients
     password: None,          // No password (future)
     hostname: Some("host"),  // Hostname for URLs

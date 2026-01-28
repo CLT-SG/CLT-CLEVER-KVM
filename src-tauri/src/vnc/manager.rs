@@ -33,7 +33,7 @@ pub struct VncServerInfo {
 /// Manager for multiple VNC servers and audio streamers
 pub struct VncServerManager {
     vnc_servers: HashMap<String, Arc<Mutex<VncKvmServer>>>,
-    audio_streamers: HashMap<String, Arc<Mutex<WebSocketAudioStreamer>>>,
+    audio_streamer: Option<Arc<Mutex<WebSocketAudioStreamer>>>,
     hostname: String,
 }
 
@@ -48,7 +48,7 @@ impl VncServerManager {
         
         Ok(Self {
             vnc_servers: HashMap::new(),
-            audio_streamers: HashMap::new(),
+            audio_streamer: None,
             hostname,
         })
     }
@@ -75,8 +75,9 @@ impl VncServerManager {
         
         // Calculate ports
         let vnc_port = vnc_port.unwrap_or(5900 + monitor_id as u16);
+        // All monitors share the same audio port 6900
         let audio_port = if enable_audio {
-            Some(audio_port.unwrap_or(6900 + monitor_id as u16))
+            Some(audio_port.unwrap_or(6900))
         } else {
             None
         };
@@ -107,20 +108,24 @@ impl VncServerManager {
         
         info!("✅ VNC server started on port {}", vnc_port);
         
-        // Start audio streamer if enabled
+        // Start shared audio streamer if enabled and not already running
         let audio_url = if let Some(audio_port) = audio_port {
-            let mut audio_streamer = WebSocketAudioStreamer::new(audio_port, Some(self.hostname.clone()))
-                .context("Failed to create audio streamer")?;
+            if self.audio_streamer.is_none() {
+                // Create and start the shared audio streamer
+                let mut audio_streamer = WebSocketAudioStreamer::new(audio_port, Some(self.hostname.clone()))
+                    .context("Failed to create audio streamer")?;
+                
+                audio_streamer.start().await
+                    .context("Failed to start audio streamer")?;
+                
+                info!("✅ Shared audio streamer started on port {}", audio_port);
+                
+                self.audio_streamer = Some(Arc::new(Mutex::new(audio_streamer)));
+            }
             
-            audio_streamer.start().await
-                .context("Failed to start audio streamer")?;
-            
-            info!("✅ Audio streamer started on port {}", audio_port);
-            
-            let url = audio_streamer.get_stream_url();
-            self.audio_streamers.insert(key.clone(), Arc::new(Mutex::new(audio_streamer)));
-            
-            Some(url)
+            // Get URL from the shared audio streamer
+            self.audio_streamer.as_ref()
+                .map(|streamer| streamer.lock().get_stream_url())
         } else {
             None
         };
@@ -152,13 +157,6 @@ impl VncServerManager {
         
         let key = format!("monitor_{}", monitor_id);
         
-        // Stop audio streamer if exists
-        if let Some(audio_streamer) = self.audio_streamers.remove(&key) {
-            let mut streamer = audio_streamer.lock();
-            streamer.stop();
-            info!("✅ Audio streamer stopped for monitor {}", monitor_id);
-        }
-        
         // Stop VNC server if exists
         if let Some(vnc_server) = self.vnc_servers.remove(&key) {
             let mut server = vnc_server.lock();
@@ -169,6 +167,15 @@ impl VncServerManager {
             warn!("VNC server for monitor {} not found", monitor_id);
         }
         
+        // If no more VNC servers are running, stop the shared audio streamer
+        if self.vnc_servers.is_empty() {
+            if let Some(audio_streamer) = self.audio_streamer.take() {
+                let mut streamer = audio_streamer.lock();
+                streamer.stop();
+                info!("✅ Shared audio streamer stopped (no more VNC servers)");
+            }
+        }
+        
         Ok(())
     }
     
@@ -176,18 +183,19 @@ impl VncServerManager {
     pub async fn stop_all(&mut self) -> Result<()> {
         info!("🛑 Stopping all VNC servers");
         
-        // Stop all audio streamers
-        for (_, audio_streamer) in self.audio_streamers.drain() {
-            let mut streamer = audio_streamer.lock();
-            streamer.stop();
-        }
-        
         // Stop all VNC servers
         for (_, vnc_server) in self.vnc_servers.drain() {
             let mut server = vnc_server.lock();
             if let Err(e) = server.stop().await {
                 error!("Failed to stop VNC server: {}", e);
             }
+        }
+        
+        // Stop the shared audio streamer
+        if let Some(audio_streamer) = self.audio_streamer.take() {
+            let mut streamer = audio_streamer.lock();
+            streamer.stop();
+            info!("✅ Shared audio streamer stopped");
         }
         
         info!("✅ All VNC servers stopped");
@@ -211,7 +219,8 @@ impl VncServerManager {
             // Get monitor info
             if let Ok(monitors) = ScreenCapture::get_all_monitors() {
                 if let Some(monitor) = monitors.get(monitor_id) {
-                    let audio_url = self.audio_streamers.get(key)
+                    // Get URL from the shared audio streamer
+                    let audio_url = self.audio_streamer.as_ref()
                         .map(|streamer| streamer.lock().get_stream_url());
                     
                     servers.push(VncServerInfo {
@@ -224,7 +233,7 @@ impl VncServerManager {
                         width: monitor.width,
                         height: monitor.height,
                         vnc_port: config.port,
-                        audio_port: config.audio_port,
+                        audio_port: if audio_url.is_some() { Some(6900) } else { None },
                         clients_connected: server.get_client_count(),
                     });
                 }

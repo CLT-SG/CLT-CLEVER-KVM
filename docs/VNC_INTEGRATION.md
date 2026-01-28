@@ -59,19 +59,21 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
 
 ## Multi-Monitor Setup
 
-CLT-CLEVER-KVM automatically manages VNC servers for multiple monitors:
+CLT-CLEVER-KVM automatically manages VNC servers for multiple monitors with a **shared audio stream**:
 
-- **Monitor 0 (First)**: VNC port 5900, Audio WebSocket port 6900
-- **Monitor 1 (Second)**: VNC port 5901, Audio WebSocket port 6901
-- **Monitor 2 (Third)**: VNC port 5902, Audio WebSocket port 6902
-- **Monitor N**: VNC port 5900+N, Audio WebSocket port 6900+N
+- **Monitor 0 (First)**: VNC port 5900, Audio WebSocket port 6900 (shared)
+- **Monitor 1 (Second)**: VNC port 5901, Audio WebSocket port 6900 (shared)
+- **Monitor 2 (Third)**: VNC port 5902, Audio WebSocket port 6900 (shared)
+- **Monitor N**: VNC port 5900+N, Audio WebSocket port 6900 (shared)
 
 Note: Monitors are zero-indexed in the code (0, 1, 2...) but may be referred to as "Monitor 1", "Monitor 2", etc. in user interfaces.
+
+**Important:** All monitors share a single audio stream on port 6900 since system audio is the same across all displays.
 
 Each monitor gets its own independent VNC server with:
 - Exact positioning from OS display settings (x, y coordinates)
 - Exact sizing from native monitor resolution (width, height)
-- Separate audio stream for synchronized playback
+- Access to the shared audio stream for synchronized playback
 
 ## Quick Start
 
