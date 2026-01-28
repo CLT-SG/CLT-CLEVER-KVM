@@ -6,6 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tracing::{info, debug, warn, error};
 
 /// WebSocket-to-VNC proxy (websockify implementation)
 /// 
@@ -44,44 +45,67 @@ impl WebsockifyProxy {
     /// Start the websockify proxy
     pub async fn start(&mut self) -> Result<()> {
         if self.running.load(Ordering::SeqCst) {
+            warn!("Websockify proxy already running on port {}", self.listen_port);
             return Ok(());
         }
 
         let addr = format!("0.0.0.0:{}", self.listen_port);
+        
+        info!("Starting websockify proxy...");
+        info!("  Listen address: {}", addr);
+        info!("  Target VNC: {}:{}", self.target_host, self.target_port);
+        
         let listener = TcpListener::bind(&addr)
             .await
             .context(format!("Failed to bind websockify to {}", addr))?;
 
-        info!("Websockify proxy listening on {} → {}:{}", 
-              addr, self.target_host, self.target_port);
+        info!("✓ Websockify proxy successfully started on port {}", self.listen_port);
+        info!("  Ready to accept NoVNC connections");
 
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let target_host = self.target_host.clone();
         let target_port = self.target_port;
+        let listen_port = self.listen_port;
 
         let handle = tokio::spawn(async move {
+            let mut connection_count = 0u32;
+            
             while running.load(Ordering::SeqCst) {
                 match listener.accept().await {
-                    Ok((stream, addr)) => {
-                        debug!("WebSocket connection from {}", addr);
+                    Ok((stream, client_addr)) => {
+                        connection_count += 1;
+                        info!("New WebSocket connection #{} from {} on port {}", 
+                              connection_count, client_addr, listen_port);
+                        
                         let target_host = target_host.clone();
+                        let conn_id = connection_count;
                         
                         tokio::spawn(async move {
-                            if let Err(e) = handle_websocket_connection(
+                            debug!("Connection #{}: Upgrading to WebSocket protocol", conn_id);
+                            
+                            match handle_websocket_connection(
                                 stream,
-                                target_host,
-                                target_port
+                                target_host.clone(),
+                                target_port,
+                                conn_id
                             ).await {
-                                debug!("WebSocket connection error: {}", e);
+                                Ok(_) => {
+                                    info!("Connection #{}: Closed cleanly", conn_id);
+                                }
+                                Err(e) => {
+                                    warn!("Connection #{}: Error: {}", conn_id, e);
+                                }
                             }
                         });
                     }
                     Err(e) => {
-                        error!("Failed to accept WebSocket connection: {}", e);
+                        error!("Failed to accept WebSocket connection on port {}: {}", listen_port, e);
                     }
                 }
             }
+            
+            info!("Websockify proxy on port {} stopped accepting connections", listen_port);
         });
 
         self.listener_handle = Some(handle);
@@ -91,16 +115,18 @@ impl WebsockifyProxy {
     /// Stop the websockify proxy
     pub async fn stop(&mut self) -> Result<()> {
         if !self.running.load(Ordering::SeqCst) {
+            debug!("Websockify proxy on port {} already stopped", self.listen_port);
             return Ok(());
         }
 
+        info!("Stopping websockify proxy on port {}...", self.listen_port);
         self.running.store(false, Ordering::SeqCst);
 
         if let Some(handle) = self.listener_handle.take() {
             handle.abort();
         }
 
-        info!("Websockify proxy stopped on port {}", self.listen_port);
+        info!("✓ Websockify proxy on port {} stopped successfully", self.listen_port);
         Ok(())
     }
 
@@ -128,84 +154,115 @@ async fn handle_websocket_connection(
     stream: TcpStream,
     target_host: String,
     target_port: u16,
+    conn_id: u32,
 ) -> Result<()> {
     // Upgrade HTTP connection to WebSocket
+    debug!("Connection #{}: Upgrading HTTP to WebSocket", conn_id);
+    
     let ws_stream = accept_async(stream)
         .await
         .context("Failed to accept WebSocket")?;
 
-    debug!("WebSocket connection established, connecting to VNC server {}:{}", 
-           target_host, target_port);
+    debug!("Connection #{}: WebSocket established, connecting to VNC at {}:{}", 
+           conn_id, target_host, target_port);
 
     // Connect to VNC server
     let vnc_stream = TcpStream::connect(format!("{}:{}", target_host, target_port))
         .await
-        .context("Failed to connect to VNC server")?;
+        .context(format!("Failed to connect to VNC server at {}:{}", target_host, target_port))?;
 
-    debug!("Connected to VNC server {}:{}", target_host, target_port);
+    info!("Connection #{}: Successfully connected to VNC server {}:{}", 
+          conn_id, target_host, target_port);
+    debug!("Connection #{}: Starting bidirectional data forwarding", conn_id);
 
     // Split WebSocket and TCP streams
     let (mut ws_write, mut ws_read) = ws_stream.split();
     let (mut vnc_read, mut vnc_write) = vnc_stream.into_split();
 
     // Forward WebSocket → VNC (browser to server)
+    let conn_id_ws = conn_id;
     let ws_to_vnc = tokio::spawn(async move {
+        let mut byte_count = 0u64;
+        let mut message_count = 0u32;
+        
         while let Some(msg) = ws_read.next().await {
             match msg {
                 Ok(Message::Binary(data)) => {
                     // Forward binary data to VNC server
+                    let data_len = data.len();
+                    byte_count += data_len as u64;
+                    message_count += 1;
+                    
+                    if message_count % 100 == 0 {
+                        debug!("Connection #{}: WS→VNC forwarded {} messages ({} bytes)", 
+                               conn_id_ws, message_count, byte_count);
+                    }
+                    
                     if let Err(e) = vnc_write.write_all(&data).await {
-                        debug!("Error writing to VNC server: {}", e);
+                        warn!("Connection #{}: Error writing to VNC server: {}", conn_id_ws, e);
                         break;
                     }
                 }
-                Ok(Message::Close(_)) => {
-                    debug!("WebSocket close received");
+                Ok(Message::Close(frame)) => {
+                    info!("Connection #{}: WebSocket close received: {:?}", conn_id_ws, frame);
                     break;
                 }
-                Ok(Message::Ping(data)) => {
-                    // Respond to ping with pong
-                    debug!("WebSocket ping received");
-                    // Note: ws_write is moved, so we can't respond here
-                    // The ping/pong is usually handled automatically
+                Ok(Message::Ping(_)) => {
+                    debug!("Connection #{}: WebSocket ping received", conn_id_ws);
                 }
                 Ok(_) => {
                     // Ignore text, pong, and other message types
                 }
                 Err(e) => {
-                    debug!("WebSocket read error: {}", e);
+                    warn!("Connection #{}: WebSocket read error: {}", conn_id_ws, e);
                     break;
                 }
             }
         }
-        debug!("WS→VNC forwarding stopped");
+        
+        info!("Connection #{}: WS→VNC forwarding stopped (total: {} messages, {} bytes)", 
+              conn_id_ws, message_count, byte_count);
     });
 
     // Forward VNC → WebSocket (server to browser)
+    let conn_id_vnc = conn_id;
     let vnc_to_ws = tokio::spawn(async move {
         let mut buffer = vec![0u8; 8192];
+        let mut byte_count = 0u64;
+        let mut message_count = 0u32;
+        
         loop {
             match vnc_read.read(&mut buffer).await {
                 Ok(0) => {
                     // Connection closed
-                    debug!("VNC server closed connection");
+                    info!("Connection #{}: VNC server closed connection", conn_id_vnc);
                     break;
                 }
                 Ok(n) => {
                     // Forward data to WebSocket as binary message
                     let data = buffer[..n].to_vec();
+                    byte_count += n as u64;
+                    message_count += 1;
+                    
+                    if message_count % 100 == 0 {
+                        debug!("Connection #{}: VNC→WS forwarded {} messages ({} bytes)", 
+                               conn_id_vnc, message_count, byte_count);
+                    }
+                    
                     if let Err(e) = ws_write.send(Message::Binary(data)).await {
-                        debug!("Error sending to WebSocket: {}", e);
+                        warn!("Connection #{}: Error sending to WebSocket: {}", conn_id_vnc, e);
                         break;
                     }
                 }
                 Err(e) => {
-                    debug!("Error reading from VNC server: {}", e);
+                    warn!("Connection #{}: Error reading from VNC server: {}", conn_id_vnc, e);
                     break;
                 }
             }
         }
-        debug!("VNC→WS forwarding stopped");
+        
+        info!("Connection #{}: VNC→WS forwarding stopped (total: {} messages, {} bytes)", 
+              conn_id_vnc, message_count, byte_count);
         
         // Send close message
         let _ = ws_write.send(Message::Close(None)).await;
@@ -214,14 +271,14 @@ async fn handle_websocket_connection(
     // Wait for either direction to finish
     tokio::select! {
         _ = ws_to_vnc => {
-            debug!("WS→VNC task completed");
+            debug!("Connection #{}: WS→VNC task completed", conn_id);
         }
         _ = vnc_to_ws => {
-            debug!("VNC→WS task completed");
+            debug!("Connection #{}: VNC→WS task completed", conn_id);
         }
     }
 
-    debug!("WebSocket connection closed");
+    debug!("Connection #{}: Bidirectional forwarding ended", conn_id);
     Ok(())
 }
 
