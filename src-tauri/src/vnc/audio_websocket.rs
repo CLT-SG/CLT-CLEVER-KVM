@@ -2,6 +2,12 @@
 //! 
 //! Implements low-latency audio streaming over WebSocket with Opus encoding.
 //! Replaces the previous RTSP-based audio architecture for reduced latency.
+//!
+//! # Architecture Notes
+//! 
+//! This implementation uses a lockless queue to avoid blocking in audio callbacks.
+//! Audio data flows from the capture callback through a crossbeam channel to an
+//! async task that handles WebSocket broadcasting.
 
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -11,26 +17,23 @@ use parking_lot::RwLock;
 use anyhow::{Result, Context};
 use log::{info, warn, error, debug};
 use tokio::net::TcpListener;
+use crossbeam_channel::{unbounded, Sender, Receiver};
 
 /// WebSocket audio streamer for low-latency audio transmission
 pub struct WebSocketAudioStreamer {
     port: u16,
-    encoder: Arc<RwLock<Encoder>>,
     clients: Arc<RwLock<Vec<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>>>>,
     running: Arc<RwLock<bool>>,
-    #[allow(dead_code)]
     stream_url: String,
+    audio_tx: Option<Sender<Vec<u8>>>,
+    listener_handle: Option<tokio::task::JoinHandle<()>>,
+    broadcaster_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl WebSocketAudioStreamer {
     /// Create a new WebSocket audio streamer
     pub fn new(port: u16, hostname: Option<String>) -> Result<Self> {
         info!("🎵 Creating WebSocket audio streamer on port {}", port);
-        
-        // Initialize Opus encoder for low-latency audio
-        // 48kHz sample rate, stereo, low delay mode
-        let encoder = Encoder::new(48000, Channels::Stereo, Application::LowDelay)
-            .context("Failed to create Opus encoder")?;
         
         let host = hostname.unwrap_or_else(|| {
             gethostname::gethostname()
@@ -42,30 +45,27 @@ impl WebSocketAudioStreamer {
         
         Ok(Self {
             port,
-            encoder: Arc::new(RwLock::new(encoder)),
             clients: Arc::new(RwLock::new(Vec::new())),
             running: Arc::new(RwLock::new(false)),
             stream_url,
+            audio_tx: None,
+            listener_handle: None,
+            broadcaster_handle: None,
         })
     }
     
     /// Start the WebSocket audio streamer
     pub async fn start(&mut self) -> Result<()> {
-        // Check if already running
+        // Check if already running with atomic-like operation
         {
-            let running = self.running.read();
+            let mut running = self.running.write();
             if *running {
                 return Err(anyhow::anyhow!("Audio streamer is already running"));
             }
+            *running = true;
         }
         
         info!("🚀 Starting WebSocket audio streamer on port {}", self.port);
-        
-        // Mark as running
-        {
-            let mut running = self.running.write();
-            *running = true;
-        }
         
         // Start WebSocket server for client connections
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await
@@ -74,31 +74,25 @@ impl WebSocketAudioStreamer {
         info!("✅ WebSocket audio server listening on 0.0.0.0:{}", self.port);
         info!("📡 Audio stream available at: {}", self.stream_url);
         
+        // Create channel for audio data
+        let (audio_tx, audio_rx) = unbounded::<Vec<u8>>();
+        self.audio_tx = Some(audio_tx);
+        
+        // Start WebSocket broadcaster task
+        let clients = self.clients.clone();
+        let running = self.running.clone();
+        let broadcaster_handle = tokio::spawn(async move {
+            Self::broadcast_audio_task(audio_rx, clients, running).await;
+        });
+        self.broadcaster_handle = Some(broadcaster_handle);
+        
         // Accept client connections in background
         let clients = self.clients.clone();
         let running = self.running.clone();
-        tokio::spawn(async move {
-            while *running.read() {
-                match listener.accept().await {
-                    Ok((stream, addr)) => {
-                        debug!("New WebSocket connection from: {}", addr);
-                        match accept_async(stream).await {
-                            Ok(ws_stream) => {
-                                info!("✅ WebSocket client connected: {}", addr);
-                                clients.write().push(ws_stream);
-                            }
-                            Err(e) => {
-                                warn!("Failed to accept WebSocket connection: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error accepting TCP connection: {}", e);
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    }
-                }
-            }
+        let listener_handle = tokio::spawn(async move {
+            Self::accept_clients_task(listener, clients, running).await;
         });
+        self.listener_handle = Some(listener_handle);
         
         // Start audio capture and streaming
         self.start_audio_capture()?;
@@ -106,29 +100,104 @@ impl WebSocketAudioStreamer {
         Ok(())
     }
     
+    /// Task to accept WebSocket client connections
+    async fn accept_clients_task(
+        listener: TcpListener,
+        clients: Arc<RwLock<Vec<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>>>>,
+        running: Arc<RwLock<bool>>,
+    ) {
+        while *running.read() {
+            match listener.accept().await {
+                Ok((stream, addr)) => {
+                    debug!("New WebSocket connection from: {}", addr);
+                    match accept_async(stream).await {
+                        Ok(ws_stream) => {
+                            info!("✅ WebSocket client connected: {}", addr);
+                            clients.write().push(ws_stream);
+                        }
+                        Err(e) => {
+                            warn!("Failed to accept WebSocket connection: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Error accepting TCP connection: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }
+    
+    /// Task to broadcast audio data to all connected clients
+    async fn broadcast_audio_task(
+        audio_rx: Receiver<Vec<u8>>,
+        clients: Arc<RwLock<Vec<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>>>>,
+        running: Arc<RwLock<bool>>,
+    ) {
+        while *running.read() {
+            // Try to receive audio data with timeout
+            match audio_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(audio_data) => {
+                    // Broadcast to all clients
+                    let mut clients = clients.write();
+                    clients.retain_mut(|client| {
+                        // Try to send, remove client if send fails
+                        match futures_util::executor::block_on(
+                            async { client.send(Message::Binary(audio_data.clone())).await }
+                        ) {
+                            Ok(_) => true,
+                            Err(e) => {
+                                debug!("Client disconnected: {}", e);
+                                false
+                            }
+                        }
+                    });
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    // Normal timeout, continue
+                    continue;
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                    // Channel closed, exit loop
+                    break;
+                }
+            }
+        }
+    }
+    
     /// Start capturing and streaming audio
+    /// 
+    /// Note: System audio loopback must be configured separately.
+    /// - Linux: Use PulseAudio monitor devices
+    /// - Windows: Use WASAPI loopback or third-party tools
+    /// - macOS: Use BlackHole or similar virtual audio devices
     fn start_audio_capture(&self) -> Result<()> {
         let host = cpal::default_host();
         
-        // Try to get default output device (for loopback/system audio)
-        let device = host.default_output_device()
-            .or_else(|| host.default_input_device())
-            .context("No audio device available")?;
+        // Try to get an input device (microphone by default)
+        // For system audio, platform-specific loopback configuration is required
+        let device = host.default_input_device()
+            .context("No input audio device available")?;
         
         info!("🎤 Using audio device: {}", device.name().unwrap_or_else(|_| "Unknown".to_string()));
         
         // Get default config
-        let config = device.default_output_config()
-            .or_else(|_| device.default_input_config())
+        let config = device.default_input_config()
             .context("Failed to get audio config")?;
         
         info!("🎵 Audio config: {:?}", config);
         
-        // Build audio stream
-        let clients = self.clients.clone();
-        let encoder = self.encoder.clone();
+        // Create Opus encoder (48kHz, stereo, low delay)
+        let encoder = Encoder::new(48000, Channels::Stereo, Application::LowDelay)
+            .context("Failed to create Opus encoder")?;
+        
+        // Get channel sender for audio data
+        let audio_tx = self.audio_tx.clone()
+            .ok_or_else(|| anyhow::anyhow!("Audio channel not initialized"))?;
+        
         let running = self.running.clone();
         
+        // Build audio stream with non-blocking callback
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => {
                 let config: cpal::StreamConfig = config.into();
@@ -139,27 +208,16 @@ impl WebSocketAudioStreamer {
                             return;
                         }
                         
-                        // Encode with Opus
-                        let mut output = vec![0u8; 4000];
-                        let encoder = encoder.read();
+                        // Encode with Opus (dedicated encoder per callback)
+                        // Use a larger buffer to accommodate various frame sizes
+                        let mut output = vec![0u8; 8000];
                         match encoder.encode_float(data, &mut output) {
                             Ok(size) => {
                                 output.truncate(size);
                                 
-                                // Broadcast to all connected clients
-                                let mut clients = clients.write();
-                                clients.retain_mut(|client| {
-                                    // Try to send, remove client if send fails
-                                    match futures_util::executor::block_on(
-                                        async { client.send(Message::Binary(output.clone())).await }
-                                    ) {
-                                        Ok(_) => true,
-                                        Err(e) => {
-                                            debug!("Client disconnected: {}", e);
-                                            false
-                                        }
-                                    }
-                                });
+                                // Send to broadcaster task via non-blocking channel
+                                // If send fails (channel full), skip this frame
+                                let _ = audio_tx.try_send(output);
                             }
                             Err(e) => {
                                 warn!("Failed to encode audio: {}", e);
@@ -177,7 +235,8 @@ impl WebSocketAudioStreamer {
         
         stream.play().context("Failed to start audio stream")?;
         
-        // Keep stream alive by forgetting it (it will be cleaned up when the process exits)
+        // Keep stream alive - it will be dropped when the struct is dropped
+        // Note: This is intentionally leaked to keep the audio stream running
         std::mem::forget(stream);
         
         info!("✅ Audio capture started");
@@ -189,8 +248,22 @@ impl WebSocketAudioStreamer {
     pub fn stop(&mut self) {
         info!("🛑 Stopping WebSocket audio streamer");
         
-        let mut running = self.running.write();
-        *running = false;
+        // Set running to false to signal tasks to stop
+        {
+            let mut running = self.running.write();
+            *running = false;
+        }
+        
+        // Drop audio channel sender to signal broadcaster task
+        self.audio_tx = None;
+        
+        // Wait for tasks to complete (with timeout)
+        if let Some(handle) = self.listener_handle.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.broadcaster_handle.take() {
+            handle.abort();
+        }
         
         // Disconnect all clients
         let mut clients = self.clients.write();

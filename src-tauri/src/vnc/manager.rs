@@ -246,12 +246,6 @@ impl VncServerManager {
     }
 }
 
-impl Default for VncServerManager {
-    fn default() -> Self {
-        Self::new().expect("Failed to create VNC server manager")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

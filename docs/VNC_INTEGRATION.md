@@ -15,7 +15,6 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
 │  ┌──────────────────────────────┐  │
 │  │  Monitor 1 (5900)            │  │
 │  │  - VNC Server (RFB 3.8)      │  │
-│  │  - Native cursor encoding    │  │
 │  │  - Position: OS-defined      │  │
 │  └──────────────────────────────┘  │
 │                                     │
@@ -37,7 +36,7 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
 │    Browser (NoVNC Client)           │
 │    - NoVNC for video/input          │
 │    - Web Audio API for audio        │
-│    - Native cursor rendering        │
+│    - Cursor: Local rendering        │
 └─────────────────────────────────────┘
 ```
 
@@ -62,10 +61,12 @@ CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implemen
 
 CLT-CLEVER-KVM automatically manages VNC servers for multiple monitors:
 
-- **Monitor 1**: VNC port 5900, Audio WebSocket port 6900
-- **Monitor 2**: VNC port 5901, Audio WebSocket port 6901
-- **Monitor 3**: VNC port 5902, Audio WebSocket port 6902
+- **Monitor 0 (First)**: VNC port 5900, Audio WebSocket port 6900
+- **Monitor 1 (Second)**: VNC port 5901, Audio WebSocket port 6901
+- **Monitor 2 (Third)**: VNC port 5902, Audio WebSocket port 6902
 - **Monitor N**: VNC port 5900+N, Audio WebSocket port 6900+N
+
+Note: Monitors are zero-indexed in the code (0, 1, 2...) but may be referred to as "Monitor 1", "Monitor 2", etc. in user interfaces.
 
 Each monitor gets its own independent VNC server with:
 - Exact positioning from OS display settings (x, y coordinates)
@@ -296,16 +297,15 @@ To unregister:
 DELETE http://clever-service:8000/api/screencasts/{id}
 ```
 
-## Cursor Support
+## Cursor Support (Planned)
 
-The VNC server includes support for native cursor rendering via RFB 3.8 cursor pseudo-encoding:
+Native cursor rendering via RFB 3.8 cursor pseudo-encoding is planned but not yet implemented:
 
-- **Cursor Encoding**: Supports cursor pseudo-encoding type -239 (RFB 3.8)
-- **NoVNC Compatibility**: Cursor appears as system cursor in NoVNC clients
-- **Real-time Updates**: Cursor shape and position updated in real-time
-- **Proper Hotspot**: Cursor hotspot positioning for accurate clicking
+- **Future Feature**: Cursor pseudo-encoding type -239 (RFB 3.8)
+- **Planned Capability**: Cursor shape and position updates to NoVNC clients
+- **Current Status**: TODO - implementation in progress
 
-**Implementation Status**: The VNC server includes cursor pseudo-encoding support. NoVNC clients can request cursor updates by including encoding -239 in their SetEncodings message.
+**Implementation Note**: Once implemented, NoVNC clients will be able to request cursor updates by including encoding -239 in their SetEncodings message, enabling native cursor rendering in the browser.
 
 ## Audio Streaming
 

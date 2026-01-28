@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
+use parking_lot::RwLock as ParkingLotRwLock;
 
 use crate::lib::DEFAULT_SERVER_PORT;
 use crate::vnc::{VncKvmServer, ScreencastRegistration, VncServerManager};
@@ -38,7 +39,7 @@ pub struct ServerState {
     pub options: ServerOptions,
     pub vnc_servers: Vec<Arc<Mutex<VncKvmServer>>>,
     pub vnc_registration: Option<ScreencastRegistration>,
-    pub vnc_manager: Option<VncServerManager>,
+    pub vnc_manager: Option<Arc<ParkingLotRwLock<VncServerManager>>>,
 }
 
 impl ServerState {
