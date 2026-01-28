@@ -1001,3 +1001,167 @@ pub fn get_use_tls_urls(
         Ok(false)
     }
 }
+
+// ============================================================================
+// VNC and Audio Configuration Commands
+// ============================================================================
+
+/// VNC Server Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VncConfig {
+    pub base_port: u16,          // Starting VNC port (default: 5900)
+    pub quality: String,         // "low", "medium", "high"
+    pub frame_rate_limit: u32,   // 15-60 FPS
+    pub cursor_encoding: bool,   // Enable cursor pseudo-encoding
+    pub desktop_resize: bool,    // Allow client-side resize
+    pub view_only: bool,         // Disable input (view-only)
+}
+
+impl Default for VncConfig {
+    fn default() -> Self {
+        Self {
+            base_port: 5900,
+            quality: "high".to_string(),
+            frame_rate_limit: 60,
+            cursor_encoding: true,
+            desktop_resize: true,
+            view_only: false,
+        }
+    }
+}
+
+/// Audio Streaming Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioConfig {
+    pub sample_rate: u32,        // 44100 or 48000 Hz
+    pub quality: String,         // "voip", "audio", "high"
+    pub channels: String,        // "mono" or "stereo"
+    pub latency: String,         // "ultra_low", "low", "normal"
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate: 48000,
+            quality: "high".to_string(),
+            channels: "stereo".to_string(),
+            latency: "low".to_string(),
+        }
+    }
+}
+
+/// WebSocket Connection Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionConfig {
+    pub keep_alive_interval: u32,      // Seconds (default: 30)
+    pub connection_timeout: u32,       // Seconds (default: 300)
+    pub auto_reconnect: bool,          // Enable auto-reconnect
+    pub max_clients_per_monitor: u32,  // Max concurrent connections
+}
+
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        Self {
+            keep_alive_interval: 30,
+            connection_timeout: 300,
+            auto_reconnect: true,
+            max_clients_per_monitor: 5,
+        }
+    }
+}
+
+/// Get VNC configuration
+#[tauri::command]
+pub fn get_vnc_config(
+    app_handle: tauri::AppHandle,
+) -> Result<VncConfig, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let config = state.vnc_config.read();
+    Ok(config.clone())
+}
+
+/// Set VNC configuration
+#[tauri::command]
+pub fn set_vnc_config(
+    app_handle: tauri::AppHandle,
+    config: VncConfig,
+) -> Result<(), String> {
+    info!("⚙️  Updating VNC configuration: {:?}", config);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let mut vnc_config = state.vnc_config.write();
+    *vnc_config = config;
+    
+    info!("✅ VNC configuration updated");
+    Ok(())
+}
+
+/// Get audio configuration
+#[tauri::command]
+pub fn get_audio_config(
+    app_handle: tauri::AppHandle,
+) -> Result<AudioConfig, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let config = state.audio_config.read();
+    Ok(config.clone())
+}
+
+/// Set audio configuration
+#[tauri::command]
+pub fn set_audio_config(
+    app_handle: tauri::AppHandle,
+    config: AudioConfig,
+) -> Result<(), String> {
+    info!("⚙️  Updating audio configuration: {:?}", config);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let mut audio_config = state.audio_config.write();
+    *audio_config = config;
+    
+    info!("✅ Audio configuration updated");
+    Ok(())
+}
+
+/// Get connection configuration
+#[tauri::command]
+pub fn get_connection_config(
+    app_handle: tauri::AppHandle,
+) -> Result<ConnectionConfig, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let config = state.connection_config.read();
+    Ok(config.clone())
+}
+
+/// Set connection configuration
+#[tauri::command]
+pub fn set_connection_config(
+    app_handle: tauri::AppHandle,
+    config: ConnectionConfig,
+) -> Result<(), String> {
+    info!("⚙️  Updating connection configuration: {:?}", config);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let mut connection_config = state.connection_config.write();
+    *connection_config = config;
+    
+    info!("✅ Connection configuration updated");
+    Ok(())
+}

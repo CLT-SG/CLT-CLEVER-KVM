@@ -5,6 +5,7 @@ use parking_lot::RwLock as ParkingLotRwLock;
 
 use crate::lib::DEFAULT_SERVER_PORT;
 use crate::vnc::{VncKvmServer, ScreencastRegistration, VncServerManager};
+use crate::app::commands::{VncConfig, AudioConfig, ConnectionConfig};
 
 /// Server configuration options
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -40,6 +41,9 @@ pub struct ServerState {
     pub vnc_servers: Vec<Arc<Mutex<VncKvmServer>>>,
     pub vnc_registration: Option<ScreencastRegistration>,
     pub vnc_manager: Option<Arc<ParkingLotRwLock<VncServerManager>>>,
+    pub vnc_config: Arc<ParkingLotRwLock<VncConfig>>,
+    pub audio_config: Arc<ParkingLotRwLock<AudioConfig>>,
+    pub connection_config: Arc<ParkingLotRwLock<ConnectionConfig>>,
 }
 
 impl ServerState {
@@ -55,6 +59,9 @@ impl ServerState {
             vnc_servers: Vec::new(),
             vnc_registration: None,
             vnc_manager: None,
+            vnc_config: Arc::new(ParkingLotRwLock::new(VncConfig::default())),
+            audio_config: Arc::new(ParkingLotRwLock::new(AudioConfig::default())),
+            connection_config: Arc::new(ParkingLotRwLock::new(ConnectionConfig::default())),
         }
     }
 }
