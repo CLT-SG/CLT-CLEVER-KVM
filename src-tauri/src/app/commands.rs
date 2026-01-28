@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use log::{debug, error, info, warn};
 use local_ip_address::local_ip;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app::{ServerState, MonitorInfo};
 use crate::core::ScreenCapture;
