@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 use crate::lib::DEFAULT_SERVER_PORT;
-use crate::vnc::{VncKvmServer, ScreencastRegistration};
+use crate::vnc::{VncKvmServer, ScreencastRegistration, VncServerManager};
 
 /// Server configuration options
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -38,6 +38,7 @@ pub struct ServerState {
     pub options: ServerOptions,
     pub vnc_servers: Vec<Arc<Mutex<VncKvmServer>>>,
     pub vnc_registration: Option<ScreencastRegistration>,
+    pub vnc_manager: Option<VncServerManager>,
 }
 
 impl ServerState {
@@ -52,6 +53,7 @@ impl ServerState {
             options: ServerOptions::default(),
             vnc_servers: Vec::new(),
             vnc_registration: None,
+            vnc_manager: None,
         }
     }
 }

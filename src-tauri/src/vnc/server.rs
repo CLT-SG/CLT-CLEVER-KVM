@@ -399,6 +399,9 @@ fn handle_vnc_client(
                         stream.read_exact(&mut encodings)?;
                         debug!("Client {} SetEncodings: {} encodings", 
                                client_id, num_encodings);
+                        
+                        // TODO: Support cursor pseudo-encoding (-239) for RFB 3.8
+                        // This would enable native cursor rendering in NoVNC clients
                     }
                     3 => {
                         // FramebufferUpdateRequest

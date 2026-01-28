@@ -5,19 +5,23 @@
 //! 
 //! Features:
 //! - Native VNC RFB 3.8 protocol server
-//! - Separate audio streaming via RTSP
-//! - Optional RFB audio extension support
+//! - WebSocket-based audio streaming with Opus encoding
+//! - Multi-monitor support with exact positioning
 //! - Multi-client support
 //! - Auto-registration with clever-service
 
 pub mod server;
 pub mod input;
 pub mod audio;
+pub mod audio_websocket;
 pub mod registration;
+pub mod manager;
 
 #[cfg(test)]
 mod tests;
 
 pub use server::{VncKvmServer, VncServerConfig};
 pub use audio::SeparateAudioStream;
+pub use audio_websocket::WebSocketAudioStreamer;
+pub use manager::VncServerManager;
 pub use registration::{register_vnc_with_clever_service, ScreencastRegistration};
