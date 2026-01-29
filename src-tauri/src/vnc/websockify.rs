@@ -185,22 +185,10 @@ async fn handle_websocket_connection(
     // Forward WebSocket → VNC (browser to server)
     let conn_id_ws = conn_id;
     let ws_to_vnc = tokio::spawn(async move {
-        let mut byte_count = 0u64;
-        let mut message_count = 0u32;
-        
         while let Some(msg) = ws_read.next().await {
             match msg {
                 Ok(Message::Binary(data)) => {
                     // Forward binary data to VNC server
-                    let data_len = data.len();
-                    byte_count += data_len as u64;
-                    message_count += 1;
-                    
-                    if message_count % 1000 == 0 {
-                        trace!("Connection #{}: WS→VNC forwarded {} messages ({} bytes)", 
-                               conn_id_ws, message_count, byte_count);
-                    }
-                    
                     if let Err(e) = vnc_write.write_all(&data).await {
                         warn!("Connection #{}: Error writing to VNC server: {}", conn_id_ws, e);
                         break;
@@ -211,7 +199,7 @@ async fn handle_websocket_connection(
                     break;
                 }
                 Ok(Message::Ping(_)) => {
-                    trace!("Connection #{}: WebSocket ping received", conn_id_ws);
+                    // Ping received, pong is sent automatically by tungstenite
                 }
                 Ok(_) => {
                     // Ignore text, pong, and other message types
@@ -223,16 +211,13 @@ async fn handle_websocket_connection(
             }
         }
         
-        info!("Connection #{}: WS→VNC forwarding stopped (total: {} messages, {} bytes)", 
-              conn_id_ws, message_count, byte_count);
+        info!("Connection #{}: WS→VNC forwarding stopped", conn_id_ws);
     });
 
     // Forward VNC → WebSocket (server to browser)
     let conn_id_vnc = conn_id;
     let vnc_to_ws = tokio::spawn(async move {
         let mut buffer = vec![0u8; 8192];
-        let mut byte_count = 0u64;
-        let mut message_count = 0u32;
         
         loop {
             match vnc_read.read(&mut buffer).await {
@@ -244,13 +229,6 @@ async fn handle_websocket_connection(
                 Ok(n) => {
                     // Forward data to WebSocket as binary message
                     let data = buffer[..n].to_vec();
-                    byte_count += n as u64;
-                    message_count += 1;
-                    
-                    if message_count % 1000 == 0 {
-                        trace!("Connection #{}: VNC→WS forwarded {} messages ({} bytes)", 
-                               conn_id_vnc, message_count, byte_count);
-                    }
                     
                     if let Err(e) = ws_write.send(Message::Binary(data)).await {
                         warn!("Connection #{}: Error sending to WebSocket: {}", conn_id_vnc, e);
@@ -264,8 +242,7 @@ async fn handle_websocket_connection(
             }
         }
         
-        info!("Connection #{}: VNC→WS forwarding stopped (total: {} messages, {} bytes)", 
-              conn_id_vnc, message_count, byte_count);
+        info!("Connection #{}: VNC→WS forwarding stopped", conn_id_vnc);
         
         // Send close message
         let _ = ws_write.send(Message::Close(None)).await;

@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write, Result as IoResult};
-use tracing::{info, warn, error, debug, trace};
+use tracing::{info, warn, error};
 use parking_lot::RwLock;
 use anyhow::{Result, Context};
 
@@ -307,8 +307,6 @@ fn handle_vnc_client(
     client_id: usize,
     screen_capture: Arc<Mutex<ScreenCapture>>,
 ) -> IoResult<()> {
-    trace!("Handling VNC client {}", client_id);
-
     // Set TCP options for low latency and ensure blocking mode
     stream.set_nodelay(true)?;
     stream.set_nonblocking(false)?; // Ensure blocking mode for read_exact/write_all
@@ -320,9 +318,6 @@ fn handle_vnc_client(
     // Step 2: Read client protocol version
     let mut client_version = [0u8; 12];
     stream.read_exact(&mut client_version)?;
-    
-    trace!("Client {} protocol: {:?}", client_id, 
-           String::from_utf8_lossy(&client_version));
 
     // Step 3: Send security types (1 = None)
     stream.write_all(&[1u8, 1u8])?; // 1 security type, type 1 (None)
@@ -391,20 +386,17 @@ fn handle_vnc_client(
             Ok(_) => {
                 match msg_type[0] {
                     0 => {
-                        // SetPixelFormat
+                        // SetPixelFormat - client specifies pixel format
                         let mut msg = [0u8; 19];
                         stream.read_exact(&mut msg)?;
-                        trace!("Client {} SetPixelFormat", client_id);
                     }
                     2 => {
-                        // SetEncodings
+                        // SetEncodings - client lists supported encodings
                         let mut header = [0u8; 3];
                         stream.read_exact(&mut header)?;
                         let num_encodings = u16::from_be_bytes([header[1], header[2]]);
                         let mut encodings = vec![0u8; (num_encodings as usize) * 4];
                         stream.read_exact(&mut encodings)?;
-                        trace!("Client {} SetEncodings: {} encodings", 
-                               client_id, num_encodings);
                         
                         // TODO: Support cursor pseudo-encoding (-239) for RFB 3.8
                         // This would enable native cursor rendering in NoVNC clients
@@ -441,13 +433,13 @@ fn handle_vnc_client(
                         }
                     }
                     6 => {
-                        // ClientCutText
+                        // ClientCutText - clipboard data from client (not used)
                         let mut header = [0u8; 7];
                         stream.read_exact(&mut header)?;
                         let length = u32::from_be_bytes([header[3], header[4], header[5], header[6]]);
                         let mut _text = vec![0u8; length as usize];
                         stream.read_exact(&mut _text)?;
-                        trace!("Client {} ClientCutText: {} bytes", client_id, length);
+                        // Clipboard text received but not processed
                     }
                     _ => {
                         warn!("Unknown message type from client {}: {}", 
@@ -457,13 +449,12 @@ fn handle_vnc_client(
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 // On Windows, this can occur transiently even in blocking mode
-                // Log at trace level and retry after brief delay
-                trace!("Client {} temporary WouldBlock, retrying", client_id);
+                // Retry after brief delay without logging
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 continue; // Retry the read
             }
-            Err(e) => {
-                trace!("Client {} connection closed: {}", client_id, e);
+            Err(_) => {
+                // Connection closed or error - exit silently
                 break;
             }
         }
