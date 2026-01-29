@@ -145,17 +145,19 @@ impl ScreenCapture {
         let image = self.monitor.capture_image()
             .map_err(|e| anyhow::anyhow!("Failed to capture screen: {:?}", e))?;
         
-        // Convert to raw RGBA bytes
-        let rgba_buffer = image.into_raw();
+        // Convert to raw bytes - note that xcap on Windows returns BGRA format
+        // (B at byte 0, G at byte 1, R at byte 2, A at byte 3)
+        let buffer = image.into_raw();
         
         // Store previous frame for delta encoding
-        self.previous_frame = Some(rgba_buffer.clone());
+        self.previous_frame = Some(buffer.clone());
         
-        Ok(rgba_buffer)
+        Ok(buffer)
     }
 
     pub fn capture_rgba(&mut self) -> Result<Vec<u8>> {
-        // For xcap, capture_raw already returns RGBA
+        // Note: Despite the name, xcap on Windows returns BGRA format, not RGBA
+        // The VNC server pixel format is set to match this
         self.capture_raw()
     }
 
