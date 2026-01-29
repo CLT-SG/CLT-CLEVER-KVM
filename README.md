@@ -74,18 +74,27 @@ CLT-CLEVER-KVM provides a native display server for seamless integration with mu
 ### Features
 - Standard RFB 3.8 protocol for display streaming
 - Multi-monitor support with individual display servers per monitor
-- Separate audio streaming via RTSP
+- Built-in WebSockify proxy for NoVNC browser clients
+- WebSocket-based audio streaming with Opus encoding
 - Exact monitor positioning and sizing preserved
 - Auto-registration with clever-service
 - Multi-client support
-- Hardware-accelerated encoding
+- Hardware-accelerated screen capture
 
 ### Port Assignment
-- **Monitor 1 (Primary)**: Display stream on port 5900
-- **Monitor 2**: Display stream on port 5901
-- **Monitor 3**: Display stream on port 5902
+
+| Service | Port Range | Description |
+|---------|------------|-------------|
+| **VNC** | 5900+ | Native VNC protocol (TigerVNC, RealVNC, etc.) |
+| **WebSockify** | 6080+ | WebSocket proxy for NoVNC browser clients |
+| **Audio** | 6900 | WebSocket audio stream (Opus, shared) |
+
+**Per-Monitor Ports:**
+- **Monitor 0 (Primary)**: VNC port 5900, WebSockify port 6080
+- **Monitor 1**: VNC port 5901, WebSockify port 6081
+- **Monitor 2**: VNC port 5902, WebSockify port 6082
 - **...and so on**
-- **Audio Stream**: Port 6900 (shared across all monitors)
+- **Audio Stream**: Port 6900 (WebSocket, shared across all monitors)
 
 ### Usage
 ```bash
@@ -93,8 +102,10 @@ CLT-CLEVER-KVM provides a native display server for seamless integration with mu
 npm run tauri dev
 
 # Start display servers for all monitors with audio
-# This will automatically start display streaming on ports 5900, 5901, etc. for each monitor
-# Audio will be available on port 6900
+# This will automatically start:
+# - VNC servers on ports 5900, 5901, etc. for each monitor
+# - WebSockify proxies on ports 6080, 6081, etc. for NoVNC
+# - Audio WebSocket on port 6900
 
 # Or start individual monitor display servers as needed
 ```
@@ -103,25 +114,28 @@ npm run tauri dev
 
 **Note**: As of version 3.0, URLs use hostname instead of IP addresses for improved stability.
 
-**TigerVNC (Monitor 1):**
+**Desktop VNC Clients (TigerVNC, RealVNC, etc.):**
 ```bash
-vncviewer <hostname>:5900
+# Connect to VNC port (5900+)
+vncviewer <hostname>:5900   # Monitor 0
+vncviewer <hostname>:5901   # Monitor 1
 ```
 
-**TigerVNC (Monitor 2):**
-```bash
-vncviewer <hostname>:5901
+**NoVNC (Browser-based):**
+```
+# Connect to WebSockify port (6080+) - NOT the VNC port!
+ws://<hostname>:6080/   # Monitor 0 (via WebSockify)
+ws://<hostname>:6081/   # Monitor 1 (via WebSockify)
 ```
 
-**RealVNC or compatible clients:**
-```bash
-vnc://<hostname>:5900  # Monitor 1
-vnc://<hostname>:5901  # Monitor 2
+**Audio (WebSocket):**
+```
+ws://<hostname>:6900/audio   # Shared audio stream (Opus encoded)
 ```
 
 ### Integration with MediaMTX
 
-Configure MediaMTX to relay display streams + audio using hostname:
+Configure MediaMTX to relay display streams using hostname:
 ```yaml
 paths:
   display_workstation_1_screen1:
@@ -130,22 +144,9 @@ paths:
   display_workstation_1_screen2:
     source: vnc://workstation-1:5901
     sourceProtocol: vnc
-  audio_workstation_1:
-    source: rtsp://workstation-1:6900/audio
 ```
 
-**Legacy IP-based configuration** (still supported):
-```yaml
-paths:
-  display_workstation_1_screen1:
-    source: vnc://192.168.1.100:5900
-    sourceProtocol: vnc
-  display_workstation_1_screen2:
-    source: vnc://192.168.1.100:5901
-    sourceProtocol: vnc
-  audio_workstation_1:
-    source: rtsp://192.168.1.100:6900/audio
-```
+**Note**: Audio streaming uses WebSocket (ws://hostname:6900/audio) instead of RTSP.
 
 For more details, see [Display Integration Guide](docs/VNC_INTEGRATION.md).
 
@@ -196,7 +197,8 @@ sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev
 ### Backend (Rust/Tauri)
 - **Display Capture**: Hardware-accelerated screen capture with multi-monitor support
 - **Display Streaming**: Native RFB 3.8 protocol implementation
-- **Audio Streaming**: RTSP server with high-quality audio encoding
+- **WebSockify Proxy**: Built-in WebSocket-to-VNC proxy for NoVNC browser clients
+- **Audio Streaming**: WebSocket server with Opus audio encoding (low-latency)
 - **Performance**: Multi-threaded processing with hardware acceleration
 
 ### Frontend (JavaScript/Vue.js)
@@ -204,9 +206,10 @@ sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev
 - Real-time status updates
 - Multi-monitor management interface
 
-### Communication Protocol
-- **Display Protocol**: RFB 3.8 (standard display streaming protocol)
-- **Audio Protocol**: RTSP for audio streaming
+### Communication Protocols
+- **VNC Display**: RFB 3.8 protocol (port 5900+) - for desktop clients
+- **WebSockify**: WebSocket-to-VNC proxy (port 6080+) - for NoVNC browser clients
+- **Audio**: WebSocket with Opus encoding (port 6900) - for audio streaming
 - **Control**: Native Tauri commands for server management
 
 ## Building and Distribution
