@@ -23,20 +23,13 @@ mod tls;
 mod vnc;
 
 use app::{commands::*, ServerState, APP_NAME};
+use lib::get_log_directory;
 use log::info;
 use std::sync::{Arc, Mutex};
-use std::path::PathBuf;
 use std::fs;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
-
-/// Get the cross-platform log directory path: ~/clever-kvm/logs/{date}/
-fn get_log_directory() -> PathBuf {
-    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-    home_dir.join("clever-kvm").join("logs").join(date)
-}
 
 fn main() {
     // Create log directory
@@ -49,9 +42,11 @@ fn main() {
     let access_log = tracing_appender::rolling::never(&log_dir, "access.log");
     let error_log = tracing_appender::rolling::never(&log_dir, "error.log");
     
-    // Create a multi-writer for access logs (includes all levels)
-    let (access_writer, _access_guard) = tracing_appender::non_blocking(access_log);
-    let (error_writer, _error_guard) = tracing_appender::non_blocking(error_log);
+    // Create non-blocking writers for async logging
+    // NOTE: The guards must be kept alive for the entire application lifetime
+    // to ensure log messages are properly flushed
+    let (access_writer, access_guard) = tracing_appender::non_blocking(access_log);
+    let (error_writer, error_guard) = tracing_appender::non_blocking(error_log);
     
     // Initialize tracing with both console and file output
     let stdout_layer = tracing_subscriber::fmt::layer()
@@ -118,4 +113,8 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+    
+    // Explicitly drop log guards after Tauri exits to ensure all logs are flushed
+    drop(access_guard);
+    drop(error_guard);
 }

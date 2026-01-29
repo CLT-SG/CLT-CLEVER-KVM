@@ -81,12 +81,7 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
 
 
 
-/// Get the cross-platform log directory path: ~/clever-kvm/logs/{date}/
-fn get_log_directory() -> std::path::PathBuf {
-    let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-    home_dir.join("clever-kvm").join("logs").join(date)
-}
+use crate::lib::get_log_directory;
 
 #[tauri::command]
 pub fn get_logs() -> Result<(String, String), String> {
@@ -671,8 +666,11 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
         hostname: Some(hostname.clone()),
     };
 
-    // Calculate websockify port (6080 base + monitor_id)
+    // Calculate websockify port (6080 base + monitor_id) with bounds checking
     let websockify_port = 6080 + monitor_id as u16;
+    if websockify_port > 6130 {
+        return Err(format!("Too many monitors for websockify port assignment (max 50 supported)"));
+    }
 
     // Create and start VNC server
     match VncKvmServer::new(config.clone()) {

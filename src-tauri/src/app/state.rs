@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use tokio::runtime::Runtime;
-use tokio::task::JoinHandle;
 use parking_lot::RwLock as ParkingLotRwLock;
 use parking_lot::Mutex as ParkingLotMutex;
 
@@ -50,8 +49,6 @@ pub struct ServerState {
     pub connection_config: Arc<ParkingLotRwLock<ConnectionConfig>>,
     /// WebSockify proxies for NoVNC support (monitor_id -> proxy)
     pub websockify_proxies: HashMap<usize, Arc<ParkingLotMutex<WebsockifyProxy>>>,
-    /// VNC server accept loop handles for clean shutdown (monitor_id -> handle)
-    pub vnc_accept_handles: HashMap<usize, JoinHandle<()>>,
 }
 
 impl ServerState {
@@ -71,7 +68,6 @@ impl ServerState {
             audio_config: Arc::new(ParkingLotRwLock::new(AudioConfig::default())),
             connection_config: Arc::new(ParkingLotRwLock::new(ConnectionConfig::default())),
             websockify_proxies: HashMap::new(),
-            vnc_accept_handles: HashMap::new(),
         }
     }
 }
