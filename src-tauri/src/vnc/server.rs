@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write, Result as IoResult};
-use log::{info, warn, error, debug};
+use tracing::{info, warn, error, debug, trace};
 use parking_lot::RwLock;
 use anyhow::{Result, Context};
 

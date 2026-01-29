@@ -21,7 +21,7 @@ use opus::{Encoder, Application, Channels};
 use std::sync::Arc;
 use parking_lot::RwLock;
 use anyhow::{Result, Context};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error, debug, trace};
 use tokio::net::TcpListener;
 use crossbeam_channel::{unbounded, Sender, Receiver};
 use futures_util::SinkExt;

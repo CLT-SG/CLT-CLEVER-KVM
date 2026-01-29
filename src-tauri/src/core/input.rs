@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
 use std::sync::Mutex;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn, trace};
 use std::thread; // Add missing thread import
 
 lazy_static! {

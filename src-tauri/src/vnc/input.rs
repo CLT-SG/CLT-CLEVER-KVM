@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use enigo::{Enigo, MouseControllable, KeyboardControllable, MouseButton, Key};
-use log::debug;
+use tracing::{debug, trace, warn};
 use std::sync::OnceLock;
 use parking_lot::Mutex;
 

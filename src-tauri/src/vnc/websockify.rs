@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn, error, trace};
 
 /// WebSocket-to-VNC proxy (websockify implementation)
 /// 
