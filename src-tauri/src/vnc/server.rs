@@ -357,17 +357,22 @@ fn handle_vnc_client(
     stream.write_all(&height.to_be_bytes())?;
 
     // Pixel format (16 bytes)
+    // xcap returns RGBA format (R at byte 0, G at byte 1, B at byte 2, A at byte 3)
+    // For little-endian, this means:
+    // - Red is at bit offset 0 (shift 0)
+    // - Green is at bit offset 8 (shift 8)
+    // - Blue is at bit offset 16 (shift 16)
     let pixel_format = [
         32, // bits per pixel
         24, // depth
-        0,  // big-endian flag
+        0,  // big-endian flag (0 = little-endian)
         1,  // true-color flag
         0, 255, // red-max (255)
         0, 255, // green-max (255)
         0, 255, // blue-max (255)
-        16, // red-shift
-        8,  // green-shift
-        0,  // blue-shift
+        0,  // red-shift (R at byte 0 for little-endian = shift 0)
+        8,  // green-shift (G at byte 1 for little-endian = shift 8)
+        16, // blue-shift (B at byte 2 for little-endian = shift 16)
         0, 0, 0, // padding
     ];
     stream.write_all(&pixel_format)?;

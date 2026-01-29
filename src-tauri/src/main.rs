@@ -25,12 +25,60 @@ mod vnc;
 use app::{commands::*, ServerState, APP_NAME};
 use log::info;
 use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::fs;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
+
+/// Get the cross-platform log directory path: ~/clever-kvm/logs/{date}/
+fn get_log_directory() -> PathBuf {
+    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    home_dir.join("clever-kvm").join("logs").join(date)
+}
 
 fn main() {
-    // Initialize logging first
-    env_logger::init();
+    // Create log directory
+    let log_dir = get_log_directory();
+    if let Err(e) = fs::create_dir_all(&log_dir) {
+        eprintln!("Warning: Failed to create log directory {:?}: {}", log_dir, e);
+    }
+    
+    // Set up file appenders for access and error logs
+    let access_log = tracing_appender::rolling::never(&log_dir, "access.log");
+    let error_log = tracing_appender::rolling::never(&log_dir, "error.log");
+    
+    // Create a multi-writer for access logs (includes all levels)
+    let (access_writer, _access_guard) = tracing_appender::non_blocking(access_log);
+    let (error_writer, _error_guard) = tracing_appender::non_blocking(error_log);
+    
+    // Initialize tracing with both console and file output
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_thread_ids(true);
+    
+    // Access log layer (all levels)
+    let access_layer = tracing_subscriber::fmt::layer()
+        .with_writer(access_writer)
+        .with_ansi(false)
+        .with_target(true);
+    
+    // Error log layer (error level only) - use filter closure
+    let error_layer = tracing_subscriber::fmt::layer()
+        .with_writer(error_writer)
+        .with_ansi(false)
+        .with_target(true)
+        .with_filter(tracing_subscriber::filter::LevelFilter::ERROR);
+    
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(access_layer)
+        .with(error_layer)
+        .init();
     
     info!("🚀 Starting {} - VNC Server for Multi-Monitor Video Wall", APP_NAME);
+    info!("📁 Log directory: {:?}", log_dir);
     
     // Run Tauri application
     tauri::Builder::default()

@@ -11,6 +11,7 @@ use parking_lot::Mutex;
 
 static ENIGO: OnceLock<Mutex<Enigo>> = OnceLock::new();
 static LAST_MOUSE_POS: OnceLock<Mutex<(u16, u16)>> = OnceLock::new();
+static LAST_BUTTON_MASK: OnceLock<Mutex<u8>> = OnceLock::new();
 
 fn get_enigo() -> &'static Mutex<Enigo> {
     ENIGO.get_or_init(|| Mutex::new(Enigo::new()))
@@ -18,6 +19,10 @@ fn get_enigo() -> &'static Mutex<Enigo> {
 
 fn get_last_mouse_pos() -> &'static Mutex<(u16, u16)> {
     LAST_MOUSE_POS.get_or_init(|| Mutex::new((0, 0)))
+}
+
+fn get_last_button_mask() -> &'static Mutex<u8> {
+    LAST_BUTTON_MASK.get_or_init(|| Mutex::new(0))
 }
 
 /// Handle VNC keyboard event
@@ -108,6 +113,7 @@ pub fn handle_vnc_keyboard(key: u32, down: bool) -> Result<()> {
 pub fn handle_vnc_mouse(button_mask: u8, x: u16, y: u16) -> Result<()> {
     let mut enigo = get_enigo().lock();
     let mut last_pos = get_last_mouse_pos().lock();
+    let mut last_buttons = get_last_button_mask().lock();
     
     debug!("Mouse event: buttons=0x{:x} x={} y={}", button_mask, x, y);
 
@@ -117,40 +123,51 @@ pub fn handle_vnc_mouse(button_mask: u8, x: u16, y: u16) -> Result<()> {
         *last_pos = (x, y);
     }
 
-    // Handle button states
+    // Handle button states - only send events when state changes
     // VNC button mask: bit 0 = left, bit 1 = middle, bit 2 = right, 
     //                  bit 3 = scroll up, bit 4 = scroll down
     
-    // Left button (bit 0)
-    if button_mask & 0x01 != 0 {
+    let prev_buttons = *last_buttons;
+    
+    // Left button (bit 0) - only on state change
+    let left_pressed = button_mask & 0x01 != 0;
+    let left_was_pressed = prev_buttons & 0x01 != 0;
+    if left_pressed && !left_was_pressed {
         enigo.mouse_down(MouseButton::Left);
-    } else {
+    } else if !left_pressed && left_was_pressed {
         enigo.mouse_up(MouseButton::Left);
     }
 
-    // Middle button (bit 1)
-    if button_mask & 0x02 != 0 {
+    // Middle button (bit 1) - only on state change
+    let middle_pressed = button_mask & 0x02 != 0;
+    let middle_was_pressed = prev_buttons & 0x02 != 0;
+    if middle_pressed && !middle_was_pressed {
         enigo.mouse_down(MouseButton::Middle);
-    } else {
+    } else if !middle_pressed && middle_was_pressed {
         enigo.mouse_up(MouseButton::Middle);
     }
 
-    // Right button (bit 2)
-    if button_mask & 0x04 != 0 {
+    // Right button (bit 2) - only on state change
+    let right_pressed = button_mask & 0x04 != 0;
+    let right_was_pressed = prev_buttons & 0x04 != 0;
+    if right_pressed && !right_was_pressed {
         enigo.mouse_down(MouseButton::Right);
-    } else {
+    } else if !right_pressed && right_was_pressed {
         enigo.mouse_up(MouseButton::Right);
     }
 
-    // Scroll up (bit 3)
-    if button_mask & 0x08 != 0 {
+    // Scroll up (bit 3) - only on button down (not held)
+    if button_mask & 0x08 != 0 && prev_buttons & 0x08 == 0 {
         enigo.mouse_scroll_y(1);
     }
 
-    // Scroll down (bit 4)
-    if button_mask & 0x10 != 0 {
+    // Scroll down (bit 4) - only on button down (not held)
+    if button_mask & 0x10 != 0 && prev_buttons & 0x10 == 0 {
         enigo.mouse_scroll_y(-1);
     }
+    
+    // Update stored button state
+    *last_buttons = button_mask;
 
     Ok(())
 }
