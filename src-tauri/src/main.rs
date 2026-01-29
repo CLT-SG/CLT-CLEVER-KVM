@@ -19,6 +19,7 @@ mod app;
 mod core;
 mod lib;
 mod system;
+mod tls;
 mod vnc;
 
 use app::{commands::*, ServerState, APP_NAME};
@@ -51,7 +52,15 @@ fn main() {
             start_vnc_servers_all,
             stop_vnc_server,
             get_vnc_status,
-            register_with_clever_service
+            register_with_clever_service,
+            set_use_tls_urls,
+            get_use_tls_urls,
+            get_vnc_config,
+            set_vnc_config,
+            get_audio_config,
+            set_audio_config,
+            get_connection_config,
+            set_connection_config
         ])
         .setup(|_app| {
             info!("✅ Tauri application initialized successfully");

@@ -309,8 +309,9 @@ fn handle_vnc_client(
 ) -> IoResult<()> {
     debug!("Handling VNC client {}", client_id);
 
-    // Set TCP options for low latency
+    // Set TCP options for low latency and ensure blocking mode
     stream.set_nodelay(true)?;
+    stream.set_nonblocking(false)?; // Ensure blocking mode for read_exact/write_all
 
     // VNC Protocol Handshake (RFB 3.8)
     // Step 1: Send protocol version
@@ -399,6 +400,9 @@ fn handle_vnc_client(
                         stream.read_exact(&mut encodings)?;
                         debug!("Client {} SetEncodings: {} encodings", 
                                client_id, num_encodings);
+                        
+                        // TODO: Support cursor pseudo-encoding (-239) for RFB 3.8
+                        // This would enable native cursor rendering in NoVNC clients
                     }
                     3 => {
                         // FramebufferUpdateRequest
@@ -445,6 +449,13 @@ fn handle_vnc_client(
                               client_id, msg_type[0]);
                     }
                 }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // On Windows, this can occur transiently even in blocking mode
+                // Log at debug level and retry after brief delay
+                debug!("Client {} temporary WouldBlock, retrying", client_id);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue; // Retry the read
             }
             Err(e) => {
                 debug!("Client {} connection closed: {}", client_id, e);

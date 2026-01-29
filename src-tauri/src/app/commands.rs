@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use log::{debug, error, info, warn};
 use local_ip_address::local_ip;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app::{ServerState, MonitorInfo};
 use crate::core::ScreenCapture;
@@ -538,6 +538,7 @@ use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register
 #[derive(Debug, Serialize, Clone)]
 pub struct VncServerInfo {
     pub vnc_url: String,
+    pub websockify_url: String,
     pub audio_url: Option<String>,
     pub port: u16,
     pub audio_port: Option<u16>,
@@ -669,6 +670,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
 
                     // Use hostname in VNC URL instead of IP address
                     let vnc_url = format!("vnc://{}:{}", hostname, config.port);
+                    let websockify_url = format!("ws://{}:{}/websockify", hostname, config.port);
                     let audio_url = vnc_server.get_audio_url();
                     let clients_connected = vnc_server.get_client_count();
                     
@@ -683,6 +685,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
                     info!("✅ VNC server started successfully");
                     info!("   Hostname: {}", hostname);
                     info!("   VNC URL: {}", vnc_url);
+                    info!("   WebSockify URL: {}", websockify_url);
                     info!("   Monitor: {} ({}x{}) at ({}, {})", 
                           monitor_name, monitor_width, monitor_height,
                           monitor_position_x, monitor_position_y);
@@ -693,6 +696,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
 
                     Ok(VncServerInfo {
                         vnc_url,
+                        websockify_url,
                         audio_url,
                         port: config.port,
                         audio_port: config.audio_port,
@@ -954,4 +958,210 @@ pub async fn register_with_clever_service(
             Err(format!("Failed to register: {}", e))
         }
     }
+}
+
+/// Enable or disable TLS URLs (wss:// instead of ws://)
+#[tauri::command]
+pub fn set_use_tls_urls(
+    app_handle: tauri::AppHandle,
+    use_tls: bool,
+) -> Result<(), String> {
+    info!("🔒 Setting TLS URLs to: {}", use_tls);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    // Update VNC manager if it exists
+    if let Some(manager) = &state.vnc_manager {
+        let mut manager_guard = manager.write();
+        manager_guard.set_use_tls_urls(use_tls);
+        info!("✅ TLS URL setting updated");
+        Ok(())
+    } else {
+        Err("VNC manager not initialized".to_string())
+    }
+}
+
+/// Get current TLS URL setting
+#[tauri::command]
+pub fn get_use_tls_urls(
+    app_handle: tauri::AppHandle,
+) -> Result<bool, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    // Get TLS setting from VNC manager if it exists
+    if let Some(manager) = &state.vnc_manager {
+        let manager_guard = manager.read();
+        Ok(manager_guard.get_use_tls_urls())
+    } else {
+        // Default to false if manager not initialized
+        Ok(false)
+    }
+}
+
+// ============================================================================
+// VNC and Audio Configuration Commands
+// ============================================================================
+
+/// VNC Server Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VncConfig {
+    pub base_port: u16,          // Starting VNC port (default: 5900)
+    pub quality: String,         // "low", "medium", "high"
+    pub frame_rate_limit: u32,   // 15-60 FPS
+    pub cursor_encoding: bool,   // Enable cursor pseudo-encoding
+    pub desktop_resize: bool,    // Allow client-side resize
+    pub view_only: bool,         // Disable input (view-only)
+}
+
+impl Default for VncConfig {
+    fn default() -> Self {
+        Self {
+            base_port: 5900,
+            quality: "high".to_string(),
+            frame_rate_limit: 60,
+            cursor_encoding: true,
+            desktop_resize: true,
+            view_only: false,
+        }
+    }
+}
+
+/// Audio Streaming Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioConfig {
+    pub sample_rate: u32,        // 44100 or 48000 Hz
+    pub quality: String,         // "voip", "audio", "high"
+    pub channels: String,        // "mono" or "stereo"
+    pub latency: String,         // "ultra_low", "low", "normal"
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate: 48000,
+            quality: "high".to_string(),
+            channels: "stereo".to_string(),
+            latency: "low".to_string(),
+        }
+    }
+}
+
+/// WebSocket Connection Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionConfig {
+    pub keep_alive_interval: u32,      // Seconds (default: 30)
+    pub connection_timeout: u32,       // Seconds (default: 300)
+    pub auto_reconnect: bool,          // Enable auto-reconnect
+    pub max_clients_per_monitor: u32,  // Max concurrent connections
+}
+
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        Self {
+            keep_alive_interval: 30,
+            connection_timeout: 300,
+            auto_reconnect: true,
+            max_clients_per_monitor: 5,
+        }
+    }
+}
+
+/// Get VNC configuration
+#[tauri::command]
+pub fn get_vnc_config(
+    app_handle: tauri::AppHandle,
+) -> Result<VncConfig, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let config = state.vnc_config.read();
+    Ok(config.clone())
+}
+
+/// Set VNC configuration
+#[tauri::command]
+pub fn set_vnc_config(
+    app_handle: tauri::AppHandle,
+    config: VncConfig,
+) -> Result<(), String> {
+    info!("⚙️  Updating VNC configuration: {:?}", config);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let mut vnc_config = state.vnc_config.write();
+    *vnc_config = config;
+    
+    info!("✅ VNC configuration updated");
+    Ok(())
+}
+
+/// Get audio configuration
+#[tauri::command]
+pub fn get_audio_config(
+    app_handle: tauri::AppHandle,
+) -> Result<AudioConfig, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let config = state.audio_config.read();
+    Ok(config.clone())
+}
+
+/// Set audio configuration
+#[tauri::command]
+pub fn set_audio_config(
+    app_handle: tauri::AppHandle,
+    config: AudioConfig,
+) -> Result<(), String> {
+    info!("⚙️  Updating audio configuration: {:?}", config);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let mut audio_config = state.audio_config.write();
+    *audio_config = config;
+    
+    info!("✅ Audio configuration updated");
+    Ok(())
+}
+
+/// Get connection configuration
+#[tauri::command]
+pub fn get_connection_config(
+    app_handle: tauri::AppHandle,
+) -> Result<ConnectionConfig, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let config = state.connection_config.read();
+    Ok(config.clone())
+}
+
+/// Set connection configuration
+#[tauri::command]
+pub fn set_connection_config(
+    app_handle: tauri::AppHandle,
+    config: ConnectionConfig,
+) -> Result<(), String> {
+    info!("⚙️  Updating connection configuration: {:?}", config);
+    
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
+    
+    let mut connection_config = state.connection_config.write();
+    *connection_config = config;
+    
+    info!("✅ Connection configuration updated");
+    Ok(())
 }

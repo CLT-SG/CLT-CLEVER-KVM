@@ -136,7 +136,7 @@ export default {
       vncEnabled: false,
       audioEnabled: true,
       vncPort: 5900,
-      audioPort: 5901,
+      audioPort: 6900,  // Shared audio port for all monitors
       selectedMonitor: 0,
       monitors: [],
       vncRunning: false,
