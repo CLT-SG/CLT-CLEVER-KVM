@@ -62,6 +62,7 @@ native-tls = "0.2" # TLS implementation
 rcgen = "0.12" # Self-signed certificate generation
 dirs = "5.0" # Platform-specific directories
 time = "0.3" # Time/date handling for certificate validity
+base64 = "0.22" # Base64 encoding/decoding for websockify
 
 # Structured logging
 tracing = "0.1" # Structured logging framework

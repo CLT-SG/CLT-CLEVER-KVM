@@ -5,7 +5,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{accept_hdr_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tracing::{info, debug, warn, error, trace};
 
 /// WebSocket-to-VNC proxy (websockify implementation)
@@ -159,12 +160,40 @@ async fn handle_websocket_connection(
     target_port: u16,
     conn_id: u32,
 ) -> Result<()> {
-    // Upgrade HTTP connection to WebSocket
+    // Upgrade HTTP connection to WebSocket with proper subprotocol negotiation
+    // NoVNC requires 'binary' or 'base64' subprotocol in Sec-WebSocket-Protocol header
     trace!("Connection #{}: Upgrading HTTP to WebSocket", conn_id);
     
-    let ws_stream = accept_async(stream)
+    let callback = |req: &Request, mut response: Response| {
+        // Check for Sec-WebSocket-Protocol header
+        if let Some(protocols) = req.headers().get("Sec-WebSocket-Protocol") {
+            if let Ok(protocols_str) = protocols.to_str() {
+                // Check if client supports 'binary' (preferred) or 'base64'
+                let requested: Vec<&str> = protocols_str.split(',').map(|s| s.trim()).collect();
+                
+                if requested.iter().any(|&p| p == "binary") {
+                    // Prefer binary protocol (more efficient)
+                    response.headers_mut().insert(
+                        "Sec-WebSocket-Protocol",
+                        "binary".parse().unwrap()
+                    );
+                    info!("Connection #{}: Negotiated 'binary' subprotocol", conn_id);
+                } else if requested.iter().any(|&p| p == "base64") {
+                    // Fallback to base64 if binary not available
+                    response.headers_mut().insert(
+                        "Sec-WebSocket-Protocol",
+                        "base64".parse().unwrap()
+                    );
+                    info!("Connection #{}: Negotiated 'base64' subprotocol", conn_id);
+                }
+            }
+        }
+        Ok(response)
+    };
+    
+    let ws_stream = accept_hdr_async(stream, callback)
         .await
-        .context("Failed to accept WebSocket")?;
+        .context("Failed to accept WebSocket connection")?;
 
     trace!("Connection #{}: WebSocket established, connecting to VNC at {}:{}", 
            conn_id, target_host, target_port);
@@ -193,6 +222,25 @@ async fn handle_websocket_connection(
                         warn!("Connection #{}: Error writing to VNC server: {}", conn_id_ws, e);
                         break;
                     }
+                    // Flush to ensure data is sent immediately
+                    if let Err(e) = vnc_write.flush().await {
+                        warn!("Connection #{}: Error flushing to VNC server: {}", conn_id_ws, e);
+                        break;
+                    }
+                }
+                Ok(Message::Text(text)) => {
+                    // NoVNC with base64 subprotocol sends text messages
+                    // Decode base64 and forward to VNC server
+                    if let Ok(data) = base64_decode(&text) {
+                        if let Err(e) = vnc_write.write_all(&data).await {
+                            warn!("Connection #{}: Error writing base64 data to VNC server: {}", conn_id_ws, e);
+                            break;
+                        }
+                        if let Err(e) = vnc_write.flush().await {
+                            warn!("Connection #{}: Error flushing to VNC server: {}", conn_id_ws, e);
+                            break;
+                        }
+                    }
                 }
                 Ok(Message::Close(frame)) => {
                     info!("Connection #{}: WebSocket close received: {:?}", conn_id_ws, frame);
@@ -202,7 +250,7 @@ async fn handle_websocket_connection(
                     // Ping received, pong is sent automatically by tungstenite
                 }
                 Ok(_) => {
-                    // Ignore text, pong, and other message types
+                    // Ignore pong and other message types
                 }
                 Err(e) => {
                     warn!("Connection #{}: WebSocket read error: {}", conn_id_ws, e);
@@ -217,7 +265,8 @@ async fn handle_websocket_connection(
     // Forward VNC → WebSocket (server to browser)
     let conn_id_vnc = conn_id;
     let vnc_to_ws = tokio::spawn(async move {
-        let mut buffer = vec![0u8; 8192];
+        // Larger buffer for screen updates (64KB for better throughput)
+        let mut buffer = vec![0u8; 65536];
         
         loop {
             match vnc_read.read(&mut buffer).await {
@@ -260,6 +309,12 @@ async fn handle_websocket_connection(
 
     trace!("Connection #{}: Bidirectional forwarding ended", conn_id);
     Ok(())
+}
+
+/// Decode base64 string to bytes (for base64 subprotocol support)
+fn base64_decode(input: &str) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    STANDARD.decode(input)
 }
 
 #[cfg(test)]
