@@ -81,20 +81,26 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
 
 
 
+use crate::lib::get_log_directory;
+
 #[tauri::command]
 pub fn get_logs() -> Result<(String, String), String> {
-    // Simplified log reading - get from default locations
-    let debug_content = match std::fs::read_to_string("/tmp/clever-kvm-debug.log") {
+    let log_dir = get_log_directory();
+    
+    let access_log_path = log_dir.join("access.log");
+    let error_log_path = log_dir.join("error.log");
+    
+    let access_content = match std::fs::read_to_string(&access_log_path) {
         Ok(content) => content,
-        Err(_) => "Debug log not found or accessible".to_string(),
+        Err(_) => format!("Access log not found at {:?}", access_log_path),
     };
     
-    let error_content = match std::fs::read_to_string("/tmp/clever-kvm-error.log") {
+    let error_content = match std::fs::read_to_string(&error_log_path) {
         Ok(content) => content,
-        Err(_) => "Error log not found or accessible".to_string(),
+        Err(_) => format!("Error log not found at {:?}", error_log_path),
     };
     
-    Ok((debug_content, error_content))
+    Ok((access_content, error_content))
 }
 
 #[tauri::command]
@@ -533,6 +539,8 @@ async fn test_mediamtx_connection(ip: &str, port: u16) -> bool {
 // ============================================================================
 
 use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register_vnc_with_clever_service};
+use crate::vnc::websockify::WebsockifyProxy;
+use parking_lot::Mutex as ParkingLotMutex;
 
 /// VNC server information returned to frontend
 #[derive(Debug, Serialize, Clone)]
@@ -541,6 +549,7 @@ pub struct VncServerInfo {
     pub websockify_url: String,
     pub audio_url: Option<String>,
     pub port: u16,
+    pub websockify_port: u16,
     pub audio_port: Option<u16>,
     pub clients_connected: usize,
     pub monitor_id: usize,
@@ -657,6 +666,12 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
         hostname: Some(hostname.clone()),
     };
 
+    // Calculate websockify port (6080 base + monitor_id) with bounds checking
+    let websockify_port = 6080 + monitor_id as u16;
+    if websockify_port > 6130 {
+        return Err(format!("Too many monitors for websockify port assignment (max 50 supported)"));
+    }
+
     // Create and start VNC server
     match VncKvmServer::new(config.clone()) {
         Ok(mut vnc_server) => {
@@ -668,18 +683,36 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
                         Err(_) => hostname.clone(),
                     };
 
+                    // Start websockify proxy to bridge WebSocket (NoVNC) to VNC
+                    let mut websockify_proxy = WebsockifyProxy::new(
+                        websockify_port,
+                        "localhost".to_string(),
+                        config.port
+                    );
+                    
+                    if let Err(e) = websockify_proxy.start().await {
+                        error!("❌ Failed to start websockify proxy: {}", e);
+                        // Stop VNC server since websockify failed
+                        let _ = vnc_server.stop().await;
+                        return Err(format!("Failed to start websockify proxy: {}", e));
+                    }
+                    
+                    info!("✅ Websockify proxy started on port {} → VNC port {}", websockify_port, config.port);
+
                     // Use hostname in VNC URL instead of IP address
                     let vnc_url = format!("vnc://{}:{}", hostname, config.port);
-                    let websockify_url = format!("ws://{}:{}/websockify", hostname, config.port);
+                    // Websockify URL uses the websockify port, not the VNC port
+                    let websockify_url = format!("ws://{}:{}/", hostname, websockify_port);
                     let audio_url = vnc_server.get_audio_url();
                     let clients_connected = vnc_server.get_client_count();
                     
-                    // Store VNC server in state (acquire lock again after async operation)
+                    // Store VNC server and websockify proxy in state (acquire lock again after async operation)
                     {
                         let state = app_handle.state::<Arc<Mutex<ServerState>>>();
                         let mut state = state.lock()
                             .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
                         state.vnc_servers.push(Arc::new(Mutex::new(vnc_server)));
+                        state.websockify_proxies.insert(monitor_id, Arc::new(ParkingLotMutex::new(websockify_proxy)));
                     }
 
                     info!("✅ VNC server started successfully");
@@ -699,6 +732,7 @@ let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_po
                         websockify_url,
                         audio_url,
                         port: config.port,
+                        websockify_port,
                         audio_port: config.audio_port,
                         clients_connected,
                         monitor_id,
@@ -807,7 +841,7 @@ pub async fn stop_vnc_server(
 ) -> Result<(), String> {
     info!("🛑 Stopping all VNC servers...");
     
-    let servers = {
+    let (servers, websockify_proxies) = {
         let state = app_handle.state::<Arc<Mutex<ServerState>>>();
         let mut state = state.lock()
             .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
@@ -817,10 +851,22 @@ pub async fn stop_vnc_server(
             return Err("No VNC servers running".to_string());
         }
 
-        std::mem::take(&mut state.vnc_servers)
+        let servers = std::mem::take(&mut state.vnc_servers);
+        let proxies = std::mem::take(&mut state.websockify_proxies);
+        (servers, proxies)
     }; // Drop state lock here before async operations
     
-    // Stop all servers in parallel using blocking tasks
+    // Stop all websockify proxies first
+    for (monitor_id, proxy) in websockify_proxies {
+        let mut proxy_guard = proxy.lock();
+        if let Err(e) = proxy_guard.stop() {
+            error!("❌ Failed to stop websockify proxy for monitor {}: {}", monitor_id, e);
+        } else {
+            info!("✅ Websockify proxy for monitor {} stopped", monitor_id);
+        }
+    }
+    
+    // Stop all VNC servers in parallel using blocking tasks
     // We use spawn_blocking because we're using std::sync::Mutex which is not Send across await points
     let stop_tasks: Vec<_> = servers.into_iter().map(|vnc_server| {
         tokio::task::spawn_blocking(move || {

@@ -5,5 +5,7 @@
 
 pub mod constants;
 pub mod error_types;
+pub mod logging;
 
 pub use constants::*;
+pub use logging::*;

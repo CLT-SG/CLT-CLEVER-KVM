@@ -212,7 +212,7 @@ impl VncServerManager {
         // Stop websockify proxy if exists
         if let Some(websockify_proxy) = self.websockify_proxies.remove(&key) {
             let mut proxy = websockify_proxy.lock();
-            proxy.stop().await
+            proxy.stop()
                 .context("Failed to stop websockify proxy")?;
             info!("✅ Websockify proxy stopped for monitor {}", monitor_id);
         }
@@ -244,7 +244,7 @@ impl VncServerManager {
         // Stop all websockify proxies
         for (_, websockify_proxy) in self.websockify_proxies.drain() {
             let mut proxy = websockify_proxy.lock();
-            if let Err(e) = proxy.stop().await {
+            if let Err(e) = proxy.stop() {
                 error!("Failed to stop websockify proxy: {}", e);
             }
         }

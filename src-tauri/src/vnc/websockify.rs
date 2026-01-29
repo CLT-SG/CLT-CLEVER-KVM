@@ -5,8 +5,10 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{accept_async, tungstenite::Message};
-use tracing::{info, debug, warn, error};
+use tokio_tungstenite::{accept_hdr_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+use tracing::{info, debug, warn, error, trace};
+use parking_lot::Mutex as ParkingLotMutex;
 
 /// WebSocket-to-VNC proxy (websockify implementation)
 /// 
@@ -23,6 +25,8 @@ pub struct WebsockifyProxy {
     target_port: u16,
     running: Arc<AtomicBool>,
     listener_handle: Option<JoinHandle<()>>,
+    /// Shared list of active connection handles that need to be aborted on stop
+    connection_handles: Arc<ParkingLotMutex<Vec<JoinHandle<()>>>>,
 }
 
 impl WebsockifyProxy {
@@ -39,6 +43,7 @@ impl WebsockifyProxy {
             target_port,
             running: Arc::new(AtomicBool::new(false)),
             listener_handle: None,
+            connection_handles: Arc::new(ParkingLotMutex::new(Vec::new())),
         }
     }
 
@@ -67,6 +72,7 @@ impl WebsockifyProxy {
         let target_host = self.target_host.clone();
         let target_port = self.target_port;
         let listen_port = self.listen_port;
+        let connection_handles = self.connection_handles.clone();
 
         let handle = tokio::spawn(async move {
             let mut connection_count = 0u32;
@@ -79,25 +85,37 @@ impl WebsockifyProxy {
                               connection_count, client_addr, listen_port);
                         
                         let target_host = target_host.clone();
+                        let running_clone = running.clone();
                         let conn_id = connection_count;
+                        let connection_handles_clone = connection_handles.clone();
                         
-                        tokio::spawn(async move {
-                            debug!("Connection #{}: Upgrading to WebSocket protocol", conn_id);
+                        // Spawn connection handler and track the handle
+                        let conn_handle = tokio::spawn(async move {
+                            trace!("Connection #{}: Upgrading to WebSocket protocol", conn_id);
                             
                             match handle_websocket_connection(
                                 stream,
                                 target_host.clone(),
                                 target_port,
-                                conn_id
+                                conn_id,
+                                running_clone,
                             ).await {
                                 Ok(_) => {
-                                    info!("Connection #{}: Closed cleanly", conn_id);
+                                    trace!("Connection #{}: Closed cleanly", conn_id);
                                 }
                                 Err(e) => {
                                     warn!("Connection #{}: Error: {}", conn_id, e);
                                 }
                             }
                         });
+                        
+                        // Store the connection handle for cleanup on stop
+                        {
+                            let mut handles = connection_handles_clone.lock();
+                            // Clean up completed handles to prevent memory leak
+                            handles.retain(|h| !h.is_finished());
+                            handles.push(conn_handle);
+                        }
                     }
                     Err(e) => {
                         error!("Failed to accept WebSocket connection on port {}: {}", listen_port, e);
@@ -113,17 +131,33 @@ impl WebsockifyProxy {
     }
 
     /// Stop the websockify proxy
-    pub async fn stop(&mut self) -> Result<()> {
+    /// 
+    /// Note: This is intentionally synchronous to avoid Send trait issues
+    /// when the mutex guard is held across await points.
+    pub fn stop(&mut self) -> Result<()> {
         if !self.running.load(Ordering::SeqCst) {
-            debug!("Websockify proxy on port {} already stopped", self.listen_port);
+            trace!("Websockify proxy on port {} already stopped", self.listen_port);
             return Ok(());
         }
 
         info!("Stopping websockify proxy on port {}...", self.listen_port);
         self.running.store(false, Ordering::SeqCst);
 
+        // Abort the listener task
         if let Some(handle) = self.listener_handle.take() {
             handle.abort();
+        }
+        
+        // Abort all active connection tasks
+        {
+            let mut handles = self.connection_handles.lock();
+            let active_count = handles.len();
+            if active_count > 0 {
+                info!("Aborting {} active WebSocket connection(s) on port {}...", active_count, self.listen_port);
+                for handle in handles.drain(..) {
+                    handle.abort();
+                }
+            }
         }
 
         info!("✓ Websockify proxy on port {} stopped successfully", self.listen_port);
@@ -155,15 +189,49 @@ async fn handle_websocket_connection(
     target_host: String,
     target_port: u16,
     conn_id: u32,
+    running: Arc<AtomicBool>,
 ) -> Result<()> {
-    // Upgrade HTTP connection to WebSocket
-    debug!("Connection #{}: Upgrading HTTP to WebSocket", conn_id);
+    // Check if we should still be running before starting
+    if !running.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     
-    let ws_stream = accept_async(stream)
+    // Upgrade HTTP connection to WebSocket with proper subprotocol negotiation
+    // NoVNC requires 'binary' or 'base64' subprotocol in Sec-WebSocket-Protocol header
+    trace!("Connection #{}: Upgrading HTTP to WebSocket", conn_id);
+    
+    let callback = |req: &Request, mut response: Response| {
+        // Check for Sec-WebSocket-Protocol header
+        if let Some(protocols) = req.headers().get("Sec-WebSocket-Protocol") {
+            if let Ok(protocols_str) = protocols.to_str() {
+                // Check if client supports 'binary' (preferred) or 'base64'
+                let requested: Vec<&str> = protocols_str.split(',').map(|s| s.trim()).collect();
+                
+                if requested.iter().any(|&p| p == "binary") {
+                    // Prefer binary protocol (more efficient)
+                    response.headers_mut().insert(
+                        "Sec-WebSocket-Protocol",
+                        "binary".parse().unwrap()
+                    );
+                    info!("Connection #{}: Negotiated 'binary' subprotocol", conn_id);
+                } else if requested.iter().any(|&p| p == "base64") {
+                    // Fallback to base64 if binary not available
+                    response.headers_mut().insert(
+                        "Sec-WebSocket-Protocol",
+                        "base64".parse().unwrap()
+                    );
+                    info!("Connection #{}: Negotiated 'base64' subprotocol", conn_id);
+                }
+            }
+        }
+        Ok(response)
+    };
+    
+    let ws_stream = accept_hdr_async(stream, callback)
         .await
-        .context("Failed to accept WebSocket")?;
+        .context("Failed to accept WebSocket connection")?;
 
-    debug!("Connection #{}: WebSocket established, connecting to VNC at {}:{}", 
+    trace!("Connection #{}: WebSocket established, connecting to VNC at {}:{}", 
            conn_id, target_host, target_port);
 
     // Connect to VNC server
@@ -171,9 +239,9 @@ async fn handle_websocket_connection(
         .await
         .context(format!("Failed to connect to VNC server at {}:{}", target_host, target_port))?;
 
-    info!("Connection #{}: Successfully connected to VNC server {}:{}", 
+    info!("Connection #{}: NoVNC client connected to VNC server {}:{}", 
           conn_id, target_host, target_port);
-    debug!("Connection #{}: Starting bidirectional data forwarding", conn_id);
+    trace!("Connection #{}: Starting bidirectional data forwarding", conn_id);
 
     // Split WebSocket and TCP streams
     let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -182,25 +250,32 @@ async fn handle_websocket_connection(
     // Forward WebSocket → VNC (browser to server)
     let conn_id_ws = conn_id;
     let ws_to_vnc = tokio::spawn(async move {
-        let mut byte_count = 0u64;
-        let mut message_count = 0u32;
-        
         while let Some(msg) = ws_read.next().await {
             match msg {
                 Ok(Message::Binary(data)) => {
                     // Forward binary data to VNC server
-                    let data_len = data.len();
-                    byte_count += data_len as u64;
-                    message_count += 1;
-                    
-                    if message_count % 100 == 0 {
-                        debug!("Connection #{}: WS→VNC forwarded {} messages ({} bytes)", 
-                               conn_id_ws, message_count, byte_count);
-                    }
-                    
                     if let Err(e) = vnc_write.write_all(&data).await {
                         warn!("Connection #{}: Error writing to VNC server: {}", conn_id_ws, e);
                         break;
+                    }
+                    // Flush to ensure data is sent immediately
+                    if let Err(e) = vnc_write.flush().await {
+                        warn!("Connection #{}: Error flushing to VNC server: {}", conn_id_ws, e);
+                        break;
+                    }
+                }
+                Ok(Message::Text(text)) => {
+                    // NoVNC with base64 subprotocol sends text messages
+                    // Decode base64 and forward to VNC server
+                    if let Ok(data) = base64_decode(&text) {
+                        if let Err(e) = vnc_write.write_all(&data).await {
+                            warn!("Connection #{}: Error writing base64 data to VNC server: {}", conn_id_ws, e);
+                            break;
+                        }
+                        if let Err(e) = vnc_write.flush().await {
+                            warn!("Connection #{}: Error flushing to VNC server: {}", conn_id_ws, e);
+                            break;
+                        }
                     }
                 }
                 Ok(Message::Close(frame)) => {
@@ -208,10 +283,10 @@ async fn handle_websocket_connection(
                     break;
                 }
                 Ok(Message::Ping(_)) => {
-                    debug!("Connection #{}: WebSocket ping received", conn_id_ws);
+                    // Ping received, pong is sent automatically by tungstenite
                 }
                 Ok(_) => {
-                    // Ignore text, pong, and other message types
+                    // Ignore pong and other message types
                 }
                 Err(e) => {
                     warn!("Connection #{}: WebSocket read error: {}", conn_id_ws, e);
@@ -220,16 +295,14 @@ async fn handle_websocket_connection(
             }
         }
         
-        info!("Connection #{}: WS→VNC forwarding stopped (total: {} messages, {} bytes)", 
-              conn_id_ws, message_count, byte_count);
+        info!("Connection #{}: WS→VNC forwarding stopped", conn_id_ws);
     });
 
     // Forward VNC → WebSocket (server to browser)
     let conn_id_vnc = conn_id;
     let vnc_to_ws = tokio::spawn(async move {
-        let mut buffer = vec![0u8; 8192];
-        let mut byte_count = 0u64;
-        let mut message_count = 0u32;
+        // Larger buffer for screen updates (64KB for better throughput)
+        let mut buffer = vec![0u8; 65536];
         
         loop {
             match vnc_read.read(&mut buffer).await {
@@ -241,13 +314,6 @@ async fn handle_websocket_connection(
                 Ok(n) => {
                     // Forward data to WebSocket as binary message
                     let data = buffer[..n].to_vec();
-                    byte_count += n as u64;
-                    message_count += 1;
-                    
-                    if message_count % 100 == 0 {
-                        debug!("Connection #{}: VNC→WS forwarded {} messages ({} bytes)", 
-                               conn_id_vnc, message_count, byte_count);
-                    }
                     
                     if let Err(e) = ws_write.send(Message::Binary(data)).await {
                         warn!("Connection #{}: Error sending to WebSocket: {}", conn_id_vnc, e);
@@ -261,8 +327,7 @@ async fn handle_websocket_connection(
             }
         }
         
-        info!("Connection #{}: VNC→WS forwarding stopped (total: {} messages, {} bytes)", 
-              conn_id_vnc, message_count, byte_count);
+        info!("Connection #{}: VNC→WS forwarding stopped", conn_id_vnc);
         
         // Send close message
         let _ = ws_write.send(Message::Close(None)).await;
@@ -271,15 +336,21 @@ async fn handle_websocket_connection(
     // Wait for either direction to finish
     tokio::select! {
         _ = ws_to_vnc => {
-            debug!("Connection #{}: WS→VNC task completed", conn_id);
+            trace!("Connection #{}: WS→VNC task completed", conn_id);
         }
         _ = vnc_to_ws => {
-            debug!("Connection #{}: VNC→WS task completed", conn_id);
+            trace!("Connection #{}: VNC→WS task completed", conn_id);
         }
     }
 
-    debug!("Connection #{}: Bidirectional forwarding ended", conn_id);
+    trace!("Connection #{}: Bidirectional forwarding ended", conn_id);
     Ok(())
+}
+
+/// Decode base64 string to bytes (for base64 subprotocol support)
+fn base64_decode(input: &str) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    STANDARD.decode(input)
 }
 
 #[cfg(test)]

@@ -29,11 +29,11 @@
     <div class="guide-section highlight-section">
       <h3>🌐 NoVNC (Browser-Based Client)</h3>
       <p>Connect using NoVNC for browser-based access via WebSocket:</p>
-      <p><strong>WebSocket URL format:</strong> <code>ws://&lt;hostname&gt;:&lt;port&gt;/websockify</code></p>
-      <p><em>Example:</em> <code>ws://workstation-1:5900/websockify</code></p>
+      <p><strong>WebSocket URL format:</strong> <code>ws://&lt;hostname&gt;:&lt;websockify_port&gt;/</code></p>
+      <p><em>Example:</em> <code>ws://workstation-1:6080/</code></p>
       <div class="info-box">
         <p><strong>Note:</strong> NoVNC requires a WebSocket proxy (websockify) between the browser and VNC server.</p>
-        <p>The websockify URL is provided by the server and can be used directly with NoVNC clients or the NoVNC HTML interface.</p>
+        <p>The websockify runs on port 6080+ (not the VNC port). The exact URL is shown in the server status after starting.</p>
       </div>
     </div>
     
@@ -53,11 +53,12 @@
       <h3>Multi-Monitor Support</h3>
       <p>Each monitor gets its own VNC server with automatic port assignment:</p>
       <ul>
-        <li><strong>Monitor 0 (Primary):</strong> VNC port 5900, WebSocket ws://hostname:5900/websockify</li>
-        <li><strong>Monitor 1:</strong> VNC port 5901, WebSocket ws://hostname:5901/websockify</li>
-        <li><strong>Monitor 2:</strong> VNC port 5902, WebSocket ws://hostname:5902/websockify</li>
+        <li><strong>Monitor 0 (Primary):</strong> VNC port 5900, WebSocket ws://hostname:6080/</li>
+        <li><strong>Monitor 1:</strong> VNC port 5901, WebSocket ws://hostname:6081/</li>
+        <li><strong>Monitor 2:</strong> VNC port 5902, WebSocket ws://hostname:6082/</li>
         <li><strong>Audio (Shared):</strong> WebSocket ws://hostname:6900/audio</li>
       </ul>
+      <p class="description">Note: Use the websockify port (608x) for NoVNC, not the VNC port (590x)</p>
     </div>
     
     <div class="features-section">

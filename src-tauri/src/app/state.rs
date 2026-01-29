@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tokio::runtime::Runtime;
 use parking_lot::RwLock as ParkingLotRwLock;
+use parking_lot::Mutex as ParkingLotMutex;
 
 use crate::lib::DEFAULT_SERVER_PORT;
 use crate::vnc::{VncKvmServer, ScreencastRegistration, VncServerManager};
+use crate::vnc::websockify::WebsockifyProxy;
 use crate::app::commands::{VncConfig, AudioConfig, ConnectionConfig};
 
 /// Server configuration options
@@ -44,6 +47,8 @@ pub struct ServerState {
     pub vnc_config: Arc<ParkingLotRwLock<VncConfig>>,
     pub audio_config: Arc<ParkingLotRwLock<AudioConfig>>,
     pub connection_config: Arc<ParkingLotRwLock<ConnectionConfig>>,
+    /// WebSockify proxies for NoVNC support (monitor_id -> proxy)
+    pub websockify_proxies: HashMap<usize, Arc<ParkingLotMutex<WebsockifyProxy>>>,
 }
 
 impl ServerState {
@@ -62,6 +67,7 @@ impl ServerState {
             vnc_config: Arc::new(ParkingLotRwLock::new(VncConfig::default())),
             audio_config: Arc::new(ParkingLotRwLock::new(AudioConfig::default())),
             connection_config: Arc::new(ParkingLotRwLock::new(ConnectionConfig::default())),
+            websockify_proxies: HashMap::new(),
         }
     }
 }

@@ -26,11 +26,12 @@
         <div class="url-examples">
           <p><strong>URL Format:</strong></p>
           <ul>
-            <li v-if="!useTlsUrls">VNC WebSocket: <code>ws://hostname:5900/websockify</code></li>
-            <li v-else>VNC WebSocket: <code>wss://hostname:5900/websockify</code></li>
+            <li v-if="!useTlsUrls">VNC WebSocket: <code>ws://hostname:6080/</code></li>
+            <li v-else>VNC WebSocket: <code>wss://hostname:6080/</code></li>
             <li v-if="!useTlsUrls">Audio: <code>ws://hostname:6900/audio</code></li>
             <li v-else>Audio: <code>wss://hostname:6900/audio</code></li>
           </ul>
+          <p class="url-note">Note: Websockify runs on port 6080+, not the VNC port 5900+</p>
         </div>
         
         <div class="tls-requirements">

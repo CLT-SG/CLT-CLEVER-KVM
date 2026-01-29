@@ -2,46 +2,81 @@
 
 ## Overview
 
-CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implementation with optimized WebSocket-based audio streaming. The new architecture eliminates MediaMTX dependencies and reduces latency significantly by using direct WebSocket connections for audio instead of RTSP.
+CLT-CLEVER-KVM includes a native VNC (Virtual Network Computing) server implementation with optimized WebSocket-based audio streaming. The architecture provides direct connections for desktop VNC clients and a built-in WebSockify proxy for browser-based NoVNC clients.
+
+## Port Assignments
+
+| Service | Ports | Description |
+|---------|-------|-------------|
+| **VNC** | 5900+ | Native VNC protocol for desktop clients (TigerVNC, RealVNC, etc.) |
+| **WebSockify** | 6080+ | WebSocket proxy for browser clients (NoVNC) |
+| **Audio** | 6900 | WebSocket audio stream (Opus encoded, shared for all monitors) |
+
+**Multi-Monitor Port Mapping:**
+
+| Monitor | VNC Port | WebSockify Port | Description |
+|---------|----------|-----------------|-------------|
+| Monitor 0 | 5900 | 6080 | Primary display |
+| Monitor 1 | 5901 | 6081 | Secondary display |
+| Monitor 2 | 5902 | 6082 | Third display |
+| Monitor N | 5900+N | 6080+N | Additional displays |
+| Audio | N/A | 6900 | Shared WebSocket audio |
 
 ## Architecture Overview
 
 ### Optimized Low-Latency Design
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  CLT-CLEVER-KVM (Tauri/Rust)                           │
-│                                                         │
-│  ┌───────────────────────────────────────────────────┐ │
-│  │  VNC Servers (Multi-Monitor)                      │ │
-│  │  ┌────────────────┐  ┌────────────────┐          │ │
-│  │  │ Monitor 0      │  │ Monitor 1      │  ...     │ │
-│  │  │ Port: 5900     │  │ Port: 5901     │          │ │
-│  │  │ RFB 3.8        │  │ RFB 3.8        │          │ │
-│  │  └────────────────┘  └────────────────┘          │ │
-│  └───────────────────────────────────────────────────┘ │
-│                                                         │
-│  ┌───────────────────────────────────────────────────┐ │
-│  │  Shared Audio WebSocket (Port 6900)               │ │
-│  │  - Single streamer for all monitors               │ │
-│  │  - cpal audio capture (system audio)              │ │
-│  │  - Opus encoding (48kHz stereo, low-latency)      │ │
-│  │  - Binary WebSocket protocol                      │ │
-│  └───────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
-         ↓ (VNC: 5900+, WebSocket: 6900)
-┌─────────────────────────────────────────────────────────┐
-│      clever-node (Node.js) - Optional Relay             │
-│      - NoVNC WebSocket proxy                            │
-│      - Audio WebSocket relay                            │
-└─────────────────────────────────────────────────────────┘
-         ↓ (Browser WebSocket)
-┌─────────────────────────────────────────────────────────┐
-│    Browser (NoVNC Client)                               │
-│    - NoVNC for video/input                              │
-│    - Web Audio API for audio                            │
-│    - Native cursor rendering (planned)                  │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  CLT-CLEVER-KVM (Tauri/Rust)                                        │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │  VNC Servers (Multi-Monitor)                                   │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐                   │ │
+│  │  │ Monitor 0        │  │ Monitor 1        │  ...              │ │
+│  │  │ VNC Port: 5900   │  │ VNC Port: 5901   │                   │ │
+│  │  │ RFB 3.8          │  │ RFB 3.8          │                   │ │
+│  │  └──────────────────┘  └──────────────────┘                   │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │  WebSockify Proxies (For NoVNC Browser Clients)                │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐                   │ │
+│  │  │ Monitor 0        │  │ Monitor 1        │  ...              │ │
+│  │  │ Port: 6080       │  │ Port: 6081       │                   │ │
+│  │  │ WS → VNC:5900    │  │ WS → VNC:5901    │                   │ │
+│  │  └──────────────────┘  └──────────────────┘                   │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │  Shared Audio WebSocket (Port 6900)                            │ │
+│  │  - Single streamer for all monitors                            │ │
+│  │  - cpal audio capture (system audio)                           │ │
+│  │  - Opus encoding (48kHz stereo, low-latency)                   │ │
+│  │  - Binary WebSocket protocol                                   │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+
+Connection Flows:
+
+NoVNC (Browser):
+┌───────────────┐                          ┌─────────────────┐
+│ NoVNC Browser │ ──── ws://host:6080/ ──→ │ WebSockify:6080 │
+│               │                          │    ↓            │
+│               │                          │ VNC Server:5900 │
+└───────────────┘                          └─────────────────┘
+
+Desktop VNC Client:
+┌───────────────┐                          ┌─────────────────┐
+│ TigerVNC      │ ──── vnc://host:5900 ──→ │ VNC Server:5900 │
+│ RealVNC       │                          │                 │
+└───────────────┘                          └─────────────────┘
+
+Audio:
+┌───────────────┐                          ┌─────────────────┐
+│ Audio Client  │ ─ ws://host:6900/audio → │ Audio WS:6900   │
+│ (Browser)     │                          │ (Opus encoded)  │
+└───────────────┘                          └─────────────────┘
 ```
 
 ## Performance Metrics
@@ -114,23 +149,25 @@ console.log('Audio URL:', vncInfo.audio_url);
 
 #### NoVNC (Browser-based VNC Client)
 
-NoVNC requires a WebSocket connection through websockify. Use the websockify URL:
+CLT-CLEVER-KVM includes a built-in WebSockify proxy for NoVNC connections. Use the websockify URL:
 
 ```
-ws://<hostname>:5900/websockify
+ws://<hostname>:6080/
 ```
+
+**⚠️ Important:** NoVNC connects to the **WebSockify port (6080+)**, NOT the VNC port (5900+).
 
 Example NoVNC connection:
 ```javascript
 // NoVNC connection in browser
-const rfb = new RFB(targetElement, 'ws://workstation-1:5900/websockify', {
+const rfb = new RFB(targetElement, 'ws://workstation-1:6080/', {
   credentials: { password: '' }
 });
 ```
 
 Or using the NoVNC HTML interface:
 ```
-http://novnc-server/vnc.html?host=<hostname>&port=5900&path=websockify
+http://novnc-server/vnc.html?host=<hostname>&port=6080
 ```
 
 #### TigerVNC
@@ -161,13 +198,20 @@ Audio is encoded using Opus codec:
 
 ### 4. NoVNC Setup and Configuration
 
-#### WebSocket Proxy Requirements
+#### Built-in WebSockify Proxy
 
-NoVNC requires a WebSocket-to-TCP proxy (websockify) to connect to the native VNC server. The CLT-CLEVER-KVM application provides VNC servers on standard TCP ports (5900+), and you need websockify to bridge the WebSocket connection from the browser to the TCP VNC port.
+CLT-CLEVER-KVM includes a built-in WebSockify proxy that automatically starts with the VNC server:
 
-**Option 1: Using websockify directly**
+- **Port 6080** → bridges to VNC server on port 5900 (Monitor 0)
+- **Port 6081** → bridges to VNC server on port 5901 (Monitor 1)
+- **Port 6082** → bridges to VNC server on port 5902 (Monitor 2)
 
-Install and run websockify:
+No external websockify installation is required!
+
+#### External WebSockify (Optional)
+
+If you need to run websockify externally:
+
 ```bash
 # Install websockify
 pip install websockify
@@ -179,32 +223,31 @@ websockify --web=/usr/share/novnc 6080 localhost:5900
 # http://localhost:6080/vnc.html?host=localhost&port=6080
 ```
 
-**Option 2: Using clever-node relay**
+**Option 2: Nginx as WebSocket proxy (for TLS termination)**
 
-The clever-node server can act as a WebSocket relay:
-```javascript
-// clever-node handles the websockify path
-// Connect to: ws://clever-node:5900/websockify
-```
-
-**Option 3: Nginx as WebSocket proxy**
-
-Configure Nginx to proxy WebSocket connections:
+Configure Nginx to proxy WebSocket connections with TLS:
 ```nginx
-location /websockify {
-    proxy_pass http://localhost:5900;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
+server {
+    listen 443 ssl;
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    # WebSockify proxy for NoVNC
+    location / {
+        proxy_pass http://localhost:6080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
 }
 ```
 
 #### Multi-Monitor NoVNC Setup
 
-For multiple monitors, each monitor has its own VNC port:
-- Monitor 0: `ws://hostname:5900/websockify`
-- Monitor 1: `ws://hostname:5901/websockify`
-- Monitor 2: `ws://hostname:5902/websockify`
+For multiple monitors, each monitor has its own WebSockify port:
+- Monitor 0: `ws://hostname:6080/` → VNC port 5900
+- Monitor 1: `ws://hostname:6081/` → VNC port 5901
+- Monitor 2: `ws://hostname:6082/` → VNC port 5902
 
 All monitors share the same audio stream:
 - Audio: `ws://hostname:6900/audio`
@@ -224,60 +267,6 @@ audioWs.onmessage = async (event) => {
   // Play decoded audio through Web Audio API
 };
 ```
-
-## Legacy MediaMTX Integration (Deprecated)
-
-**Note**: MediaMTX integration has been removed in favor of direct WebSocket streaming. The following documentation is kept for reference only.
-
-<details>
-<summary>Legacy MediaMTX Configuration (Click to expand)</summary>
-
-MediaMTX was previously used to relay audio streams:
-
-```yaml
-# mediamtx.yml (DEPRECATED)
-paths:
-  workstation_1_video:
-    source: vnc://workstation-1:5900
-    sourceProtocol: vnc
-    
-  workstation_1_audio:
-    source: rtsp://workstation-1:5901/audio
-    sourceProtocol: rtsp
-```
-
-**Migration**: Use direct WebSocket connections instead:
-- Video: Connect to VNC directly (vnc://hostname:5900)
-- Audio: Connect to WebSocket (ws://hostname:6900/audio)
-
-</details>
-
-#### MediaMTX Auto-Discovery
-
-CLT-CLEVER-KVM includes an automatic MediaMTX server discovery feature that scans your local network for MediaMTX servers running on port 9997.
-
-**Automatic Scanning:**
-1. Open Advanced Settings in the Configuration tab
-2. Enable "Auto-scan network for MediaMTX server on port 9997"
-3. The application will automatically scan your local subnet (e.g., 192.168.1.0/24) on startup
-4. Found servers will be listed in the MediaMTX URL dropdown
-
-**Manual Configuration:**
-1. Open Advanced Settings in the Configuration tab
-2. Enter the MediaMTX server URL manually in the "MediaMTX URL" field
-3. Format: `http://<ip-address>:9997` or `http://<hostname>:9997`
-
-**Manual Scanning:**
-- Click the "🔍 Scan" button to trigger a manual network scan
-- The scan checks all hosts in your subnet with a 200ms timeout per host
-- Found servers are displayed in a dropdown for easy selection
-
-**How It Works:**
-- Detects your local network subnet automatically
-- Scans all IP addresses in the subnet (1-254) in parallel
-- Tests TCP connection to port 9997 on each host
-- Returns list of responsive MediaMTX servers
-- Auto-selects the first found server when auto-scan is enabled
 
 ## Configuration
 
@@ -390,14 +379,14 @@ Native cursor rendering via RFB 3.8 cursor pseudo-encoding is planned but not ye
 
 ## Audio Streaming
 
-### WebSocket-Based Audio (Current)
+### WebSocket-Based Audio
 
 CLT-CLEVER-KVM uses direct WebSocket streaming for audio with significant performance improvements:
 
 - **Direct WebSocket**: Audio streams via ws://hostname:6900/audio
 - **Opus Encoding**: 48kHz stereo with low-latency mode
-- **Low Latency**: 5-30ms (vs 300-800ms with RTSP)
-- **No Relay Required**: Direct connection to client, no MediaMTX needed
+- **Low Latency**: 5-30ms end-to-end
+- **No External Dependencies**: Direct connection, no relay required
 - **Binary Protocol**: Efficient binary WebSocket messages
 
 ### Audio Quality Settings
@@ -407,21 +396,6 @@ Audio encoding uses Opus codec with these settings:
 - **Channels**: 2 (stereo)
 - **Encoding Mode**: Low Delay (optimized for real-time)
 - **Bitrate**: Adaptive
-
-### Legacy RTSP Audio (Deprecated)
-
-<details>
-<summary>Previous RTSP-based audio (Click to expand)</summary>
-
-The previous implementation used RTSP:
-- Required MediaMTX server for relay
-- Higher latency: 300-800ms
-- Multiple encoding passes
-- Complex infrastructure
-
-**Migration**: Update clients to use WebSocket URLs instead of RTSP URLs.
-
-</details>
 
 ## Keyboard and Mouse Control
 
@@ -575,7 +549,8 @@ Returns:
 ```typescript
 interface VncServerInfo {
   vnc_url: string;           // VNC connection URL (e.g., vnc://hostname:5900)
-  websockify_url: string;    // WebSocket URL for NoVNC (e.g., ws://hostname:5900/websockify)
+  websockify_url: string;    // WebSocket URL for NoVNC (e.g., ws://hostname:6080/)
+  websockify_port: number;   // WebSockify port (6080+ for each monitor)
   audio_url?: string;        // Audio WebSocket URL (e.g., ws://hostname:6900/audio)
   monitor_id: number;        // Monitor index (0-based)
   monitor_name: string;      // Monitor display name
@@ -583,11 +558,16 @@ interface VncServerInfo {
   position_y: number;        // Monitor Y position
   width: number;             // Monitor width in pixels
   height: number;            // Monitor height in pixels
-  vnc_port: number;          // VNC port number
+  port: number;              // VNC port number (5900+ for each monitor)
   audio_port?: number;       // Audio port number (6900 when audio is enabled)
   clients_connected: number; // Number of connected VNC clients
 }
 ```
+
+**Port assignments:**
+- VNC port = 5900 + monitor_id (e.g., 5900, 5901, 5902)
+- WebSockify port = 6080 + monitor_id (e.g., 6080, 6081, 6082)
+- Audio port = 6900 (shared)
 
 #### stop_vnc_server
 Stop the VNC server.
@@ -750,8 +730,8 @@ await invoke('set_use_tls_urls', { useTls: true });
 ```
 
 This changes URL generation:
-- `ws://hostname:6900/audio` → `wss://hostname:6900/audio`
-- `ws://hostname:5900/websockify` → `wss://hostname:5900/websockify`
+- `ws://hostname:6080/` → `wss://hostname:6080/` (WebSockify)
+- `ws://hostname:6900/audio` → `wss://hostname:6900/audio` (Audio)
 
 2. **Set up TLS termination at reverse proxy level** (industry standard approach)
 
@@ -764,15 +744,17 @@ server {
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
     
-    location /audio {
-        proxy_pass http://localhost:6900;
+    # WebSockify for NoVNC (port 6080)
+    location / {
+        proxy_pass http://localhost:6080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
     }
     
-    location /websockify {
-        proxy_pass http://localhost:5900;
+    # Audio WebSocket (port 6900)
+    location /audio {
+        proxy_pass http://localhost:6900;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -783,8 +765,8 @@ server {
 #### Caddy (Automatic HTTPS)
 ```
 your-domain.com {
+    reverse_proxy /* localhost:6080
     reverse_proxy /audio localhost:6900
-    reverse_proxy /websockify localhost:5900
 }
 ```
 
