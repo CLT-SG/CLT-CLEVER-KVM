@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::{accept_hdr_async, tungstenite::Message};
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tracing::{info, debug, warn, error, trace};
+use parking_lot::Mutex as ParkingLotMutex;
 
 /// WebSocket-to-VNC proxy (websockify implementation)
 /// 
@@ -24,6 +25,8 @@ pub struct WebsockifyProxy {
     target_port: u16,
     running: Arc<AtomicBool>,
     listener_handle: Option<JoinHandle<()>>,
+    /// Shared list of active connection handles that need to be aborted on stop
+    connection_handles: Arc<ParkingLotMutex<Vec<JoinHandle<()>>>>,
 }
 
 impl WebsockifyProxy {
@@ -40,6 +43,7 @@ impl WebsockifyProxy {
             target_port,
             running: Arc::new(AtomicBool::new(false)),
             listener_handle: None,
+            connection_handles: Arc::new(ParkingLotMutex::new(Vec::new())),
         }
     }
 
@@ -68,6 +72,7 @@ impl WebsockifyProxy {
         let target_host = self.target_host.clone();
         let target_port = self.target_port;
         let listen_port = self.listen_port;
+        let connection_handles = self.connection_handles.clone();
 
         let handle = tokio::spawn(async move {
             let mut connection_count = 0u32;
@@ -80,16 +85,20 @@ impl WebsockifyProxy {
                               connection_count, client_addr, listen_port);
                         
                         let target_host = target_host.clone();
+                        let running_clone = running.clone();
                         let conn_id = connection_count;
+                        let connection_handles_clone = connection_handles.clone();
                         
-                        tokio::spawn(async move {
+                        // Spawn connection handler and track the handle
+                        let conn_handle = tokio::spawn(async move {
                             trace!("Connection #{}: Upgrading to WebSocket protocol", conn_id);
                             
                             match handle_websocket_connection(
                                 stream,
                                 target_host.clone(),
                                 target_port,
-                                conn_id
+                                conn_id,
+                                running_clone,
                             ).await {
                                 Ok(_) => {
                                     trace!("Connection #{}: Closed cleanly", conn_id);
@@ -99,6 +108,14 @@ impl WebsockifyProxy {
                                 }
                             }
                         });
+                        
+                        // Store the connection handle for cleanup on stop
+                        {
+                            let mut handles = connection_handles_clone.lock();
+                            // Clean up completed handles to prevent memory leak
+                            handles.retain(|h| !h.is_finished());
+                            handles.push(conn_handle);
+                        }
                     }
                     Err(e) => {
                         error!("Failed to accept WebSocket connection on port {}: {}", listen_port, e);
@@ -126,8 +143,21 @@ impl WebsockifyProxy {
         info!("Stopping websockify proxy on port {}...", self.listen_port);
         self.running.store(false, Ordering::SeqCst);
 
+        // Abort the listener task
         if let Some(handle) = self.listener_handle.take() {
             handle.abort();
+        }
+        
+        // Abort all active connection tasks
+        {
+            let mut handles = self.connection_handles.lock();
+            let active_count = handles.len();
+            if active_count > 0 {
+                info!("Aborting {} active WebSocket connection(s) on port {}...", active_count, self.listen_port);
+                for handle in handles.drain(..) {
+                    handle.abort();
+                }
+            }
         }
 
         info!("✓ Websockify proxy on port {} stopped successfully", self.listen_port);
@@ -159,7 +189,13 @@ async fn handle_websocket_connection(
     target_host: String,
     target_port: u16,
     conn_id: u32,
+    running: Arc<AtomicBool>,
 ) -> Result<()> {
+    // Check if we should still be running before starting
+    if !running.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    
     // Upgrade HTTP connection to WebSocket with proper subprotocol negotiation
     // NoVNC requires 'binary' or 'base64' subprotocol in Sec-WebSocket-Protocol header
     trace!("Connection #{}: Upgrading HTTP to WebSocket", conn_id);
