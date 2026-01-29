@@ -113,7 +113,10 @@ impl WebsockifyProxy {
     }
 
     /// Stop the websockify proxy
-    pub async fn stop(&mut self) -> Result<()> {
+    /// 
+    /// Note: This is intentionally synchronous to avoid Send trait issues
+    /// when the mutex guard is held across await points.
+    pub fn stop(&mut self) -> Result<()> {
         if !self.running.load(Ordering::SeqCst) {
             debug!("Websockify proxy on port {} already stopped", self.listen_port);
             return Ok(());

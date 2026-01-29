@@ -859,7 +859,7 @@ pub async fn stop_vnc_server(
     // Stop all websockify proxies first
     for (monitor_id, proxy) in websockify_proxies {
         let mut proxy_guard = proxy.lock();
-        if let Err(e) = proxy_guard.stop().await {
+        if let Err(e) = proxy_guard.stop() {
             error!("❌ Failed to stop websockify proxy for monitor {}: {}", monitor_id, e);
         } else {
             info!("✅ Websockify proxy for monitor {} stopped", monitor_id);
