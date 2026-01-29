@@ -29,7 +29,7 @@ fn get_last_button_mask() -> &'static Mutex<u8> {
 pub fn handle_vnc_keyboard(key: u32, down: bool) -> Result<()> {
     let mut enigo = get_enigo().lock();
     
-    debug!("Keyboard event: key={} down={}", key, down);
+    trace!("Keyboard event: key={} down={}", key, down);
 
     // Convert VNC keysym to enigo Key
     let enigo_key = match key {
@@ -94,7 +94,7 @@ pub fn handle_vnc_keyboard(key: u32, down: bool) -> Result<()> {
                 return Ok(());
             }
             // Unknown key
-            debug!("Unknown VNC keysym: 0x{:x}", key);
+            trace!("Unknown VNC keysym: 0x{:x}", key);
             return Ok(());
         }
     };
@@ -115,7 +115,7 @@ pub fn handle_vnc_mouse(button_mask: u8, x: u16, y: u16) -> Result<()> {
     let mut last_pos = get_last_mouse_pos().lock();
     let mut last_buttons = get_last_button_mask().lock();
     
-    debug!("Mouse event: buttons=0x{:x} x={} y={}", button_mask, x, y);
+    trace!("Mouse event: buttons=0x{:x} x={} y={}", button_mask, x, y);
 
     // Move mouse if position changed
     if last_pos.0 != x || last_pos.1 != y {

@@ -133,10 +133,10 @@ impl WebSocketAudioStreamer {
         while *running.read() {
             match listener.accept().await {
                 Ok((stream, addr)) => {
-                    debug!("New WebSocket connection from: {}", addr);
+                    trace!("New WebSocket connection from: {}", addr);
                     match accept_async(stream).await {
                         Ok(ws_stream) => {
-                            info!("✅ WebSocket client connected: {}", addr);
+                            info!("✅ WebSocket audio client connected: {}", addr);
                             clients.write().push(ws_stream);
                         }
                         Err(e) => {
@@ -173,7 +173,7 @@ impl WebSocketAudioStreamer {
                     for (idx, client) in clients_list.iter_mut().enumerate() {
                         // Try to send, mark for removal if send fails
                         if let Err(e) = client.send(Message::Binary(audio_data.clone())).await {
-                            debug!("Client {} disconnected: {}", idx, e);
+                            trace!("Audio client {} disconnected: {}", idx, e);
                             indices_to_remove.push(idx);
                         }
                     }

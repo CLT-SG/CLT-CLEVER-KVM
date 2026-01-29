@@ -307,7 +307,7 @@ fn handle_vnc_client(
     client_id: usize,
     screen_capture: Arc<Mutex<ScreenCapture>>,
 ) -> IoResult<()> {
-    debug!("Handling VNC client {}", client_id);
+    trace!("Handling VNC client {}", client_id);
 
     // Set TCP options for low latency and ensure blocking mode
     stream.set_nodelay(true)?;
@@ -321,7 +321,7 @@ fn handle_vnc_client(
     let mut client_version = [0u8; 12];
     stream.read_exact(&mut client_version)?;
     
-    debug!("Client {} protocol: {:?}", client_id, 
+    trace!("Client {} protocol: {:?}", client_id, 
            String::from_utf8_lossy(&client_version));
 
     // Step 3: Send security types (1 = None)
@@ -394,7 +394,7 @@ fn handle_vnc_client(
                         // SetPixelFormat
                         let mut msg = [0u8; 19];
                         stream.read_exact(&mut msg)?;
-                        debug!("Client {} SetPixelFormat", client_id);
+                        trace!("Client {} SetPixelFormat", client_id);
                     }
                     2 => {
                         // SetEncodings
@@ -403,7 +403,7 @@ fn handle_vnc_client(
                         let num_encodings = u16::from_be_bytes([header[1], header[2]]);
                         let mut encodings = vec![0u8; (num_encodings as usize) * 4];
                         stream.read_exact(&mut encodings)?;
-                        debug!("Client {} SetEncodings: {} encodings", 
+                        trace!("Client {} SetEncodings: {} encodings", 
                                client_id, num_encodings);
                         
                         // TODO: Support cursor pseudo-encoding (-239) for RFB 3.8
@@ -447,7 +447,7 @@ fn handle_vnc_client(
                         let length = u32::from_be_bytes([header[3], header[4], header[5], header[6]]);
                         let mut _text = vec![0u8; length as usize];
                         stream.read_exact(&mut _text)?;
-                        debug!("Client {} ClientCutText: {} bytes", client_id, length);
+                        trace!("Client {} ClientCutText: {} bytes", client_id, length);
                     }
                     _ => {
                         warn!("Unknown message type from client {}: {}", 
@@ -457,13 +457,13 @@ fn handle_vnc_client(
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 // On Windows, this can occur transiently even in blocking mode
-                // Log at debug level and retry after brief delay
-                debug!("Client {} temporary WouldBlock, retrying", client_id);
+                // Log at trace level and retry after brief delay
+                trace!("Client {} temporary WouldBlock, retrying", client_id);
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 continue; // Retry the read
             }
             Err(e) => {
-                debug!("Client {} connection closed: {}", client_id, e);
+                trace!("Client {} connection closed: {}", client_id, e);
                 break;
             }
         }

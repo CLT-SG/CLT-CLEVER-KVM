@@ -82,7 +82,7 @@ impl WebsockifyProxy {
                         let conn_id = connection_count;
                         
                         tokio::spawn(async move {
-                            debug!("Connection #{}: Upgrading to WebSocket protocol", conn_id);
+                            trace!("Connection #{}: Upgrading to WebSocket protocol", conn_id);
                             
                             match handle_websocket_connection(
                                 stream,
@@ -91,7 +91,7 @@ impl WebsockifyProxy {
                                 conn_id
                             ).await {
                                 Ok(_) => {
-                                    info!("Connection #{}: Closed cleanly", conn_id);
+                                    trace!("Connection #{}: Closed cleanly", conn_id);
                                 }
                                 Err(e) => {
                                     warn!("Connection #{}: Error: {}", conn_id, e);
@@ -118,7 +118,7 @@ impl WebsockifyProxy {
     /// when the mutex guard is held across await points.
     pub fn stop(&mut self) -> Result<()> {
         if !self.running.load(Ordering::SeqCst) {
-            debug!("Websockify proxy on port {} already stopped", self.listen_port);
+            trace!("Websockify proxy on port {} already stopped", self.listen_port);
             return Ok(());
         }
 
@@ -160,13 +160,13 @@ async fn handle_websocket_connection(
     conn_id: u32,
 ) -> Result<()> {
     // Upgrade HTTP connection to WebSocket
-    debug!("Connection #{}: Upgrading HTTP to WebSocket", conn_id);
+    trace!("Connection #{}: Upgrading HTTP to WebSocket", conn_id);
     
     let ws_stream = accept_async(stream)
         .await
         .context("Failed to accept WebSocket")?;
 
-    debug!("Connection #{}: WebSocket established, connecting to VNC at {}:{}", 
+    trace!("Connection #{}: WebSocket established, connecting to VNC at {}:{}", 
            conn_id, target_host, target_port);
 
     // Connect to VNC server
@@ -174,9 +174,9 @@ async fn handle_websocket_connection(
         .await
         .context(format!("Failed to connect to VNC server at {}:{}", target_host, target_port))?;
 
-    info!("Connection #{}: Successfully connected to VNC server {}:{}", 
+    info!("Connection #{}: NoVNC client connected to VNC server {}:{}", 
           conn_id, target_host, target_port);
-    debug!("Connection #{}: Starting bidirectional data forwarding", conn_id);
+    trace!("Connection #{}: Starting bidirectional data forwarding", conn_id);
 
     // Split WebSocket and TCP streams
     let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -196,8 +196,8 @@ async fn handle_websocket_connection(
                     byte_count += data_len as u64;
                     message_count += 1;
                     
-                    if message_count % 100 == 0 {
-                        debug!("Connection #{}: WS→VNC forwarded {} messages ({} bytes)", 
+                    if message_count % 1000 == 0 {
+                        trace!("Connection #{}: WS→VNC forwarded {} messages ({} bytes)", 
                                conn_id_ws, message_count, byte_count);
                     }
                     
@@ -211,7 +211,7 @@ async fn handle_websocket_connection(
                     break;
                 }
                 Ok(Message::Ping(_)) => {
-                    debug!("Connection #{}: WebSocket ping received", conn_id_ws);
+                    trace!("Connection #{}: WebSocket ping received", conn_id_ws);
                 }
                 Ok(_) => {
                     // Ignore text, pong, and other message types
@@ -247,8 +247,8 @@ async fn handle_websocket_connection(
                     byte_count += n as u64;
                     message_count += 1;
                     
-                    if message_count % 100 == 0 {
-                        debug!("Connection #{}: VNC→WS forwarded {} messages ({} bytes)", 
+                    if message_count % 1000 == 0 {
+                        trace!("Connection #{}: VNC→WS forwarded {} messages ({} bytes)", 
                                conn_id_vnc, message_count, byte_count);
                     }
                     
@@ -274,14 +274,14 @@ async fn handle_websocket_connection(
     // Wait for either direction to finish
     tokio::select! {
         _ = ws_to_vnc => {
-            debug!("Connection #{}: WS→VNC task completed", conn_id);
+            trace!("Connection #{}: WS→VNC task completed", conn_id);
         }
         _ = vnc_to_ws => {
-            debug!("Connection #{}: VNC→WS task completed", conn_id);
+            trace!("Connection #{}: VNC→WS task completed", conn_id);
         }
     }
 
-    debug!("Connection #{}: Bidirectional forwarding ended", conn_id);
+    trace!("Connection #{}: Bidirectional forwarding ended", conn_id);
     Ok(())
 }
 

@@ -162,7 +162,7 @@ impl InputHandler {
                 // Translate coordinates to global screen space if monitor_id is provided
                 let (global_x, global_y) = self.translate_coordinates(x, y, monitor_id)?;
                 self.enigo.mouse_move_to(global_x, global_y);
-                debug!("Mouse move to ({}, {})", global_x, global_y);
+                trace!("Mouse move to ({}, {})", global_x, global_y);
             }
             
             InputEvent::MouseDown { button, x, y, monitor_id } => {
@@ -171,7 +171,7 @@ impl InputHandler {
                 self.enigo.mouse_move_to(global_x, global_y);
                 let button = self.map_mouse_button(&button)?;
                 self.enigo.mouse_down(button);
-                debug!("Mouse down {:?} at ({}, {})", button, global_x, global_y);
+                trace!("Mouse down {:?} at ({}, {})", button, global_x, global_y);
             }
             
             InputEvent::MouseUp { button, x, y, monitor_id } => {
@@ -180,7 +180,7 @@ impl InputHandler {
                 self.enigo.mouse_move_to(global_x, global_y);
                 let button = self.map_mouse_button(&button)?;
                 self.enigo.mouse_up(button);
-                debug!("Mouse up {:?} at ({}, {})", button, global_x, global_y);
+                trace!("Mouse up {:?} at ({}, {})", button, global_x, global_y);
             }
             
             InputEvent::MouseWheel { delta_y, delta_x, monitor_id: _ } => {
@@ -335,14 +335,14 @@ impl InputHandler {
                     let primary = &touches[0];
                     let (global_x, global_y) = self.translate_coordinates(primary.x, primary.y, monitor_id)?;
                     self.enigo.mouse_move_to(global_x, global_y);
-                    debug!("Multi-touch primary point: ({}, {})", global_x, global_y);
+                    trace!("Multi-touch primary point: ({}, {})", global_x, global_y);
                 }
             }
             
             InputEvent::GamepadEvent { button, value, is_pressed } => {
                 // Gamepad events could be mapped to keyboard/mouse actions
                 // This is a placeholder - real implementation would depend on use case
-                debug!("Gamepad event: button={}, value={}, pressed={}", button, value, is_pressed);
+                trace!("Gamepad event: button={}, value={}, pressed={}", button, value, is_pressed);
                 
                 // Example: Map some gamepad buttons to keyboard keys
                 match button {
@@ -367,7 +367,7 @@ impl InputHandler {
             
             InputEvent::HotKey { combination } => {
                 // Handle special hotkey combinations
-                debug!("HotKey: {:?}", combination);
+                trace!("HotKey: {:?}", combination);
                 
                 // Press all keys in the combination
                 let mut keys = Vec::new();
