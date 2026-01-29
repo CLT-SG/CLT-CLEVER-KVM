@@ -92,30 +92,6 @@ ws://<hostname>:6900/audio
 - **Encoding**: Opus (48kHz stereo)
 - **Latency**: 5-30ms
 
-## MediaMTX Integration
-
-Configure MediaMTX to relay VNC streams using hostname:
-
-```yaml
-paths:
-  # Monitor 0
-  vnc_screen0:
-    source: vnc://workstation-1:5900
-    sourceProtocol: vnc
-    
-  # Monitor 1
-  vnc_screen1:
-    source: vnc://workstation-1:5901
-    sourceProtocol: vnc
-    
-  # Monitor 2
-  vnc_screen2:
-    source: vnc://workstation-1:5902
-    sourceProtocol: vnc
-```
-
-**Note**: Audio streaming uses WebSocket (ws://hostname:6900/audio) instead of RTSP.
-
 ## Display Positioning
 
 Each VNC server preserves the exact monitor configuration from your system:

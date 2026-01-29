@@ -41,9 +41,9 @@ npm run tauri dev
 - Hardware-accelerated screen capture
 
 🎵 **Separate Audio Streaming**
-- RTSP audio streaming on dedicated port (6900)
+- WebSocket audio streaming on dedicated port (6900)
+- Opus encoding for low-latency audio (5-30ms)
 - Shared audio across all monitors
-- High-quality audio encoding
 
 🚀 **Performance**
 - Hardware acceleration for screen capture
@@ -59,13 +59,12 @@ npm run tauri dev
 🎛️ **Display Server Mode**
 - Native display streaming (RFB 3.8) server for video wall integration
 - Multi-monitor support with automatic port assignment (5900, 5901, 5902, etc.)
-- Separate audio streaming via RTSP on port 6900
+- WebSocket-based audio streaming on port 6900 (Opus encoded)
 - Exact display positioning and sizing
 - Auto-registration with CLEVER service
 - Multi-client support (up to 10 simultaneous connections per monitor)
 - Compatible with all standard display clients
-- **MediaMTX Auto-Discovery**: Automatically scans local network for MediaMTX servers on port 9997
-- Manual and automatic MediaMTX server configuration
+- Built-in WebSockify proxy for NoVNC browser clients
 
 ## Display Server Configuration
 
@@ -132,21 +131,6 @@ ws://<hostname>:6081/   # Monitor 1 (via WebSockify)
 ```
 ws://<hostname>:6900/audio   # Shared audio stream (Opus encoded)
 ```
-
-### Integration with MediaMTX
-
-Configure MediaMTX to relay display streams using hostname:
-```yaml
-paths:
-  display_workstation_1_screen1:
-    source: vnc://workstation-1:5900
-    sourceProtocol: vnc
-  display_workstation_1_screen2:
-    source: vnc://workstation-1:5901
-    sourceProtocol: vnc
-```
-
-**Note**: Audio streaming uses WebSocket (ws://hostname:6900/audio) instead of RTSP.
 
 For more details, see [Display Integration Guide](docs/VNC_INTEGRATION.md).
 

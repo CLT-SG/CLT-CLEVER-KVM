@@ -268,60 +268,6 @@ audioWs.onmessage = async (event) => {
 };
 ```
 
-## Legacy MediaMTX Integration (Deprecated)
-
-**Note**: MediaMTX integration has been removed in favor of direct WebSocket streaming. The following documentation is kept for reference only.
-
-<details>
-<summary>Legacy MediaMTX Configuration (Click to expand)</summary>
-
-MediaMTX was previously used to relay audio streams:
-
-```yaml
-# mediamtx.yml (DEPRECATED)
-paths:
-  workstation_1_video:
-    source: vnc://workstation-1:5900
-    sourceProtocol: vnc
-    
-  workstation_1_audio:
-    source: rtsp://workstation-1:5901/audio
-    sourceProtocol: rtsp
-```
-
-**Migration**: Use direct WebSocket connections instead:
-- Video: Connect to VNC directly (vnc://hostname:5900)
-- Audio: Connect to WebSocket (ws://hostname:6900/audio)
-
-</details>
-
-#### MediaMTX Auto-Discovery
-
-CLT-CLEVER-KVM includes an automatic MediaMTX server discovery feature that scans your local network for MediaMTX servers running on port 9997.
-
-**Automatic Scanning:**
-1. Open Advanced Settings in the Configuration tab
-2. Enable "Auto-scan network for MediaMTX server on port 9997"
-3. The application will automatically scan your local subnet (e.g., 192.168.1.0/24) on startup
-4. Found servers will be listed in the MediaMTX URL dropdown
-
-**Manual Configuration:**
-1. Open Advanced Settings in the Configuration tab
-2. Enter the MediaMTX server URL manually in the "MediaMTX URL" field
-3. Format: `http://<ip-address>:9997` or `http://<hostname>:9997`
-
-**Manual Scanning:**
-- Click the "🔍 Scan" button to trigger a manual network scan
-- The scan checks all hosts in your subnet with a 200ms timeout per host
-- Found servers are displayed in a dropdown for easy selection
-
-**How It Works:**
-- Detects your local network subnet automatically
-- Scans all IP addresses in the subnet (1-254) in parallel
-- Tests TCP connection to port 9997 on each host
-- Returns list of responsive MediaMTX servers
-- Auto-selects the first found server when auto-scan is enabled
-
 ## Configuration
 
 ### Default Settings
@@ -433,14 +379,14 @@ Native cursor rendering via RFB 3.8 cursor pseudo-encoding is planned but not ye
 
 ## Audio Streaming
 
-### WebSocket-Based Audio (Current)
+### WebSocket-Based Audio
 
 CLT-CLEVER-KVM uses direct WebSocket streaming for audio with significant performance improvements:
 
 - **Direct WebSocket**: Audio streams via ws://hostname:6900/audio
 - **Opus Encoding**: 48kHz stereo with low-latency mode
-- **Low Latency**: 5-30ms (vs 300-800ms with RTSP)
-- **No Relay Required**: Direct connection to client, no MediaMTX needed
+- **Low Latency**: 5-30ms end-to-end
+- **No External Dependencies**: Direct connection, no relay required
 - **Binary Protocol**: Efficient binary WebSocket messages
 
 ### Audio Quality Settings
@@ -450,21 +396,6 @@ Audio encoding uses Opus codec with these settings:
 - **Channels**: 2 (stereo)
 - **Encoding Mode**: Low Delay (optimized for real-time)
 - **Bitrate**: Adaptive
-
-### Legacy RTSP Audio (Deprecated)
-
-<details>
-<summary>Previous RTSP-based audio (Click to expand)</summary>
-
-The previous implementation used RTSP:
-- Required MediaMTX server for relay
-- Higher latency: 300-800ms
-- Multiple encoding passes
-- Complex infrastructure
-
-**Migration**: Update clients to use WebSocket URLs instead of RTSP URLs.
-
-</details>
 
 ## Keyboard and Mouse Control
 

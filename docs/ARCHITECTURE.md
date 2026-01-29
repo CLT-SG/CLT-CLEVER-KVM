@@ -265,16 +265,16 @@ Each monitor gets its own VNC server but all share a single audio stream:
 
 ### Latency Metrics
 
-| Component | Latency | Previous (RTSP) |
-|-----------|---------|-----------------|
-| Video (VNC) | 10-50ms | 200-500ms |
-| Audio (WebSocket) | 5-30ms | 300-800ms |
-| Input | <5ms | <5ms |
-| Total End-to-End | 15-85ms | 500-1000ms |
+| Component | Latency |
+|-----------|---------|
+| Video (VNC) | 10-50ms |
+| Audio (WebSocket) | 5-30ms |
+| Input | <5ms |
+| Total End-to-End | 15-85ms |
 
 ### CPU Usage
 
-- **WebSocket Architecture**: 40-60% reduction vs RTSP
+- **WebSocket Architecture**: Optimized for low CPU usage
 - **Single-pass Encoding**: No transcoding overhead
 - **Per-monitor Overhead**: ~5-10% CPU per active server
 
@@ -438,25 +438,12 @@ curl http://localhost:PORT/status
 wscat -c ws://localhost:6900/audio
 ```
 
-## Migration from RTSP
+## Current Architecture
 
-### Before (RTSP Architecture)
-
+### Connection Flow
 ```
-VNC → FFmpeg → RTSP → MediaMTX → Client
-Audio → RTSP AAC → FFmpeg → MediaMTX → HLS → Client
-```
-
-**Issues:**
-- Multiple encoding passes
-- High latency (200-800ms)
-- Complex infrastructure
-- High CPU usage
-
-### After (WebSocket Architecture)
-
-```
-VNC → Client (direct)
+VNC → Client (direct RFB 3.8)
+VNC → WebSockify → NoVNC Client (browser)
 Audio → Opus → WebSocket → Client (direct)
 ```
 
@@ -464,7 +451,7 @@ Audio → Opus → WebSocket → Client (direct)
 - Single-pass encoding
 - Low latency (5-50ms)
 - Simple architecture
-- 40-60% lower CPU usage
+- Low CPU usage
 
 ## Future Roadmap
 
