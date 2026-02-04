@@ -4,10 +4,9 @@ use log::{debug, error, info, warn};
 use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
 use std::sync::Arc;
-use parking_lot::{Mutex, RwLock}; // High-performance locks
+use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc;
-use scap::{Target, get_all_targets};
-use rayon::prelude::*; // Parallel processing
+use rayon::prelude::*;
 use crate::network::models::NetworkStats;
 
 /// Ultra-low latency codec errors
@@ -180,18 +179,17 @@ impl UltraPerformanceStats {
 /// Ultra-high performance screen streaming encoder
 /// Designed for <16ms total latency with Google/Microsoft engineering practices
 pub struct UltraLowLatencyEncoder {
-    monitor: Option<Target>, // Changed from Monitor to Target
     config: UltraLowLatencyConfig,
     frame_count: AtomicU64,
     last_keyframe: AtomicU64,
     performance_stats: Arc<UltraPerformanceStats>,
     
     // High-performance frame processing
-    frame_pool: Arc<RwLock<Vec<UltraFrame>>>, // Pre-allocated frame pool
-    previous_frame: Arc<Mutex<Option<Box<[u8]>>>>, // Previous frame for delta
+    frame_pool: Arc<RwLock<Vec<UltraFrame>>>,
+    previous_frame: Arc<Mutex<Option<Box<[u8]>>>>,
     
     // SIMD optimization state
-    simd_buffer: Arc<Mutex<Vec<u8>>>, // Aligned buffer for SIMD operations
+    simd_buffer: Arc<Mutex<Vec<u8>>>,
     
     // Adaptive quality management
     quality_controller: Arc<Mutex<AdaptiveQualityController>>,
@@ -383,23 +381,11 @@ impl EncodingPipeline {
 
 impl UltraLowLatencyEncoder {
     pub fn new(config: UltraLowLatencyConfig) -> Result<Self, UltraLowLatencyError> {
-        info!("🚀 Initializing ULTRA-LOW LATENCY encoder (Google/Microsoft level)");
+        info!("🚀 Initializing ULTRA-LOW LATENCY encoder with native capture");
         info!("📊 Target: {}ms total latency, {}fps, quality adaptation: {}", 
               config.target_latency_ms, config.performance_target.target_fps, config.adaptive_quality);
-        
-        // Get the specified monitor
-        let targets = get_all_targets();
-        let displays: Vec<_> = targets.into_iter()
-            .filter(|target| matches!(target, Target::Display(_)))
-            .collect();
-        
-        let monitor = if config.monitor_id < displays.len() {
-            displays.into_iter().nth(config.monitor_id)
-        } else {
-            None
-        }.ok_or_else(|| UltraLowLatencyError::MonitorNotFound(0))?;
 
-        info!("🖥️  Using display target for monitor index: {} - Hardware accel: {}, SIMD: {}, Parallel: {}", 
+        info!("🖥️  Using native GDI capture for monitor {}: Hardware accel: {}, SIMD: {}, Parallel: {}", 
               config.monitor_id, config.use_hardware_acceleration, 
               config.enable_simd_optimization, config.enable_parallel_processing);
 
@@ -411,7 +397,6 @@ impl UltraLowLatencyEncoder {
         }
 
         Ok(Self {
-            monitor: Some(monitor),
             config: config.clone(),
             frame_count: AtomicU64::new(0),
             last_keyframe: AtomicU64::new(0),
@@ -426,8 +411,45 @@ impl UltraLowLatencyEncoder {
     
     /// Ultra-fast capture and encode with strict performance budgets
     pub fn capture_frame(&mut self, force_keyframe: bool) -> Result<Vec<u8>, UltraLowLatencyError> {
-        // Note: Direct image capture needs to be implemented with scap integration
-        todo!("capture_frame needs to be updated to use ScreenCapture with scap")
+        use std::time::Instant;
+        use crate::core::ScreenCapture;
+        
+        let capture_start = Instant::now();
+        
+        // Use native screen capture
+        let mut screen_capture = ScreenCapture::new(Some(self.config.monitor_id))
+            .map_err(|e| UltraLowLatencyError::Capture(format!("Failed to init capture: {}", e)))?;
+        
+        let rgba_data = screen_capture.capture_rgba()
+            .map_err(|e| UltraLowLatencyError::Capture(format!("Capture failed: {}", e)))?;
+        
+        let (width, height) = screen_capture.dimensions();
+        
+        let capture_time = capture_start.elapsed();
+        self.performance_stats.update_capture_time(capture_time.as_nanos() as u64);
+        
+        // Encode the frame
+        let encode_start = Instant::now();
+        let encoded = self.encode_frame_ultra_fast(&rgba_data, width as u32, height as u32, force_keyframe)?;
+        let encode_time = encode_start.elapsed();
+        
+        self.performance_stats.update_encode_time(encode_time.as_nanos() as u64);
+        self.performance_stats.increment_frames();
+        self.frame_count.fetch_add(1, Ordering::Relaxed);
+        
+        // Log performance occasionally
+        let frame_num = self.frame_count.load(Ordering::Relaxed);
+        if frame_num % 60 == 0 {
+            debug!(
+                "⚡ Frame #{}: capture={:.1}ms, encode={:.1}ms, size={:.1}KB",
+                frame_num,
+                capture_time.as_secs_f64() * 1000.0,
+                encode_time.as_secs_f64() * 1000.0,
+                encoded.len() as f64 / 1024.0
+            );
+        }
+        
+        Ok(encoded)
     }
     
     /// Ultra-fast frame encoding with direct RGBA format (no conversion overhead)

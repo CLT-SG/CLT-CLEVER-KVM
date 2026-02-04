@@ -2,7 +2,6 @@ use anyhow::Result;
 use thiserror::Error;
 use log::{debug, error, info};
 use std::time::Instant;
-use scap::{Target, get_all_targets};
 use crate::network::models::NetworkStats;
 
 // Custom error type for real-time codec operations
@@ -26,10 +25,10 @@ pub struct RealtimeConfig {
     pub monitor_id: usize,
     pub width: u32,
     pub height: u32,
-    pub bitrate: u32, // kbps
+    pub bitrate: u32,
     pub framerate: u32,
     pub keyframe_interval: u32,
-    pub target_latency_ms: u32, // Target latency in milliseconds
+    pub target_latency_ms: u32,
 }
 
 impl Default for RealtimeConfig {
@@ -38,47 +37,31 @@ impl Default for RealtimeConfig {
             monitor_id: 0,
             width: 1920,
             height: 1080,
-            bitrate: 4000, // Increased to 4 Mbps for better quality
-            framerate: 60, // Increased to 60 FPS for smoother streaming
-            keyframe_interval: 120, // Every 2 seconds at 60fps
-            target_latency_ms: 50, // Reduced to 50ms for faster response
+            bitrate: 4000,
+            framerate: 60,
+            keyframe_interval: 120,
+            target_latency_ms: 50,
         }
     }
 }
 
-// Real-time screen streaming encoder
+// Real-time screen streaming encoder using native capture
 pub struct RealtimeStreamEncoder {
-    monitor: Option<Target>, // Changed from Monitor to Target
     config: RealtimeConfig,
     frame_count: u64,
     last_keyframe: u64,
     last_capture_time: Instant,
     capture_duration_ms: f64,
     encode_duration_ms: f64,
-    previous_frame_data: Option<Vec<u8>>, // For delta compression
+    previous_frame_data: Option<Vec<u8>>,
 }
 
 impl RealtimeStreamEncoder {
     pub fn new(config: RealtimeConfig) -> Result<Self, RealtimeCodecError> {
-        info!("Initializing real-time stream encoder for monitor {} ({}x{} @ {}fps, {}kbps)", 
+        info!("Initializing real-time stream encoder with native capture for monitor {} ({}x{} @ {}fps, {}kbps)", 
               config.monitor_id, config.width, config.height, config.framerate, config.bitrate);
 
-        // Get the specified target/display
-        let targets = get_all_targets();
-        let displays: Vec<_> = targets.into_iter()
-            .filter(|target| matches!(target, Target::Display(_)))
-            .collect();
-        
-        let monitor = if config.monitor_id < displays.len() {
-            displays.into_iter().nth(config.monitor_id)
-        } else {
-            None
-        }.ok_or_else(|| RealtimeCodecError::MonitorNotFound(config.monitor_id))?;
-
-        info!("Using display target for monitor {}", config.monitor_id);
-
         Ok(Self {
-            monitor: Some(monitor),
             config,
             frame_count: 0,
             last_keyframe: 0,
@@ -90,8 +73,44 @@ impl RealtimeStreamEncoder {
     }
 
     pub fn capture_and_encode(&mut self) -> Result<Vec<u8>, RealtimeCodecError> {
-        // Note: Direct image capture needs to be implemented with scap integration
-        todo!("capture_and_encode needs to be updated to use ScreenCapture with scap")
+        use crate::core::ScreenCapture;
+        
+        let capture_start = Instant::now();
+        
+        // Use native screen capture
+        let mut screen_capture = ScreenCapture::new(Some(self.config.monitor_id))
+            .map_err(|e| RealtimeCodecError::Capture(format!("Failed to init capture: {}", e)))?;
+        
+        let rgba_data = screen_capture.capture_rgba()
+            .map_err(|e| RealtimeCodecError::Capture(format!("Capture failed: {}", e)))?;
+        
+        let (width, height) = screen_capture.dimensions();
+        
+        self.capture_duration_ms = capture_start.elapsed().as_secs_f64() * 1000.0;
+        
+        // Check if we need a keyframe
+        let force_keyframe = (self.frame_count - self.last_keyframe) >= self.config.keyframe_interval as u64;
+        
+        // Encode the frame
+        let encode_start = Instant::now();
+        let encoded = self.encode_frame_data(&rgba_data, width as u32, height as u32, force_keyframe)?;
+        self.encode_duration_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+        
+        self.frame_count += 1;
+        self.last_capture_time = Instant::now();
+        
+        // Log performance occasionally
+        if self.frame_count % 60 == 0 {
+            debug!(
+                "📹 Frame #{}: capture={:.1}ms, encode={:.1}ms, size={:.1}KB",
+                self.frame_count,
+                self.capture_duration_ms,
+                self.encode_duration_ms,
+                encoded.len() as f64 / 1024.0
+            );
+        }
+        
+        Ok(encoded)
     }
 
     fn encode_frame_data(&mut self, rgba_data: &[u8], width: u32, height: u32, force_keyframe: bool) -> Result<Vec<u8>, RealtimeCodecError> {

@@ -129,10 +129,44 @@ impl UltraStreamHandler {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1); // Single-buffer for ultra-low latency
         let (control_tx, mut control_rx) = tokio::sync::mpsc::channel::<String>(5);
         
+        // Get actual monitor dimensions for accurate client sizing
+        // Extract dimensions synchronously first to avoid Send issues with Box<dyn Error>
+        let monitor_dimensions: Option<(u32, u32)> = crate::core::capture::ScreenCapture::get_all_monitors()
+            .ok()
+            .and_then(|monitors| {
+                if !monitors.is_empty() {
+                    Some((monitors[0].width as u32, monitors[0].height as u32))
+                } else {
+                    None
+                }
+            });
+        
+        let (actual_width, actual_height): (u32, u32) = match monitor_dimensions {
+            Some(dims) => dims,
+            None => {
+                let encoder = self.encoder.lock().await;
+                encoder.get_dimensions()
+            }
+        };
+        
+        // Pre-fetch monitor list synchronously to avoid Send issues
+        let monitor_list_json: Option<String> = crate::core::capture::ScreenCapture::get_all_monitors()
+            .ok()
+            .map(|monitors| {
+                json!({
+                    "type": "monitors",
+                    "monitors": monitors.iter().map(|m| json!({
+                        "id": m.id,
+                        "name": m.name,
+                        "width": m.width,
+                        "height": m.height,
+                        "is_primary": m.is_primary
+                    })).collect::<Vec<_>>()
+                }).to_string()
+            });
+        
         // Send initial server info with ultra-performance specifications
         {
-            let encoder = self.encoder.lock().await;
-            let (width, height) = encoder.get_dimensions();
             let performance_mode_str = {
                 let mode = self.performance_mode.read();
                 format!("{:?}", *mode)
@@ -140,14 +174,14 @@ impl UltraStreamHandler {
             
             let server_info = json!({
                 "type": "server_info",
-                "width": width,
-                "height": height,
+                "width": actual_width,
+                "height": actual_height,
                 "hostname": "ultra-kvm-server",
                 "monitor": 0,
-                "codec": "ultra-rgba",
+                "codec": "rgba",
                 "audio": false,
                 "performance_mode": performance_mode_str,
-                "target_fps": 120,
+                "target_fps": 60,
                 "ultra_features": {
                     "simd_optimization": true,
                     "parallel_processing": true,
@@ -160,6 +194,13 @@ impl UltraStreamHandler {
             if let Err(e) = control_tx.send(server_info.to_string()).await {
                 error!("Failed to send ultra server info: {}", e);
                 return;
+            }
+            
+            // Send monitor list for client UI (pre-fetched to avoid Send issues)
+            if let Some(monitor_list) = monitor_list_json {
+                if let Err(e) = control_tx.send(monitor_list).await {
+                    warn!("Failed to send monitor list: {}", e);
+                }
             }
         }
         
@@ -477,73 +518,64 @@ impl UltraStreamHandler {
     }
 }
 
-/// Optimized fallback capture with proper VP8-compatible WebM format
-async fn fallback_simple_capture() -> Result<Option<Vec<u8>>, String> {
+/// Optimized fallback capture with RGBA format that the client understands
+/// This is a synchronous function to avoid Send issues with Box<dyn Error>
+fn fallback_simple_capture_sync() -> Result<Option<Vec<u8>>, String> {
     use crate::core::capture::ScreenCapture;
+    use std::sync::atomic::{AtomicU64, Ordering};
     
-    debug!("🔍 [FALLBACK] Starting VP8 WebM capture...");
+    // Static frame counter for frame numbering
+    static FRAME_COUNTER: AtomicU64 = AtomicU64::new(0);
     
-    // Simple screen capture
+    debug!("🔍 [FALLBACK] Starting RGBA capture...");
+    
+    // Get monitor info and capture screen
     let monitors = ScreenCapture::get_all_monitors().map_err(|e| format!("Monitor error: {}", e))?;
     if monitors.is_empty() {
         return Err("No monitors available".to_string());
     }
     
+    let monitor = &monitors[0];
+    let width = monitor.width;
+    let height = monitor.height;
+    
     let mut capture = ScreenCapture::new(Some(0)).map_err(|e| format!("Capture init error: {}", e))?;
     
     match capture.capture_raw() {
-        Ok(image_data) => {
-            debug!("🔍 [FALLBACK] Raw capture successful: {} bytes", image_data.len());
+        Ok(rgba_data) => {
+            let frame_number = FRAME_COUNTER.fetch_add(1, Ordering::Relaxed);
             
-            // Convert RGBA to YUV420 for VP8 compatibility
-            let original_width = 1920;
-            let original_height = 1080;
-            let bytes_per_pixel = 4; // RGBA
+            debug!("🔍 [FALLBACK] Raw RGBA capture: {}x{}, {} bytes", width, height, rgba_data.len());
             
-            // Downsample for better performance (still high quality)
-            let scale_factor = 1; // Keep full resolution for better quality
-            let scaled_width = original_width / scale_factor;
-            let scaled_height = original_height / scale_factor;
+            // Create RGBA frame in the format the client expects:
+            // "RGBA" signature (4 bytes) + width (4 bytes) + height (4 bytes) + 
+            // frame_number (8 bytes) + data_length (4 bytes) + raw RGBA data
+            let header_size = 4 + 4 + 4 + 8 + 4; // 24 bytes
+            let mut frame_data = Vec::with_capacity(header_size + rgba_data.len());
             
-            debug!("🔍 [FALLBACK] Processing {}x{} -> {}x{}", 
-                   original_width, original_height, scaled_width, scaled_height);
+            // RGBA signature - the client checks for 0x52474241 ("RGBA" in big-endian)
+            frame_data.extend_from_slice(b"RGBA");
             
-            // Convert RGBA to YUV420 for VP8
-            let yuv_data = rgba_to_yuv420_fast(&image_data, original_width, original_height, scale_factor);
+            // Width and height (little-endian u32)
+            frame_data.extend_from_slice(&(width as u32).to_le_bytes());
+            frame_data.extend_from_slice(&(height as u32).to_le_bytes());
             
-            // Create VP8 WebM keyframe
-            let mut webm_frame = Vec::with_capacity(yuv_data.len());
+            // Frame number (little-endian u64)
+            frame_data.extend_from_slice(&frame_number.to_le_bytes());
             
-            // VP8 keyframe header for WebM container
-            webm_frame.extend_from_slice(&[0x9D, 0x01, 0x2A]); // VP8 keyframe signature
-            webm_frame.extend_from_slice(&(scaled_width as u16).to_le_bytes()); // Width
-            webm_frame.extend_from_slice(&(scaled_height as u16).to_le_bytes()); // Height
+            // Data length (little-endian u32)
+            frame_data.extend_from_slice(&(rgba_data.len() as u32).to_le_bytes());
             
-            // Add frame number for debugging
-            let frame_number = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u32;
-            webm_frame.extend_from_slice(&frame_number.to_le_bytes());
+            // Raw RGBA pixel data
+            frame_data.extend_from_slice(&rgba_data);
             
-            // Compress YUV data efficiently
-            let compressed_yuv = compress_yuv_simple(&yuv_data, scaled_width, scaled_height);
+            // Log only occasionally to avoid log spam
+            if frame_number % 60 == 0 {
+                info!("📸 [FALLBACK] RGBA frame #{}: {}x{} ({:.1}KB)", 
+                      frame_number, width, height, frame_data.len() as f64 / 1024.0);
+            }
             
-            // Add data length and compressed data
-            webm_frame.extend_from_slice(&(compressed_yuv.len() as u32).to_le_bytes());
-            webm_frame.extend_from_slice(&compressed_yuv);
-            
-            debug!("🔍 [FALLBACK] VP8 WebM frame structure:");
-            debug!("  - VP8 header: 3 bytes [9D 01 2A]");
-            debug!("  - Dimensions: {}x{}", scaled_width, scaled_height);
-            debug!("  - Frame number: {}", frame_number);
-            debug!("  - YUV data: {} bytes compressed", compressed_yuv.len());
-            debug!("  - Total frame: {} bytes", webm_frame.len());
-            
-            info!("📸 [FALLBACK] VP8 WebM capture: {}x{} ({}KB YUV, {}KB total)", 
-                  scaled_width, scaled_height, yuv_data.len() / 1024, webm_frame.len() / 1024);
-            
-            Ok(Some(webm_frame))
+            Ok(Some(frame_data))
         },
         Err(e) => {
             error!("🔴 [FALLBACK] Capture error: {}", e);
@@ -552,116 +584,9 @@ async fn fallback_simple_capture() -> Result<Option<Vec<u8>>, String> {
     }
 }
 
-/// Fast RGBA to YUV420 conversion optimized for screen content
-fn rgba_to_yuv420_fast(rgba_data: &[u8], width: usize, height: usize, scale_factor: usize) -> Vec<u8> {
-    let scaled_width = width / scale_factor;
-    let scaled_height = height / scale_factor;
-    let pixels = scaled_width * scaled_height;
-    
-    let mut yuv_data = Vec::with_capacity(pixels + (pixels / 2));
-    
-    // Y plane (luminance) - full resolution
-    for y in (0..height).step_by(scale_factor) {
-        for x in (0..width).step_by(scale_factor) {
-            let idx = (y * width + x) * 4;
-            if idx + 2 < rgba_data.len() {
-                let r = rgba_data[idx] as f32;
-                let g = rgba_data[idx + 1] as f32;
-                let b = rgba_data[idx + 2] as f32;
-                
-                // ITU-R BT.601 standard for Y
-                let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
-                yuv_data.push(y_val);
-            }
-        }
-    }
-    
-    // U and V planes (chrominance) - quarter resolution (4:2:0 subsampling)
-    for y in (0..height).step_by(scale_factor * 2) {
-        for x in (0..width).step_by(scale_factor * 2) {
-            let idx = (y * width + x) * 4;
-            if idx + 2 < rgba_data.len() {
-                let r = rgba_data[idx] as f32;
-                let g = rgba_data[idx + 1] as f32;
-                let b = rgba_data[idx + 2] as f32;
-                
-                // ITU-R BT.601 standard for U and V
-                let u_val = (-0.147 * r - 0.289 * g + 0.436 * b + 128.0).clamp(0.0, 255.0) as u8;
-                let v_val = (0.615 * r - 0.515 * g - 0.100 * b + 128.0).clamp(0.0, 255.0) as u8;
-                
-                yuv_data.push(u_val);
-                yuv_data.push(v_val);
-            }
-        }
-    }
-    
-    yuv_data
-}
-
-/// Simple but effective YUV compression for screen content
-fn compress_yuv_simple(yuv_data: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut compressed = Vec::with_capacity(yuv_data.len() / 2);
-    
-    // Use block-based compression (8x8 blocks)
-    let block_size = 8;
-    let y_plane_size = width * height;
-    
-    // Compress Y plane
-    compress_plane_blocks(&yuv_data[0..y_plane_size], width, height, block_size, &mut compressed);
-    
-    // Compress U and V planes (half resolution)
-    let uv_width = width / 2;
-    let uv_height = height / 2;
-    let uv_size = uv_width * uv_height;
-    
-    if yuv_data.len() >= y_plane_size + uv_size * 2 {
-        compress_plane_blocks(&yuv_data[y_plane_size..y_plane_size + uv_size], 
-                             uv_width, uv_height, block_size / 2, &mut compressed);
-        compress_plane_blocks(&yuv_data[y_plane_size + uv_size..y_plane_size + uv_size * 2], 
-                             uv_width, uv_height, block_size / 2, &mut compressed);
-    }
-    
-    compressed
-}
-
-/// Compress plane using block-based algorithm
-fn compress_plane_blocks(plane_data: &[u8], width: usize, height: usize, block_size: usize, output: &mut Vec<u8>) {
-    for block_y in (0..height).step_by(block_size) {
-        for block_x in (0..width).step_by(block_size) {
-            // Extract block
-            let mut block = Vec::with_capacity(block_size * block_size);
-            
-            for y in 0..block_size {
-                for x in 0..block_size {
-                    let px = block_x + x;
-                    let py = block_y + y;
-                    
-                    if px < width && py < height {
-                        let idx = py * width + px;
-                        if idx < plane_data.len() {
-                            block.push(plane_data[idx]);
-                        } else {
-                            block.push(128); // Middle gray
-                        }
-                    } else {
-                        block.push(128); // Padding
-                    }
-                }
-            }
-            
-            // Simple block compression: DC value + differences
-            if !block.is_empty() {
-                let dc = block.iter().map(|&x| x as u32).sum::<u32>() / block.len() as u32;
-                output.push(dc as u8);
-                
-                // Store significant differences only
-                for &value in &block {
-                    let diff = (value as i16 - dc as i16).abs();
-                    if diff > 4 { // Only store significant differences
-                        output.push(value);
-                    }
-                }
-            }
-        }
-    }
+/// Async wrapper for fallback capture that runs on blocking thread pool
+async fn fallback_simple_capture() -> Result<Option<Vec<u8>>, String> {
+    tokio::task::spawn_blocking(fallback_simple_capture_sync)
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }

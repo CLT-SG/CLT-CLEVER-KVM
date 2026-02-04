@@ -102,20 +102,7 @@
       },
       "deb": {
         "depends": [
-          "libwebkit2gtk-4.1-0", 
-          "libgtk-3-0", 
-          "libpipewire-0.3-0", 
-          "libopus0",
-          "libavformat60", 
-          "libavcodec60", 
-          "libavutil58", 
-          "libswscale7", 
-          "libswresample4",
-          "libayatana-appindicator3-1",
-          "librsvg2-2",
-          "libxdo3",
-          "libxrandr2",
-          "libxcb-randr0"
+          "ffmpeg"
         ]
       },
       "appimage": {

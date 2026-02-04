@@ -9,12 +9,10 @@ use tokio::sync::mpsc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use scap::get_all_targets;
 
+use crate::core::ScreenCapture;
 use crate::streaming::{
     YUV420Encoder, YUV420Config, YUV420EncoderError,
-    // EnhancedVideoEncoder, EnhancedVideoConfig, VideoEncoderError,
-    // EnhancedAudioEncoder, EnhancedAudioConfig, AudioEncoderError,
     SystemAudioCapture,
 };
 
@@ -638,15 +636,15 @@ impl IntegratedStreamHandler {
         
         let server_info = ServerInfo {
             hostname: gethostname::gethostname().to_string_lossy().to_string(),
-            monitor_count: get_all_targets().len(),
+            monitor_count: ScreenCapture::get_all_monitors().map(|m| m.len()).unwrap_or(1),
             current_monitor: self.config.monitor_id,
             capabilities: vec![
                 "yuv420_vp8".to_string(),
                 "webm_container".to_string(),
                 if self.config.enable_audio { "opus_audio" } else { "no_audio" }.to_string(),
                 "adaptive_quality".to_string(),
-                "enhanced_capture".to_string(), // Our enhanced xcap wrapper
-                "yuv420_output".to_string(), // YUV support via our converter
+                "native_gdi_capture".to_string(),
+                "yuv420_output".to_string(),
             ],
         };
         

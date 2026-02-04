@@ -5,12 +5,10 @@ use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
 use std::sync::Arc;
 use parking_lot::{Mutex, RwLock};
-use scap::{Target, get_all_targets};
 use rayon::prelude::*;
 use image::{ImageBuffer, Rgba, DynamicImage};
 
-// For now, we'll create a simplified encoder that works with existing infrastructure
-// Future versions can add VP8/WebM support when dependencies are resolved
+// Simplified encoder using native capture for stability
 
 /// Enhanced YUV420 video encoder errors
 #[derive(Error, Debug)]
@@ -35,15 +33,15 @@ pub struct YUV420Config {
     pub width: u32,
     pub height: u32,
     pub framerate: u32,
-    pub bitrate: u32,         // Target bitrate in kbps
-    pub keyframe_interval: u32, // Keyframe every N frames
-    pub quality: u32,         // Quality level 0-63 (lower is better)
+    pub bitrate: u32,
+    pub keyframe_interval: u32,
+    pub quality: u32,
     pub monitor_id: usize,
     pub use_webm_container: bool,
     pub enable_audio: bool,
-    pub opus_bitrate: u32,    // Audio bitrate in bps
-    pub temporal_layers: u8,   // Number of temporal layers (1-4)
-    pub spatial_layers: u8,    // Number of spatial layers (1-3)
+    pub opus_bitrate: u32,
+    pub temporal_layers: u8,
+    pub spatial_layers: u8,
 }
 
 impl Default for YUV420Config {
@@ -52,13 +50,13 @@ impl Default for YUV420Config {
             width: 1920,
             height: 1080,
             framerate: 30,
-            bitrate: 2000,  // 2 Mbps
-            keyframe_interval: 60, // Every 2 seconds at 30fps
-            quality: 20,    // Good balance of quality and speed
+            bitrate: 2000,
+            keyframe_interval: 60,
+            quality: 20,
             monitor_id: 0,
             use_webm_container: true,
-            enable_audio: false, // Disabled by default for stability
-            opus_bitrate: 128000, // 128 kbps
+            enable_audio: false,
+            opus_bitrate: 128000,
             temporal_layers: 1,
             spatial_layers: 1,
         }
@@ -68,13 +66,13 @@ impl Default for YUV420Config {
 /// YUV420 frame data with proper color space conversion
 #[derive(Debug, Clone)]
 pub struct YUV420Frame {
-    pub y_plane: Vec<u8>,     // Luminance (Y) plane
-    pub u_plane: Vec<u8>,     // Chrominance (U/Cb) plane  
-    pub v_plane: Vec<u8>,     // Chrominance (V/Cr) plane
+    pub y_plane: Vec<u8>,
+    pub u_plane: Vec<u8>,
+    pub v_plane: Vec<u8>,
     pub width: u32,
     pub height: u32,
     pub frame_number: u64,
-    pub timestamp: u64,       // Timestamp in microseconds
+    pub timestamp: u64,
     pub is_keyframe: bool,
 }
 
@@ -152,7 +150,6 @@ impl YUV420Frame {
 /// Simplified YUV420 encoder for stable screen streaming
 pub struct YUV420Encoder {
     config: YUV420Config,
-    monitor: Option<Target>, // Changed from Monitor to Target
     frame_count: AtomicU64,
     last_keyframe: AtomicU64,
     
@@ -210,7 +207,7 @@ impl EncodingStats {
 impl YUV420Encoder {
     /// Create a new simplified YUV420 encoder for stable streaming
     pub fn new(config: YUV420Config) -> Result<Self, YUV420EncoderError> {
-        info!("Initializing YUV420 encoder: {}x{} @ {}fps, {}kbps", 
+        info!("Initializing YUV420 encoder with native capture: {}x{} @ {}fps, {}kbps", 
               config.width, config.height, config.framerate, config.bitrate);
         
         // Validate configuration
@@ -221,28 +218,13 @@ impl YUV420Encoder {
             return Err(YUV420EncoderError::Config("Invalid framerate".to_string()));
         }
         
-        // Get monitor
-        let targets = get_all_targets();
-        let displays: Vec<_> = targets.into_iter()
-            .filter(|target| matches!(target, Target::Display(_)))
-            .collect();
-        
-        let monitor = if config.monitor_id < displays.len() {
-            displays.into_iter().nth(config.monitor_id)
-        } else {
-            None
-        }.ok_or_else(|| YUV420EncoderError::Capture(format!("Monitor {} not found", config.monitor_id)))?;
-        
-        info!("Using display target for monitor {}", config.monitor_id);
-        
         let encoder = Self {
             config: config.clone(),
-            monitor: Some(monitor),
             frame_count: AtomicU64::new(0),
             last_keyframe: AtomicU64::new(0),
             encoding_stats: Arc::new(EncodingStats::new()),
             frame_buffer: Arc::new(Mutex::new(Vec::new())),
-            max_buffer_size: 5, // Allow small buffer for smoothing
+            max_buffer_size: 5,
         };
         
         Ok(encoder)
@@ -257,8 +239,32 @@ impl YUV420Encoder {
     
     /// Capture and encode a frame
     pub fn capture_and_encode(&mut self, force_keyframe: bool) -> Result<Option<Vec<u8>>, YUV420EncoderError> {
-        // Note: Direct image capture needs to be implemented with scap integration
-        todo!("capture_and_encode needs to be updated to use ScreenCapture with scap")
+        use crate::core::ScreenCapture;
+        
+        // Use native screen capture
+        let mut screen_capture = ScreenCapture::new(Some(self.config.monitor_id))
+            .map_err(|e| YUV420EncoderError::Capture(format!("Failed to init capture: {}", e)))?;
+        
+        let rgba_data = screen_capture.capture_rgba()
+            .map_err(|e| YUV420EncoderError::Capture(format!("Capture failed: {}", e)))?;
+        
+        let (width, height) = screen_capture.dimensions();
+        let frame_count = self.frame_count.fetch_add(1, Ordering::Relaxed);
+        
+        // Convert RGBA to YUV420
+        let yuv_frame = YUV420Frame::from_rgba(&rgba_data, width as u32, height as u32, frame_count)
+            .map_err(|e| YUV420EncoderError::YUVConversion(format!("Conversion failed: {}", e)))?;
+        
+        // Determine if keyframe is needed
+        let last_keyframe = self.last_keyframe.load(Ordering::Relaxed);
+        let should_keyframe = force_keyframe || (frame_count - last_keyframe) >= self.config.keyframe_interval as u64;
+        
+        if should_keyframe {
+            self.last_keyframe.store(frame_count, Ordering::Relaxed);
+        }
+        
+        // Encode the frame
+        self.encode_yuv_frame(yuv_frame, should_keyframe)
     }
 
     /// Encode a YUV420 frame (simplified version for now)

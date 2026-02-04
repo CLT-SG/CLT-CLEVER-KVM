@@ -33,7 +33,10 @@ gethostname = "0.4.3"
 
 # Ultra-performance dependencies for streaming
 webrtc = "0.11.0"
-scap = "0.0.8"
+# Use zed-scap fork instead of scap for Windows compatibility
+# The original scap 0.1.0-beta.1 has breaking API changes with windows-capture 1.5.0
+# zed-scap uses windows-capture ^1.3.6 but we must pin to 1.4.4 to avoid 1.5.0 breaking changes
+zed-scap = "0.0.8-zed"
 anyhow = "1.0.75"
 thiserror = "1.0.50"
 
@@ -49,6 +52,11 @@ parking_lot = "0.12" # High-performance locks (replaces std::sync::Mutex)
 rayon = "1.8" # Data parallelism for SIMD and multi-core processing
 mimalloc = { version = "0.1", optional = true } # Microsoft's high-performance allocator
 
+# Windows-specific dependencies
+# Pin windows-capture to 1.4.4 to avoid breaking API changes in 1.5.0
+[target.'cfg(windows)'.dependencies]
+windows-capture = "=1.4.4"
+
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!
@@ -56,4 +64,3 @@ custom-protocol = ["tauri/custom-protocol"]
 # Ultra-performance features
 default = ["mimalloc"] # Use Microsoft's allocator by default for best performance
 ultra-performance = ["mimalloc"] # Enable all performance optimizations
-# scap-capture = ["scap"] # Future: Enable scap for enhanced capture (currently disabled due to beta issues)

@@ -1,12 +1,17 @@
-use scap::{
-    capturer::{Capturer, Options, Resolution},
-    frame::{Frame, FrameType},
-    is_supported, has_permission, request_permission
-};
-use log::{info, warn};
+//! Screen Capture Module
+//!
+//! Provides stable screen capture functionality using native Windows GDI as the primary
+//! method for maximum stability and reliability across all Windows versions.
+//!
+//! This module replaces the problematic zed-scap dependency with a direct Windows API
+//! implementation that works reliably for remote connections.
+
+use log::{debug, error, info, warn};
 use std::sync::Mutex;
 
-// For delta encoding
+use super::native_capture::{NativeScreenCapture, NativeCaptureError, NativeMonitorInfo};
+
+/// Screen tile for delta encoding optimization
 #[derive(Clone)]
 pub struct ScreenTile {
     pub data: Vec<u8>,
@@ -14,6 +19,7 @@ pub struct ScreenTile {
     pub changed: bool,
 }
 
+/// Monitor information structure
 pub struct MonitorInfo {
     pub id: String,
     pub name: String,
@@ -22,41 +28,21 @@ pub struct MonitorInfo {
     pub height: usize,
     pub position_x: i32,
     pub position_y: i32,
-    pub scale_factor: f64,  // Added for HiDPI displays
-    pub rotation: i32,      // 0, 90, 180, 270 degrees
-    pub supports_cursor: bool, // New: scap cursor support
-    pub supports_highlight: bool, // New: scap highlight support
+    pub scale_factor: f64,
+    pub rotation: i32,
+    pub supports_cursor: bool,
+    pub supports_highlight: bool,
 }
 
-pub struct ScreenCapture {
-    capturer: Option<Capturer>,
-    width: usize,
-    height: usize,
-    tile_size: usize,
-    tiles: Vec<ScreenTile>,
-    previous_frame: Option<Vec<u8>>,
-    // Track quality based on network conditions
-    adaptive_quality: Mutex<u8>,
-    // Monitor info
-    monitor_id: String,
-    is_primary: bool,
-    // Enhanced features (native scap support)
-    show_cursor: bool,
-    output_format: OutputFormat,
-    capture_fps: u32,
-    // YUV conversion support
-    yuv_converter: Option<YuvConverter>,
-}
-
-// Output format enum to prepare for scap migration
+/// Output format for captured frames
 #[derive(Debug, Clone, PartialEq)]
 pub enum OutputFormat {
     RGBA,
     BGRA,
-    YUV420, // Simulated YUV support
+    YUV420,
 }
 
-// YUV converter for future scap compatibility
+/// YUV converter for format conversion
 pub struct YuvConverter {
     width: usize,
     height: usize,
@@ -66,23 +52,24 @@ impl YuvConverter {
     pub fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
-    
-    // Convert RGBA to YUV420 (simplified implementation)
+
+    /// Convert RGBA to YUV420 planar format
     pub fn rgba_to_yuv420(&self, rgba_data: &[u8]) -> Vec<u8> {
         let pixel_count = self.width * self.height;
-        let mut yuv_data = Vec::with_capacity(pixel_count * 3 / 2); // Y + U/2 + V/2
-        
-        // Y plane
+        let uv_size = pixel_count / 4;
+        let mut yuv_data = Vec::with_capacity(pixel_count + uv_size * 2);
+
+        // Y plane (full resolution)
         for chunk in rgba_data.chunks_exact(4) {
             let r = chunk[0] as f32;
             let g = chunk[1] as f32;
             let b = chunk[2] as f32;
-            
-            // ITU-R BT.601 conversion
-            let y = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
+
+            // ITU-R BT.709 conversion for better screen content
+            let y = (0.2126 * r + 0.7152 * g + 0.0722 * b).clamp(0.0, 255.0) as u8;
             yuv_data.push(y);
         }
-        
+
         // U and V planes (subsampled 4:2:0)
         for y in (0..self.height).step_by(2) {
             for x in (0..self.width).step_by(2) {
@@ -91,92 +78,100 @@ impl YuvConverter {
                     let r = rgba_data[idx] as f32;
                     let g = rgba_data[idx + 1] as f32;
                     let b = rgba_data[idx + 2] as f32;
-                    
-                    let u = (-0.169 * r - 0.331 * g + 0.500 * b + 128.0) as u8;
-                    let v = (0.500 * r - 0.419 * g - 0.081 * b + 128.0) as u8;
-                    
+
+                    let u = (-0.1146 * r - 0.3854 * g + 0.5 * b + 128.0).clamp(0.0, 255.0) as u8;
+                    let v = (0.5 * r - 0.4542 * g - 0.0458 * b + 128.0).clamp(0.0, 255.0) as u8;
+
                     yuv_data.push(u);
                     yuv_data.push(v);
                 }
             }
         }
-        
+
         yuv_data
     }
 }
 
+/// Main screen capture structure using native Windows APIs
+pub struct ScreenCapture {
+    /// Native capture instance (primary capture method)
+    native_capture: NativeScreenCapture,
+
+    /// Frame dimensions
+    width: usize,
+    height: usize,
+
+    /// Tile-based encoding support
+    tile_size: usize,
+    tiles: Vec<ScreenTile>,
+
+    /// Previous frame for delta encoding
+    previous_frame: Option<Vec<u8>>,
+
+    /// Adaptive quality level (1-100)
+    adaptive_quality: Mutex<u8>,
+
+    /// Monitor identification
+    monitor_id: String,
+    is_primary: bool,
+
+    /// Capture options
+    show_cursor: bool,
+    output_format: OutputFormat,
+    capture_fps: u32,
+
+    /// YUV conversion support
+    yuv_converter: Option<YuvConverter>,
+
+    /// Frame counter for statistics
+    frame_count: u64,
+}
+
 impl ScreenCapture {
-    // Getter methods for private fields
+    /// Get the current width
     pub fn width(&self) -> usize {
         self.width
     }
-    
+
+    /// Get the current height
     pub fn height(&self) -> usize {
         self.height
     }
 
+    /// Create a new screen capture instance for the specified monitor
     pub fn new(monitor_index: Option<usize>) -> Result<Self, Box<dyn std::error::Error>> {
         Self::new_with_options(monitor_index, true, OutputFormat::RGBA)
     }
-    
-    // Enhanced constructor with cursor and format options (using scap)
+
+    /// Create a new screen capture with custom options
     pub fn new_with_options(
-        monitor_index: Option<usize>, 
-        show_cursor: bool, 
-        output_format: OutputFormat
+        monitor_index: Option<usize>,
+        show_cursor: bool,
+        output_format: OutputFormat,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Check if the platform is supported
-        if !is_supported() {
-            return Err("❌ Platform not supported".into());
-        }
-
-        // Check if we have permission to capture screen
-        if !has_permission() {
-            warn!("❌ Permission not granted. Requesting permission...");
-            if !request_permission() {
-                return Err("❌ Permission denied".into());
-            }
-        }
-
-        // Get recording targets
-        let targets = scap::get_all_targets();
-        info!("Targets: {:?}", targets);
-
-        // Create capturer options (following scap example pattern)
-        let options = Options {
-            fps: 30,
-            target: None, // None captures the primary display
-            show_cursor,
-            show_highlight: false,
-            excluded_targets: None,
-            output_type: FrameType::BGRAFrame,
-            output_resolution: Resolution::_720p,
-            crop_area: None, // Capture full screen
-            ..Default::default()
-        };
-
-        // Create capturer using the build() method (following scap example)
-        let mut capturer = Capturer::build(options)
-            .map_err(|e| format!("Problem with building Capturer: {}", e))?;
+        let idx = monitor_index.unwrap_or(0);
         
-        // Start capture
-        capturer.start_capture();
-        
-        // Use default dimensions (will be updated when first frame arrives)
-        let (width, height) = (1920, 1080);
-        
-        info!("Initialized scap screen capture ({}x{}) with cursor: {}, format: {:?}", 
-              width, height, show_cursor, output_format);
-        
-        // Define tile size (64x64 is a good balance)
+        info!("🖥️  Initializing native screen capture for monitor {}", idx);
+
+        // Create native capture instance
+        let native_capture = NativeScreenCapture::new_with_options(Some(idx), show_cursor)
+            .map_err(|e| format!("Failed to initialize native capture: {}", e))?;
+
+        let (width, height) = native_capture.dimensions();
+        let width = width as usize;
+        let height = height as usize;
+
+        info!(
+            "✅ Native screen capture initialized: {}x{}, cursor: {}, format: {:?}",
+            width, height, show_cursor, output_format
+        );
+
+        // Initialize tile structure (64x64 tiles for delta encoding)
         let tile_size = 64;
-        
-        // Calculate how many tiles we need
         let tiles_x = (width + tile_size - 1) / tile_size;
         let tiles_y = (height + tile_size - 1) / tile_size;
         let total_tiles = tiles_x * tiles_y;
-        
-        // Initialize empty tiles
+
         let tiles = vec![
             ScreenTile {
                 data: Vec::new(),
@@ -185,181 +180,98 @@ impl ScreenCapture {
             };
             total_tiles
         ];
-        
+
         // Initialize YUV converter if needed
         let yuv_converter = match output_format {
             OutputFormat::YUV420 => Some(YuvConverter::new(width, height)),
             _ => None,
         };
-        
+
         Ok(Self {
-            capturer: Some(capturer),
+            native_capture,
             width,
             height,
             tile_size,
             tiles,
             previous_frame: None,
             adaptive_quality: Mutex::new(80),
-            monitor_id: format!("scap-target-{}", monitor_index.unwrap_or(0)),
-            is_primary: monitor_index.is_none() || monitor_index == Some(0),
+            monitor_id: format!("native-monitor-{}", idx),
+            is_primary: idx == 0,
             show_cursor,
             output_format,
             capture_fps: 30,
             yuv_converter,
+            frame_count: 0,
         })
     }
 
-    // Get a list of all available monitors (simplified)
+    /// Get all available monitors
     pub fn get_all_monitors() -> Result<Vec<MonitorInfo>, Box<dyn std::error::Error>> {
-        // Check if the platform is supported
-        if !is_supported() {
-            return Err("❌ Platform not supported".into());
-        }
+        let native_monitors = NativeScreenCapture::enumerate_monitors()
+            .map_err(|e| format!("Failed to enumerate monitors: {}", e))?;
 
-        // Check if we have permission to capture screen
-        if !has_permission() {
-            warn!("❌ Permission not granted for monitor enumeration");
-        }
+        let monitors: Vec<MonitorInfo> = native_monitors
+            .into_iter()
+            .map(|m| MonitorInfo {
+                id: m.id,
+                name: m.name,
+                is_primary: m.is_primary,
+                width: m.width as usize,
+                height: m.height as usize,
+                position_x: m.position_x,
+                position_y: m.position_y,
+                scale_factor: 1.0,
+                rotation: 0,
+                supports_cursor: true,
+                supports_highlight: false,
+            })
+            .collect();
 
-        // For simplicity, return a default primary monitor
-        // scap will handle target selection internally when None is used
-        let monitor_info = MonitorInfo {
-            id: "primary".to_string(),
-            name: "Primary Display".to_string(),
-            is_primary: true,
-            width: 1920, // Default values - actual values determined at capture time
-            height: 1080,
-            position_x: 0,
-            position_y: 0,
-            scale_factor: 1.0,
-            rotation: 0,
-            supports_cursor: true,
-            supports_highlight: true,
-        };
-        
-        Ok(vec![monitor_info])
+        if monitors.is_empty() {
+            // Fallback to default monitor
+            Ok(vec![MonitorInfo {
+                id: "primary".to_string(),
+                name: "Primary Display".to_string(),
+                is_primary: true,
+                width: 1920,
+                height: 1080,
+                position_x: 0,
+                position_y: 0,
+                scale_factor: 1.0,
+                rotation: 0,
+                supports_cursor: true,
+                supports_highlight: false,
+            }])
+        } else {
+            Ok(monitors)
+        }
     }
 
-    // Enhanced capture_raw method following scap example pattern
+    /// Capture a raw frame in the current output format
     pub fn capture_raw(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        // Check if we have a capturer
-        let capturer = self.capturer.as_mut()
-            .ok_or("No capturer available")?;
-        
-        // Get the next frame (following scap example pattern)
-        let frame = capturer.get_next_frame()
-            .map_err(|e| format!("Error getting frame: {}", e))?;
-        
-        // Update dimensions from frame and convert to RGBA format
-        let rgba_buffer = match frame {
-            Frame::BGRA(f) => {
-                // Update dimensions
-                self.width = f.width as usize;
-                self.height = f.height as usize;
-                
-                // Convert BGRA to RGBA
-                let mut rgba = Vec::with_capacity(f.data.len());
-                for chunk in f.data.chunks_exact(4) {
-                    rgba.push(chunk[2]); // R (from B)
-                    rgba.push(chunk[1]); // G
-                    rgba.push(chunk[0]); // B (from R)
-                    rgba.push(chunk[3]); // A
-                }
-                rgba
-            },
-            Frame::RGB(f) => {
-                // Update dimensions
-                self.width = f.width as usize;
-                self.height = f.height as usize;
-                
-                // Convert RGB to RGBA
-                let mut rgba = Vec::with_capacity(f.data.len() * 4 / 3);
-                for chunk in f.data.chunks_exact(3) {
-                    rgba.push(chunk[0]); // R
-                    rgba.push(chunk[1]); // G
-                    rgba.push(chunk[2]); // B
-                    rgba.push(255);      // A
-                }
-                rgba
-            },
-            Frame::RGBx(f) => {
-                // Update dimensions
-                self.width = f.width as usize;
-                self.height = f.height as usize;
-                
-                // Convert RGBx to RGBA
-                let mut rgba = Vec::with_capacity(f.data.len());
-                for chunk in f.data.chunks_exact(4) {
-                    rgba.push(chunk[0]); // R
-                    rgba.push(chunk[1]); // G
-                    rgba.push(chunk[2]); // B
-                    rgba.push(255);      // A (ignore X)
-                }
-                rgba
-            },
-            Frame::BGRx(f) => {
-                // Update dimensions
-                self.width = f.width as usize;
-                self.height = f.height as usize;
-                
-                // Convert BGRx to RGBA
-                let mut rgba = Vec::with_capacity(f.data.len());
-                for chunk in f.data.chunks_exact(4) {
-                    rgba.push(chunk[2]); // R (from B)
-                    rgba.push(chunk[1]); // G
-                    rgba.push(chunk[0]); // B (from R)
-                    rgba.push(255);      // A (ignore X)
-                }
-                rgba
-            },
-            Frame::XBGR(f) => {
-                // Update dimensions
-                self.width = f.width as usize;
-                self.height = f.height as usize;
-                
-                // Convert XBGR to RGBA
-                let mut rgba = Vec::with_capacity(f.data.len());
-                for chunk in f.data.chunks_exact(4) {
-                    rgba.push(chunk[3]); // R (from last)
-                    rgba.push(chunk[2]); // G 
-                    rgba.push(chunk[1]); // B 
-                    rgba.push(255);      // A (ignore X)
-                }
-                rgba
-            },
-            Frame::BGR0(f) => {
-                // Update dimensions
-                self.width = f.width as usize;
-                self.height = f.height as usize;
-                
-                // Convert BGR0 to RGBA
-                let mut rgba = Vec::with_capacity(f.data.len());
-                for chunk in f.data.chunks_exact(4) {
-                    rgba.push(chunk[2]); // R (from B)
-                    rgba.push(chunk[1]); // G
-                    rgba.push(chunk[0]); // B (from R)
-                    rgba.push(255);      // A (ignore 0)
-                }
-                rgba
-            },
-            Frame::YUVFrame(f) => {
-                // Update dimensions
-                self.width = f.width as usize;
-                self.height = f.height as usize;
-                
-                // For YUV, we'd need proper conversion - for now return error
-                return Err("YUV frame conversion not implemented yet".into());
+        self.frame_count += 1;
+
+        // Capture RGBA frame using native capture
+        let rgba_buffer = self.native_capture.capture_rgba()
+            .map_err(|e| format!("Native capture failed: {}", e))?;
+
+        // Update dimensions based on captured frame
+        let (new_width, new_height) = self.native_capture.dimensions();
+        if new_width as usize != self.width || new_height as usize != self.height {
+            self.width = new_width as usize;
+            self.height = new_height as usize;
+            
+            // Update YUV converter if format requires it
+            if matches!(self.output_format, OutputFormat::YUV420) {
+                self.yuv_converter = Some(YuvConverter::new(self.width, self.height));
             }
-        };
-        
-        // Update YUV converter if dimensions changed
-        if matches!(self.output_format, OutputFormat::YUV420) {
-            self.yuv_converter = Some(YuvConverter::new(self.width, self.height));
+            
+            debug!("Screen dimensions updated: {}x{}", self.width, self.height);
         }
-        
+
         // Apply format conversion if needed
         let output_buffer = match self.output_format {
-            OutputFormat::RGBA => rgba_buffer.clone(),
+            OutputFormat::RGBA => rgba_buffer,
             OutputFormat::BGRA => {
                 // Convert RGBA to BGRA
                 let mut bgra_buffer = Vec::with_capacity(rgba_buffer.len());
@@ -370,9 +282,8 @@ impl ScreenCapture {
                     bgra_buffer.push(chunk[3]); // A
                 }
                 bgra_buffer
-            },
+            }
             OutputFormat::YUV420 => {
-                // Convert RGBA to YUV420
                 if let Some(ref converter) = self.yuv_converter {
                     converter.rgba_to_yuv420(&rgba_buffer)
                 } else {
@@ -380,161 +291,162 @@ impl ScreenCapture {
                 }
             }
         };
-        
-        // Store as previous frame for delta encoding
+
+        // Store for delta encoding
         self.previous_frame = Some(output_buffer.clone());
-        
+
+        // Log occasionally for debugging
+        if self.frame_count % 60 == 0 {
+            debug!(
+                "📸 Frame #{}: {}x{} ({:.1} KB)",
+                self.frame_count,
+                self.width,
+                self.height,
+                output_buffer.len() as f64 / 1024.0
+            );
+        }
+
         Ok(output_buffer)
     }
 
+    /// Capture a frame in RGBA format
     pub fn capture_rgba(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        // If current format is already RGBA, use direct capture
         if matches!(self.output_format, OutputFormat::RGBA) {
             return self.capture_raw();
         }
-        
+
         // Temporarily switch to RGBA format
         let original_format = self.output_format.clone();
         self.output_format = OutputFormat::RGBA;
-        
-        // Update YUV converter if needed
-        if matches!(original_format, OutputFormat::YUV420) {
-            self.yuv_converter = None; // Disable for RGBA
-        }
-        
+        let yuv_converter = self.yuv_converter.take();
+
         let result = self.capture_raw();
-        
+
         // Restore original format
         self.output_format = original_format;
-        if matches!(self.output_format, OutputFormat::YUV420) {
-            self.yuv_converter = Some(YuvConverter::new(self.width, self.height));
-        }
-        
+        self.yuv_converter = yuv_converter;
+
         result
     }
 
+    /// Get current dimensions
     pub fn dimensions(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 
+    /// Get tile dimensions for delta encoding
     pub fn tile_dimensions(&self) -> (usize, usize, usize) {
         let tiles_x = (self.width + self.tile_size - 1) / self.tile_size;
         let tiles_y = (self.height + self.tile_size - 1) / self.tile_size;
         (tiles_x, tiles_y, self.tile_size)
     }
 
+    /// Update adaptive quality level
     pub fn update_quality(&self, quality: u8) {
-        let mut current_quality = self.adaptive_quality.lock().unwrap();
-        *current_quality = quality.clamp(1, 100);
+        if let Ok(mut current_quality) = self.adaptive_quality.lock() {
+            *current_quality = quality.clamp(1, 100);
+        }
     }
-    
+
+    /// Get the monitor ID
     pub fn get_monitor_id(&self) -> &str {
         &self.monitor_id
     }
-    
+
+    /// Check if this is the primary monitor
     pub fn is_primary(&self) -> bool {
         self.is_primary
     }
 
-    // Enhanced methods (preparing for scap migration)
-    
-    // Enable/disable cursor capture (native scap support)
+    /// Enable or disable cursor capture
     pub fn set_cursor_capture(&mut self, show_cursor: bool) -> Result<(), Box<dyn std::error::Error>> {
         self.show_cursor = show_cursor;
-        // Note: To actually change cursor capture, we'd need to recreate the capturer
-        // For now, just update the preference and log
-        info!("Cursor capture preference set to: {} (scap native support available)", show_cursor);
+        info!("Cursor capture set to: {}", show_cursor);
         Ok(())
     }
-    
-    // Set capture FPS preference (for future scap compatibility)
+
+    /// Set capture FPS preference
     pub fn set_fps(&mut self, fps: u32) -> Result<(), Box<dyn std::error::Error>> {
         self.capture_fps = fps;
-        info!("Capture FPS preference set to: {}", fps);
+        info!("Capture FPS set to: {}", fps);
         Ok(())
     }
-    
-    // Set output format
-    pub fn set_output_format(&mut self, format: OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+
+    /// Set output format
+    pub fn set_output_format(
+        &mut self,
+        format: OutputFormat,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.output_format = format.clone();
-        
+
         // Update YUV converter based on format
         match format {
             OutputFormat::YUV420 => {
                 self.yuv_converter = Some(YuvConverter::new(self.width, self.height));
-            },
+            }
             _ => {
                 self.yuv_converter = None;
             }
         }
-        
+
         info!("Output format set to: {:?}", format);
         Ok(())
     }
-    
-    // Check if cursor capture is enabled
+
+    /// Check if cursor capture is enabled
     pub fn cursor_enabled(&self) -> bool {
         self.show_cursor
     }
-    
-    // Get current FPS setting
+
+    /// Get current FPS setting
     pub fn get_fps(&self) -> u32 {
         self.capture_fps
     }
-    
-    // Get current output format
+
+    /// Get current output format
     pub fn get_output_format(&self) -> &OutputFormat {
         &self.output_format
     }
-    
-    // Capture YUV frame directly (for streaming efficiency)
+
+    /// Capture YUV frame directly
     pub fn capture_yuv(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        // Temporarily switch to YUV format if not already
-        if !matches!(self.output_format, OutputFormat::YUV420) {
-            let original_format = self.output_format.clone();
-            self.output_format = OutputFormat::YUV420;
-            self.yuv_converter = Some(YuvConverter::new(self.width, self.height));
-            
-            let result = self.capture_raw();
-            
-            // Restore original format
-            match original_format {
-                OutputFormat::YUV420 => {
-                    self.output_format = original_format; // Keep YUV converter
-                }, 
-                _ => {
-                    self.output_format = original_format;
-                    self.yuv_converter = None;
-                }
-            }
-            
-            result
-        } else {
-            self.capture_raw()
+        if matches!(self.output_format, OutputFormat::YUV420) {
+            return self.capture_raw();
         }
+
+        // Temporarily switch to YUV format
+        let original_format = self.output_format.clone();
+        self.output_format = OutputFormat::YUV420;
+        self.yuv_converter = Some(YuvConverter::new(self.width, self.height));
+
+        let result = self.capture_raw();
+
+        // Restore original format
+        self.output_format = original_format;
+        if !matches!(self.output_format, OutputFormat::YUV420) {
+            self.yuv_converter = None;
+        }
+
+        result
     }
-    
-    // Get supported capabilities
+
+    /// Get supported capabilities
     pub fn get_capabilities(&self) -> Vec<String> {
         vec![
+            "native_gdi_capture".to_string(),
             "rgba_output".to_string(),
-            "bgra_output".to_string(), 
+            "bgra_output".to_string(),
             "yuv420_output".to_string(),
             "format_conversion".to_string(),
             "tile_based_capture".to_string(),
             "adaptive_quality".to_string(),
-            "cursor_capture".to_string(), // Native scap support
-            "highlight_support".to_string(), // Native scap support
-            "high_fps_capture".to_string(), // scap optimization
+            "cursor_capture".to_string(),
         ]
     }
 }
 
 impl Drop for ScreenCapture {
     fn drop(&mut self) {
-        if let Some(ref mut capturer) = self.capturer {
-            capturer.stop_capture();
-            info!("ScreenCapture stopped and cleaned up");
-        }
+        info!("ScreenCapture stopped and cleaned up");
     }
 }
