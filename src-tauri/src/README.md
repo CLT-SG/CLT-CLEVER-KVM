@@ -74,11 +74,20 @@ src-tauri/src/
 - Better organization than single file approach
 
 ### 3. **core/** - Core System Operations
-- **capture.rs**: Screen capture functionality
+- **capture.rs**: Screen capture functionality (cross-platform unified interface)
+- **native_capture.rs**: Native platform-specific screen capture implementations
 - **input.rs**: Input handling (keyboard/mouse)
 - **mod.rs**: Core functionality exports
 
+**Native Screen Capture - Platform Support:**
+- **Windows**: GDI (GetDC, BitBlt, GetDIBits) for maximum compatibility
+- **Linux X11**: X11 library with RandR extension for multi-monitor support
+- **macOS**: Core Graphics (CGDisplayCreateImage) for Quartz display capture
+
 **Benefits:**
+- Cross-platform native screen capture without external dependencies
+- High-performance direct platform API access
+- Multi-monitor support on all platforms
 - Clear separation of core system operations
 - Logical grouping of related functionality
 
@@ -166,6 +175,41 @@ src-tauri/src/
 ✅ **Same public API** - All Tauri commands and public interfaces remain the same.
 
 ✅ **Build compatibility** - The project builds successfully with the new structure.
+
+## Cross-Platform Screen Capture
+
+The native screen capture module (`core/native_capture.rs`) provides high-performance screen capture using platform-native APIs:
+
+### Windows
+- **API**: Windows GDI (Graphics Device Interface)
+- **Functions**: `GetDC`, `BitBlt`, `GetDIBits`
+- **Format**: BGRA → RGBA conversion
+- **Dependencies**: `windows-capture` crate for monitor enumeration
+
+### Linux (X11)
+- **API**: X11 with RandR extension
+- **Functions**: `XGetImage`, `RandR` for multi-monitor
+- **Format**: Depth-aware conversion (16/24/32-bit support)
+- **Dependencies**: `x11rb` crate with `randr` feature
+
+### macOS
+- **API**: Core Graphics (Quartz)
+- **Functions**: `CGDisplayCreateImage`, `CGDataProvider`
+- **Format**: BGRA → RGBA conversion
+- **Dependencies**: `core-graphics` and `core-foundation` crates
+
+### Usage Example
+```rust
+use crate::core::native_capture::{NativeScreenCapture, capture_screen_native};
+
+// Using the struct
+let mut capture = NativeScreenCapture::new(Some(0))?; // Monitor 0
+let rgba_data = capture.capture_rgba()?;
+let (width, height) = capture.dimensions();
+
+// Using the standalone function
+let (data, width, height) = capture_screen_native(0)?;
+```
 
 ## Build Status
 

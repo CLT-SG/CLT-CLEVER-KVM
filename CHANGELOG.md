@@ -20,3 +20,7 @@ All notable changes to this project will be documented in this file.
 - New native_capture.rs module with direct Windows GDI API implementation
 - Native monitor enumeration support
 - Improved error handling for screen capture operations
+- Cross-platform native screen capture support for Linux X11 and macOS
+- Linux X11 capture using x11rb library with RandR extension for multi-monitor support
+- macOS capture using Core Graphics (CGDisplayCreateImage) API
+- Platform-specific dependencies: x11rb for Linux, core-graphics/core-foundation for macOS

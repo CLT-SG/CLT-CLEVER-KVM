@@ -1,24 +1,34 @@
-//! Native Windows Screen Capture Module
+//! Native Cross-Platform Screen Capture Module
 //!
 //! This module provides a stable, high-performance screen capture implementation
-//! for Windows using the Windows Graphics Capture API (DXGI Desktop Duplication)
-//! with GDI fallback for maximum compatibility.
+//! for Windows, Linux (X11), and macOS using native platform APIs.
 //!
-//! This replaces the unreliable zed-scap dependency with a direct Windows API implementation.
+//! Platform-specific implementations:
+//! - **Windows**: GDI (GetDC, BitBlt, GetDIBits) for maximum compatibility
+//! - **Linux X11**: X11 library (XGetImage) for X Window System
+//! - **macOS**: Core Graphics (CGDisplayCreateImage) for Quartz display
+//!
+//! This replaces external dependencies with direct platform API implementations
+//! for better stability and reliability across all platforms.
 
 use log::{debug, error, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use parking_lot::Mutex;
 
+// Platform-specific imports
 #[cfg(target_os = "windows")]
-use windows_capture::{
-    capture::GraphicsCaptureApiHandler,
-    frame::Frame,
-    graphics_capture_api::InternalCaptureControl,
-    monitor::Monitor,
-    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
+use windows_capture::monitor::Monitor;
+
+#[cfg(target_os = "linux")]
+use x11rb::{
+    connection::Connection,
+    protocol::xproto::{ConnectionExt, ImageFormat, Screen},
+    rust_connection::RustConnection,
 };
+
+#[cfg(target_os = "macos")]
+use core_graphics::display::CGDisplay;
 
 /// Native monitor information structure
 #[derive(Debug, Clone)]
@@ -66,9 +76,11 @@ pub struct SharedFrameData {
     pub is_valid: bool,
 }
 
-/// Native screen capture implementation using Windows APIs
-/// 
-/// Uses DXGI Desktop Duplication for high-performance capture with GDI fallback
+/// Native screen capture implementation using platform-specific APIs
+///
+/// - Windows: GDI (GetDC, BitBlt) for stable screen capture
+/// - Linux: X11 (XGetImage) for X Window System capture  
+/// - macOS: Core Graphics (CGDisplayCreateImage) for Quartz capture
 pub struct NativeScreenCapture {
     monitor_index: usize,
     width: u32,
@@ -81,6 +93,13 @@ pub struct NativeScreenCapture {
     
     // Capture state
     capture_active: Arc<std::sync::atomic::AtomicBool>,
+    
+    // Platform-specific state
+    #[cfg(target_os = "linux")]
+    x11_connection: Option<Arc<RustConnection>>,
+    
+    #[cfg(target_os = "linux")]
+    x11_screen_num: usize,
 }
 
 impl NativeScreenCapture {
@@ -93,7 +112,14 @@ impl NativeScreenCapture {
     pub fn new_with_options(monitor_index: Option<usize>, show_cursor: bool) -> Result<Self, NativeCaptureError> {
         let idx = monitor_index.unwrap_or(0);
         
+        #[cfg(target_os = "windows")]
         info!("🖥️  Initializing native Windows screen capture for monitor {}", idx);
+        
+        #[cfg(target_os = "linux")]
+        info!("🖥️  Initializing native Linux X11 screen capture for monitor {}", idx);
+        
+        #[cfg(target_os = "macos")]
+        info!("🖥️  Initializing native macOS screen capture for monitor {}", idx);
         
         // Get monitor info to determine dimensions
         let monitors = Self::enumerate_monitors()?;
@@ -112,6 +138,14 @@ impl NativeScreenCapture {
         
         info!("✅ Using monitor: {} ({}x{})", target_monitor.name, target_monitor.width, target_monitor.height);
         
+        // Platform-specific initialization
+        #[cfg(target_os = "linux")]
+        let (x11_connection, x11_screen_num) = {
+            let (conn, screen_num) = RustConnection::connect(None)
+                .map_err(|e| NativeCaptureError::InitializationFailed(format!("X11 connection failed: {}", e)))?;
+            (Some(Arc::new(conn)), screen_num)
+        };
+        
         Ok(Self {
             monitor_index: idx,
             width: target_monitor.width,
@@ -120,6 +154,10 @@ impl NativeScreenCapture {
             show_cursor,
             shared_frame: Arc::new(Mutex::new(SharedFrameData::default())),
             capture_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(target_os = "linux")]
+            x11_connection,
+            #[cfg(target_os = "linux")]
+            x11_screen_num,
         })
     }
     
@@ -127,64 +165,217 @@ impl NativeScreenCapture {
     pub fn enumerate_monitors() -> Result<Vec<NativeMonitorInfo>, NativeCaptureError> {
         #[cfg(target_os = "windows")]
         {
-            let monitors = Monitor::enumerate()
-                .map_err(|e| NativeCaptureError::InitializationFailed(format!("Failed to enumerate monitors: {}", e)))?;
-            
-            let mut result = Vec::new();
-            for (i, monitor) in monitors.iter().enumerate() {
-                let name = monitor.name().unwrap_or_else(|_| format!("Display {}", i + 1));
-                
-                // Get monitor dimensions - use device_name for primary detection
-                let is_primary = i == 0; // First monitor is typically primary
-                
-                // Default dimensions - will be updated on first capture
-                let (width, height) = (1920, 1080);
-                
-                result.push(NativeMonitorInfo {
-                    id: format!("monitor-{}", i),
-                    name,
-                    is_primary,
-                    width,
-                    height,
-                    position_x: 0,
-                    position_y: 0,
-                });
-            }
-            
-            if result.is_empty() {
-                // Fallback: create at least one default monitor
-                result.push(NativeMonitorInfo {
-                    id: "primary".to_string(),
-                    name: "Primary Display".to_string(),
-                    is_primary: true,
-                    width: 1920,
-                    height: 1080,
-                    position_x: 0,
-                    position_y: 0,
-                });
-            }
-            
-            Ok(result)
+            Self::enumerate_monitors_windows()
         }
         
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            Self::enumerate_monitors_linux()
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            Self::enumerate_monitors_macos()
+        }
+        
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             Err(NativeCaptureError::UnsupportedPlatform)
         }
     }
     
-    /// Capture a single frame in RGBA format
+    // =========================================================================
+    // Windows Monitor Enumeration
+    // =========================================================================
+    
     #[cfg(target_os = "windows")]
-    pub fn capture_rgba(&mut self) -> Result<Vec<u8>, NativeCaptureError> {
-        use std::time::{Duration, Instant};
+    fn enumerate_monitors_windows() -> Result<Vec<NativeMonitorInfo>, NativeCaptureError> {
+        let monitors = Monitor::enumerate()
+            .map_err(|e| NativeCaptureError::InitializationFailed(format!("Failed to enumerate monitors: {}", e)))?;
         
-        let frame_num = self.frame_count.fetch_add(1, Ordering::Relaxed);
+        let mut result = Vec::new();
+        for (i, monitor) in monitors.iter().enumerate() {
+            let name = monitor.name().unwrap_or_else(|_| format!("Display {}", i + 1));
+            let is_primary = i == 0;
+            let (width, height) = (1920, 1080);
+            
+            result.push(NativeMonitorInfo {
+                id: format!("monitor-{}", i),
+                name,
+                is_primary,
+                width,
+                height,
+                position_x: 0,
+                position_y: 0,
+            });
+        }
         
-        // Use GDI capture for stability and simplicity
-        self.capture_gdi()
+        if result.is_empty() {
+            result.push(NativeMonitorInfo {
+                id: "primary".to_string(),
+                name: "Primary Display".to_string(),
+                is_primary: true,
+                width: 1920,
+                height: 1080,
+                position_x: 0,
+                position_y: 0,
+            });
+        }
+        
+        Ok(result)
     }
     
-    /// GDI-based screen capture for maximum stability
+    // =========================================================================
+    // Linux X11 Monitor Enumeration
+    // =========================================================================
+    
+    #[cfg(target_os = "linux")]
+    fn enumerate_monitors_linux() -> Result<Vec<NativeMonitorInfo>, NativeCaptureError> {
+        use x11rb::protocol::randr::{self, ConnectionExt as RandrConnectionExt};
+        
+        let (conn, screen_num) = RustConnection::connect(None)
+            .map_err(|e| NativeCaptureError::InitializationFailed(format!("X11 connection failed: {}", e)))?;
+        
+        let setup = conn.setup();
+        let screen = &setup.roots[screen_num];
+        
+        // Try to use RandR extension for multi-monitor support
+        let mut result = Vec::new();
+        
+        if let Ok(resources) = conn.randr_get_screen_resources_current(screen.root) {
+            if let Ok(resources) = resources.reply() {
+                for (i, output) in resources.outputs.iter().enumerate() {
+                    if let Ok(output_info) = conn.randr_get_output_info(*output, resources.config_timestamp) {
+                        if let Ok(output_info) = output_info.reply() {
+                            if output_info.connection == randr::Connection::CONNECTED {
+                                if let Some(crtc) = output_info.crtc.checked_sub(0).filter(|&c| c != 0) {
+                                    if let Ok(crtc_info) = conn.randr_get_crtc_info(crtc, resources.config_timestamp) {
+                                        if let Ok(crtc_info) = crtc_info.reply() {
+                                            let name = String::from_utf8_lossy(&output_info.name).to_string();
+                                            result.push(NativeMonitorInfo {
+                                                id: format!("monitor-{}", i),
+                                                name: if name.is_empty() { format!("Display {}", i + 1) } else { name },
+                                                is_primary: i == 0,
+                                                width: crtc_info.width as u32,
+                                                height: crtc_info.height as u32,
+                                                position_x: crtc_info.x as i32,
+                                                position_y: crtc_info.y as i32,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fallback to root window dimensions if RandR fails
+        if result.is_empty() {
+            result.push(NativeMonitorInfo {
+                id: "primary".to_string(),
+                name: "Primary Display".to_string(),
+                is_primary: true,
+                width: screen.width_in_pixels as u32,
+                height: screen.height_in_pixels as u32,
+                position_x: 0,
+                position_y: 0,
+            });
+        }
+        
+        info!("🖥️  Found {} monitors on Linux X11", result.len());
+        Ok(result)
+    }
+    
+    // =========================================================================
+    // macOS Monitor Enumeration
+    // =========================================================================
+    
+    #[cfg(target_os = "macos")]
+    fn enumerate_monitors_macos() -> Result<Vec<NativeMonitorInfo>, NativeCaptureError> {
+        let mut result = Vec::new();
+        
+        // Get all active displays
+        let display_ids = CGDisplay::active_displays()
+            .map_err(|_| NativeCaptureError::InitializationFailed("Failed to get active displays".to_string()))?;
+        
+        let main_display = CGDisplay::main();
+        let main_display_id = main_display.id;
+        
+        for (i, &display_id) in display_ids.iter().enumerate() {
+            let display = CGDisplay::new(display_id);
+            let is_primary = display_id == main_display_id;
+            
+            // Get display dimensions using pixels_wide/pixels_high
+            let width = display.pixels_wide() as u32;
+            let height = display.pixels_high() as u32;
+            
+            result.push(NativeMonitorInfo {
+                id: format!("display-{}", display_id),
+                name: if is_primary { 
+                    "Main Display".to_string() 
+                } else { 
+                    format!("Display {}", i + 1) 
+                },
+                is_primary,
+                width,
+                height,
+                position_x: 0, // Position can be obtained if needed
+                position_y: 0,
+            });
+        }
+        
+        if result.is_empty() {
+            result.push(NativeMonitorInfo {
+                id: "main".to_string(),
+                name: "Main Display".to_string(),
+                is_primary: true,
+                width: main_display.pixels_wide() as u32,
+                height: main_display.pixels_high() as u32,
+                position_x: 0,
+                position_y: 0,
+            });
+        }
+        
+        info!("🖥️  Found {} monitors on macOS", result.len());
+        Ok(result)
+    }
+    
+    // =========================================================================
+    // Screen Capture - Platform Dispatcher
+    // =========================================================================
+    
+    /// Capture a single frame in RGBA format
+    pub fn capture_rgba(&mut self) -> Result<Vec<u8>, NativeCaptureError> {
+        let frame_num = self.frame_count.fetch_add(1, Ordering::Relaxed);
+        
+        #[cfg(target_os = "windows")]
+        {
+            self.capture_gdi()
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            self.capture_x11()
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            self.capture_macos()
+        }
+        
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            Err(NativeCaptureError::UnsupportedPlatform)
+        }
+    }
+    
+    // =========================================================================
+    // Windows GDI Capture
+    // =========================================================================
+    
+    /// GDI-based screen capture for maximum stability (Windows)
     #[cfg(target_os = "windows")]
     fn capture_gdi(&self) -> Result<Vec<u8>, NativeCaptureError> {
         use std::ptr;
@@ -341,10 +532,231 @@ impl NativeScreenCapture {
         }
     }
     
-    #[cfg(not(target_os = "windows"))]
-    pub fn capture_rgba(&mut self) -> Result<Vec<u8>, NativeCaptureError> {
-        Err(NativeCaptureError::UnsupportedPlatform)
+    // =========================================================================
+    // Linux X11 Capture
+    // =========================================================================
+    
+    /// X11-based screen capture for Linux
+    #[cfg(target_os = "linux")]
+    fn capture_x11(&self) -> Result<Vec<u8>, NativeCaptureError> {
+        let conn = self.x11_connection.as_ref()
+            .ok_or_else(|| NativeCaptureError::CaptureError("X11 connection not initialized".to_string()))?;
+        
+        let setup = conn.setup();
+        let screen = &setup.roots[self.x11_screen_num];
+        let root = screen.root;
+        
+        // Get geometry of root window
+        let geometry = conn.get_geometry(root)
+            .map_err(|e| NativeCaptureError::CaptureError(format!("Failed to get geometry: {}", e)))?
+            .reply()
+            .map_err(|e| NativeCaptureError::CaptureError(format!("Failed to get geometry reply: {}", e)))?;
+        
+        let width = geometry.width as u32;
+        let height = geometry.height as u32;
+        
+        // Capture the screen using XGetImage equivalent
+        let image = conn.get_image(
+            ImageFormat::Z_PIXMAP,
+            root,
+            0, 0,
+            width as u16,
+            height as u16,
+            !0, // All planes
+        )
+        .map_err(|e| NativeCaptureError::CaptureError(format!("Failed to get image: {}", e)))?
+        .reply()
+        .map_err(|e| NativeCaptureError::CaptureError(format!("Failed to get image reply: {}", e)))?;
+        
+        let depth = image.depth;
+        let data = image.data;
+        
+        // Convert to RGBA based on depth and visual
+        let rgba_buffer = self.convert_x11_to_rgba(&data, width, height, depth, screen)?;
+        
+        debug!("📸 X11 capture complete: {}x{} ({} bytes)", width, height, rgba_buffer.len());
+        
+        Ok(rgba_buffer)
     }
+    
+    /// Convert X11 image data to RGBA format
+    #[cfg(target_os = "linux")]
+    #[allow(unused_variables)]
+    fn convert_x11_to_rgba(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        depth: u8,
+        screen: &Screen, // Reserved for future visual info lookup
+    ) -> Result<Vec<u8>, NativeCaptureError> {
+        let pixel_count = (width * height) as usize;
+        let mut rgba_buffer = Vec::with_capacity(pixel_count * 4);
+        
+        match depth {
+            24 | 32 => {
+                // 32-bit BGRA or 24-bit BGR (padded to 32-bit)
+                let bytes_per_pixel = 4;
+                for i in 0..pixel_count {
+                    let offset = i * bytes_per_pixel;
+                    if offset + 3 < data.len() {
+                        // X11 typically uses BGRA or BGRX format
+                        let b = data[offset];
+                        let g = data[offset + 1];
+                        let r = data[offset + 2];
+                        let a = if depth == 32 { data[offset + 3] } else { 255 };
+                        
+                        rgba_buffer.push(r);
+                        rgba_buffer.push(g);
+                        rgba_buffer.push(b);
+                        rgba_buffer.push(a);
+                    } else {
+                        rgba_buffer.extend_from_slice(&[0, 0, 0, 255]);
+                    }
+                }
+            }
+            16 => {
+                // 16-bit RGB565
+                for i in 0..pixel_count {
+                    let offset = i * 2;
+                    if offset + 1 < data.len() {
+                        let pixel = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                        let r = ((pixel >> 11) & 0x1F) as u8 * 8;
+                        let g = ((pixel >> 5) & 0x3F) as u8 * 4;
+                        let b = (pixel & 0x1F) as u8 * 8;
+                        
+                        rgba_buffer.push(r);
+                        rgba_buffer.push(g);
+                        rgba_buffer.push(b);
+                        rgba_buffer.push(255);
+                    } else {
+                        rgba_buffer.extend_from_slice(&[0, 0, 0, 255]);
+                    }
+                }
+            }
+            _ => {
+                // Unsupported depth, create black image
+                warn!("⚠️  Unsupported X11 depth: {}, creating fallback", depth);
+                rgba_buffer.resize(pixel_count * 4, 0);
+                for i in (3..rgba_buffer.len()).step_by(4) {
+                    rgba_buffer[i] = 255; // Alpha
+                }
+            }
+        }
+        
+        Ok(rgba_buffer)
+    }
+    
+    // =========================================================================
+    // macOS Core Graphics Capture
+    // =========================================================================
+    
+    /// Core Graphics-based screen capture for macOS
+    #[cfg(target_os = "macos")]
+    fn capture_macos(&self) -> Result<Vec<u8>, NativeCaptureError> {
+        use core_foundation::data::CFData;
+        use core_graphics::image::CGImage;
+        
+        // Get all displays and find the target one
+        let display_ids = CGDisplay::active_displays()
+            .map_err(|_| NativeCaptureError::CaptureError("Failed to get active displays".to_string()))?;
+        
+        let display_id = if self.monitor_index < display_ids.len() {
+            display_ids[self.monitor_index]
+        } else {
+            CGDisplay::main().id
+        };
+        
+        let display = CGDisplay::new(display_id);
+        
+        // Capture the display image
+        let image: Option<CGImage> = display.image();
+        let image = image.ok_or_else(|| {
+            NativeCaptureError::CaptureError("Failed to capture display image".to_string())
+        })?;
+        
+        // Get image properties
+        let width = image.width();
+        let height = image.height();
+        let bytes_per_row = image.bytes_per_row();
+        let bits_per_pixel = image.bits_per_pixel();
+        
+        // Get pixel data from the image
+        let data_provider = image.data_provider()
+            .ok_or_else(|| NativeCaptureError::CaptureError("Failed to get data provider".to_string()))?;
+        
+        let cf_data: CFData = data_provider.copy_data()
+            .ok_or_else(|| NativeCaptureError::CaptureError("Failed to copy pixel data".to_string()))?;
+        
+        let raw_data = cf_data.bytes();
+        
+        // Convert to RGBA (macOS typically uses BGRA)
+        let rgba_buffer = self.convert_macos_to_rgba(raw_data, width, height, bytes_per_row, bits_per_pixel)?;
+        
+        debug!("📸 macOS capture complete: {}x{} ({} bytes)", width, height, rgba_buffer.len());
+        
+        Ok(rgba_buffer)
+    }
+    
+    /// Convert macOS image data to RGBA format
+    #[cfg(target_os = "macos")]
+    fn convert_macos_to_rgba(
+        &self,
+        data: &[u8],
+        width: usize,
+        height: usize,
+        bytes_per_row: usize,
+        bits_per_pixel: usize,
+    ) -> Result<Vec<u8>, NativeCaptureError> {
+        let bytes_per_pixel = bits_per_pixel / 8;
+        let pixel_count = width * height;
+        let mut rgba_buffer = Vec::with_capacity(pixel_count * 4);
+        
+        for y in 0..height {
+            for x in 0..width {
+                let offset = y * bytes_per_row + x * bytes_per_pixel;
+                
+                if offset + bytes_per_pixel <= data.len() {
+                    match bytes_per_pixel {
+                        4 => {
+                            // macOS uses BGRA format (little-endian ARGB)
+                            let b = data[offset];
+                            let g = data[offset + 1];
+                            let r = data[offset + 2];
+                            let a = data[offset + 3];
+                            
+                            rgba_buffer.push(r);
+                            rgba_buffer.push(g);
+                            rgba_buffer.push(b);
+                            rgba_buffer.push(a);
+                        }
+                        3 => {
+                            // BGR format
+                            let b = data[offset];
+                            let g = data[offset + 1];
+                            let r = data[offset + 2];
+                            
+                            rgba_buffer.push(r);
+                            rgba_buffer.push(g);
+                            rgba_buffer.push(b);
+                            rgba_buffer.push(255);
+                        }
+                        _ => {
+                            rgba_buffer.extend_from_slice(&[0, 0, 0, 255]);
+                        }
+                    }
+                } else {
+                    rgba_buffer.extend_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+        
+        Ok(rgba_buffer)
+    }
+    
+    // =========================================================================
+    // Common Methods
+    // =========================================================================
     
     /// Get current dimensions
     pub fn dimensions(&self) -> (u32, u32) {
@@ -367,19 +779,28 @@ impl NativeScreenCapture {
     }
 }
 
-/// Capture a single frame using GDI (standalone function for fallback use)
-#[cfg(target_os = "windows")]
-pub fn capture_screen_gdi(monitor_index: usize) -> Result<(Vec<u8>, u32, u32), NativeCaptureError> {
+// =============================================================================
+// Standalone Capture Functions
+// =============================================================================
+
+/// Capture a single frame using native platform APIs (standalone function)
+pub fn capture_screen_native(monitor_index: usize) -> Result<(Vec<u8>, u32, u32), NativeCaptureError> {
     let mut capture = NativeScreenCapture::new(Some(monitor_index))?;
     let data = capture.capture_rgba()?;
     let (width, height) = capture.dimensions();
     Ok((data, width, height))
 }
 
-/// Capture a single frame using GDI (standalone function for fallback use)
+/// Capture a single frame using GDI (Windows only, for backward compatibility)
+#[cfg(target_os = "windows")]
+pub fn capture_screen_gdi(monitor_index: usize) -> Result<(Vec<u8>, u32, u32), NativeCaptureError> {
+    capture_screen_native(monitor_index)
+}
+
+/// Capture a single frame (non-Windows platforms)
 #[cfg(not(target_os = "windows"))]
-pub fn capture_screen_gdi(_monitor_index: usize) -> Result<(Vec<u8>, u32, u32), NativeCaptureError> {
-    Err(NativeCaptureError::UnsupportedPlatform)
+pub fn capture_screen_gdi(monitor_index: usize) -> Result<(Vec<u8>, u32, u32), NativeCaptureError> {
+    capture_screen_native(monitor_index)
 }
 
 #[cfg(test)]

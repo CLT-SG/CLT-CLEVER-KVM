@@ -39,10 +39,11 @@ npm run tauri dev
 - Adaptive quality (1-10 Mbps) and frame rates (15-60 FPS)
 
 🖥️ **Native Screen Capture**
-- **Cross-Platform `scap` Integration**: Native screen recording using `scap` 0.0.8 library
-- **Linux Desktop Portal Support**: Full integration with XDG Desktop Portals for secure screen access
-- **Multi-Format Frame Support**: Handles BGRA, RGB, RGBx, BGRx, XBGR, BGR0, and YUV formats automatically
-- **Permission Management**: Proper desktop portal permission flow for screen capture on Linux
+- **Cross-Platform Native APIs**: Direct platform API integration for maximum stability
+- **Windows**: GDI capture (GetDC, BitBlt, GetDIBits) for universal Windows compatibility
+- **Linux X11**: Native X11 library with RandR extension for multi-monitor support
+- **macOS**: Core Graphics (CGDisplayCreateImage) for Quartz display capture
+- **Multi-Format Frame Support**: Handles BGRA, RGB, and YUV formats with automatic conversion
 - **Monitor Detection**: Automatic display enumeration with fallback for headless systems
 
 🎵 **Professional Audio**
@@ -171,11 +172,12 @@ http://hostname:9921/kvm?quality=balanced&bitrate=1500
 
 ### Backend (Rust/Tauri)
 - **Screen Capture**:
-  - Native `scap` 0.0.8 library for cross-platform screen recording
-  - Linux XDG Desktop Portal integration for secure screen capture
-  - Multi-format frame support: BGRA, RGB, RGBx, BGRx, XBGR, BGR0, YUV
+  - Native platform APIs for cross-platform screen recording (no external dependencies)
+  - Windows: GDI (GetDC, BitBlt, GetDIBits) for maximum compatibility
+  - Linux: X11 library with RandR extension for multi-monitor support
+  - macOS: Core Graphics (CGDisplayCreateImage) for Quartz display capture
+  - Multi-format frame support: BGRA, RGB, YUV with automatic conversion
   - Automatic format conversion and cursor overlay capabilities
-  - Permission management for desktop portal access on Linux
 - **Video Encoding**: 
   - Native WebM + VP8 encoder with YUV420 color space optimization
   - Built-in `webm` and `matroska` crate integration - no FFmpeg required
@@ -261,14 +263,15 @@ For detailed build instructions, troubleshooting, platform-specific optimization
 
 ## Recent Enhancements (v3.0)
 
-### Native Screen Capture with `scap` Integration (v3.1.0)
-- **Cross-Platform `scap` Library**: Migrated from `xcap` to native `scap` 0.0.8 for improved screen recording
-- **Linux Desktop Portal Integration**: Full support for XDG Desktop Portals enabling secure screen capture on modern Linux environments
-- **Multi-Format Frame Support**: Automatic handling of BGRA, RGB, RGBx, BGRx, XBGR, BGR0, and YUV frame formats with real-time conversion
-- **Enhanced Permission Management**: Proper desktop portal permission flow with comprehensive error handling for Linux screen capture
-- **Monitor Detection Improvements**: Simplified monitor enumeration with better fallback support for headless systems
-- **Cursor Capture Optimization**: Platform-specific cursor overlay with optional capture modes for different desktop environments
-- **Clean API Architecture**: Streamlined implementation following official `scap` examples with removed duplicate code
+### Native Cross-Platform Screen Capture (v3.1.0)
+- **Platform-Native APIs**: Replaced external dependencies with direct platform API implementations for maximum stability
+- **Windows GDI Capture**: Native Windows GDI implementation (GetDC, BitBlt, GetDIBits) for universal Windows compatibility
+- **Linux X11 Capture**: Native X11 library integration with RandR extension for multi-monitor support on Ubuntu and other X11-based systems
+- **macOS Core Graphics Capture**: Native Core Graphics (CGDisplayCreateImage) for Quartz display capture on macOS
+- **Multi-Format Frame Support**: Automatic handling of BGRA, RGB, and YUV frame formats with real-time conversion to RGBA
+- **Monitor Detection Improvements**: Platform-specific monitor enumeration with automatic fallback support for headless systems
+- **Zero External Dependencies**: No reliance on scap or other screen capture libraries - pure platform API implementation
+- **Clean API Architecture**: Unified cross-platform interface with platform-specific optimizations
 
 ### Native WebM Video/Audio Pipeline
 - **Zero External Dependencies**: Completely eliminated FFmpeg - now uses pure Rust libraries
@@ -299,8 +302,16 @@ For detailed build instructions, troubleshooting, platform-specific optimization
 
 ### Key Rust Dependencies (Native WebM + Screen Capture Stack)
 ```toml
-# Screen Capture
-scap = "0.0.8"         # Cross-platform screen recording with desktop portal support
+# Screen Capture (Platform-Specific)
+[target.'cfg(windows)'.dependencies]
+windows-capture = "=1.4.4"  # Windows capture API support
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["randr"] }  # X11 with multi-monitor support
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"      # macOS Core Graphics API
+core-foundation = "0.10"    # macOS Core Foundation
 
 # WebM Pipeline  
 webm = "1.1"           # WebM container format

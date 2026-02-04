@@ -6,10 +6,13 @@ The application failed to compile and run on Windows due to breaking API changes
 
 ## Solution
 
-Replaced the problematic `scap`/`zed-scap` dependency with a native Windows GDI screen capture implementation. This provides:
+Replaced the problematic `scap`/`zed-scap` dependency with native platform-specific screen capture implementations. This provides:
 
-- Stable screen capture using direct Windows API calls (GDI)
-- Maximum compatibility across all Windows versions
+- Stable screen capture using direct platform API calls
+- Cross-platform support for Windows, Linux (X11), and macOS
+- Windows: GDI (GetDC, BitBlt, GetDIBits) for maximum compatibility
+- Linux: X11 library (XGetImage) with RandR extension for multi-monitor support
+- macOS: Core Graphics (CGDisplayCreateImage) for Quartz display capture
 - No external dependency conflicts
 - Reliable RGBA frame output for streaming
 
@@ -17,8 +20,9 @@ Replaced the problematic `scap`/`zed-scap` dependency with a native Windows GDI 
 
 ### Core Changes
 - **src-tauri/Cargo.toml**: Replaced `scap` with `zed-scap 0.0.8-zed` and pinned `windows-capture` to version `1.4.4` to avoid breaking changes
-- **src-tauri/src/core/native_capture.rs**: New native Windows GDI screen capture module with direct Windows API implementation
-- **src-tauri/src/core/capture.rs**: Refactored to use the new native capture backend instead of scap
+- **src-tauri/Cargo.toml**: Added platform-specific dependencies for Linux (x11rb with randr) and macOS (core-graphics, core-foundation)
+- **src-tauri/src/core/native_capture.rs**: New cross-platform native screen capture module supporting Windows GDI, Linux X11, and macOS Core Graphics
+- **src-tauri/src/core/capture.rs**: Refactored to use the new native capture backend with cross-platform documentation
 - **src-tauri/src/core/mod.rs**: Added native_capture module export
 
 ### Streaming Updates

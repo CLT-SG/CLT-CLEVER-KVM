@@ -1,10 +1,15 @@
 //! Screen Capture Module
 //!
-//! Provides stable screen capture functionality using native Windows GDI as the primary
-//! method for maximum stability and reliability across all Windows versions.
+//! Provides stable screen capture functionality using native platform APIs for maximum
+//! stability and reliability across all operating systems.
 //!
-//! This module replaces the problematic zed-scap dependency with a direct Windows API
-//! implementation that works reliably for remote connections.
+//! Platform Support:
+//! - **Windows**: GDI (GetDC, BitBlt, GetDIBits) for universal Windows compatibility
+//! - **Linux**: X11 (XGetImage) for X Window System support
+//! - **macOS**: Core Graphics (CGDisplayCreateImage) for Quartz display capture
+//!
+//! This module provides a unified interface for screen capture that works consistently
+//! across Windows, Linux (X11), and macOS platforms.
 
 use log::{debug, error, info, warn};
 use std::sync::Mutex;
