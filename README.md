@@ -263,7 +263,7 @@ For detailed build instructions, troubleshooting, platform-specific optimization
 
 ## Recent Enhancements (v3.0)
 
-### Native Cross-Platform Screen Capture (v3.1.0)
+### Native Cross-Platform Screen Capture (4.1.0)
 - **Platform-Native APIs**: Replaced external dependencies with direct platform API implementations for maximum stability
 - **Windows GDI Capture**: Native Windows GDI implementation (GetDC, BitBlt, GetDIBits) for universal Windows compatibility
 - **Linux X11 Capture**: Native X11 library integration with RandR extension for multi-monitor support on Ubuntu and other X11-based systems

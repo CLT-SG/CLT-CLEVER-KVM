@@ -35,8 +35,25 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 ### Configuration
 - **src-tauri/tauri.conf.json**: Simplified Debian package dependencies
 
+### Web Client Fixes
+- **src-tauri/web-client/kvm-client.js**: Fixed black screen issue by setting default screen dimensions to 1920x1080 instead of 0x0
+- **src-tauri/web-client/kvm-client.js**: Fixed mouse coordinate calculation to use dynamically created canvas as target element
+- **src-tauri/web-client/kvm-client.js**: Added bounds checking and dimension validation for coordinate scaling
+- **src-tauri/web-client/kvm-client.js**: Fixed RGBA frame data copying to prevent ArrayBuffer reuse issues
+- **src-tauri/web-client/kvm-client.js**: Added connection health monitoring with automatic reconnection on stale connections
+- **src-tauri/web-client/kvm-client.css**: Fixed cursor visibility from 'none' to 'crosshair' for remote control
+
+### Input Handling Fixes
+- **src-tauri/src/streaming/handlers/ultra_stream.rs**: Added input event parsing and handling for mouse/keyboard events
+- **src-tauri/src/streaming/handlers/ultra_stream.rs**: Changed InputHandler to use Arc<parking_lot::Mutex> for thread-safe access
+- **src-tauri/src/streaming/handlers/realtime_stream.rs**: Added input event parsing and handling for mouse/keyboard events
+- **src-tauri/src/streaming/handlers/realtime_stream.rs**: Changed InputHandler to use Arc<parking_lot::Mutex> for thread-safe access
+
 ## Testing
 
 - Verified screen capture works correctly on Windows
 - Confirmed RGBA frame output is correctly formatted
 - Tested streaming functionality with the web client
+- Verified mouse cursor alignment between client and server
+- Confirmed keyboard and mouse input events are processed correctly
+- Tested connection recovery after stream freeze

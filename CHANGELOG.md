@@ -2,11 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.1.0] - 2026-02-04
+## [4.1.0] - 2026-02-04
 
 ### Fixed
 - Fixed Windows screen capture compatibility issues caused by breaking API changes in windows-capture 1.5.0
 - Resolved build failures due to scap/zed-scap dependency conflicts
+- Fixed KVM web client black screen issue by correcting default screen dimensions
+- Fixed mouse cursor alignment between client and actual screen coordinates
+- Fixed mouse and keyboard input events not being processed by the server
+- Fixed RGBA frame data copying to prevent ArrayBuffer reuse issues
+- Fixed cursor visibility in CSS for remote control interface
 
 ### Changed
 - Replaced scap screen capture library with native Windows GDI implementation for maximum stability
@@ -24,3 +29,7 @@ All notable changes to this project will be documented in this file.
 - Linux X11 capture using x11rb library with RandR extension for multi-monitor support
 - macOS capture using Core Graphics (CGDisplayCreateImage) API
 - Platform-specific dependencies: x11rb for Linux, core-graphics/core-foundation for macOS
+- Connection health monitoring with automatic stream freeze detection
+- Automatic reconnection when connection becomes stale
+- Input event parsing for mouse and keyboard events in streaming handlers
+- Thread-safe input handler using Arc<parking_lot::Mutex>

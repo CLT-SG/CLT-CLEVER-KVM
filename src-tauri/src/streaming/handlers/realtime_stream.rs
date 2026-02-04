@@ -8,12 +8,12 @@ use serde_json::json;
 use anyhow::Result;
 
 use crate::streaming::{RealtimeStreamEncoder, RealtimeConfig};
-use crate::core::InputHandler;
+use crate::core::{InputHandler, InputEvent};
 use crate::network::models::NetworkStats;
 
 pub struct RealtimeStreamHandler {
     encoder: Arc<Mutex<RealtimeStreamEncoder>>,
-    input_handler: InputHandler,
+    input_handler: Arc<parking_lot::Mutex<InputHandler>>,
     last_keyframe_time: Instant,
     frame_count: u64,
     network_stats: NetworkStats,
@@ -22,7 +22,7 @@ pub struct RealtimeStreamHandler {
 impl RealtimeStreamHandler {
     pub fn new(config: RealtimeConfig) -> Result<Self> {
         let encoder = Arc::new(Mutex::new(RealtimeStreamEncoder::new(config)?));
-        let input_handler = InputHandler::new();
+        let input_handler = Arc::new(parking_lot::Mutex::new(InputHandler::new()));
         
         Ok(Self {
             encoder,
@@ -173,12 +173,24 @@ impl RealtimeStreamHandler {
         // Receive task for handling client messages
         let encoder_clone2 = Arc::clone(&self.encoder);
         let control_tx_clone = control_tx.clone();
+        let input_handler_clone = Arc::clone(&self.input_handler);
         let receive_task = tokio::spawn(async move {
             while let Some(msg) = receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
                         if let Ok(json_msg) = serde_json::from_str::<serde_json::Value>(&text) {
                             match json_msg.get("type").and_then(|t| t.as_str()) {
+                                // Handle input events (mouse and keyboard)
+                                Some("mousemove") | Some("mousedown") | Some("mouseup") | 
+                                Some("wheel") | Some("keydown") | Some("keyup") => {
+                                    // Parse and handle input event
+                                    if let Some(input_event) = parse_client_input_event(&json_msg) {
+                                        let mut handler = input_handler_clone.lock();
+                                        if let Err(e) = handler.handle_event(input_event) {
+                                            debug!("Input event error: {}", e);
+                                        }
+                                    }
+                                }
                                 Some("ping") => {
                                     let pong = json!({
                                         "type": "pong",
@@ -234,5 +246,85 @@ impl RealtimeStreamHandler {
         }
         
         info!("Real-time streaming session ended");
+    }
+}
+
+/// Parse client input events from JSON and convert to InputEvent
+/// Handles the conversion from web client format to server InputEvent format
+fn parse_client_input_event(json: &serde_json::Value) -> Option<InputEvent> {
+    let event_type = json.get("type")?.as_str()?;
+    
+    match event_type {
+        "mousemove" => {
+            let x = json.get("x")?.as_i64()? as i32;
+            let y = json.get("y")?.as_i64()? as i32;
+            let monitor_id = json.get("monitor_id").and_then(|v| v.as_str()).map(String::from);
+            Some(InputEvent::MouseMove { x, y, monitor_id })
+        }
+        "mousedown" => {
+            let x = json.get("x")?.as_i64()? as i32;
+            let y = json.get("y")?.as_i64()? as i32;
+            let button = json.get("button")?.as_str()?.to_string();
+            let monitor_id = json.get("monitor_id").and_then(|v| v.as_str()).map(String::from);
+            Some(InputEvent::MouseDown { button, x, y, monitor_id })
+        }
+        "mouseup" => {
+            let x = json.get("x")?.as_i64()? as i32;
+            let y = json.get("y")?.as_i64()? as i32;
+            let button = json.get("button")?.as_str()?.to_string();
+            let monitor_id = json.get("monitor_id").and_then(|v| v.as_str()).map(String::from);
+            Some(InputEvent::MouseUp { button, x, y, monitor_id })
+        }
+        "wheel" => {
+            let delta_y = json.get("delta_y")?.as_i64()? as i32;
+            let delta_x = json.get("delta_x").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let monitor_id = json.get("monitor_id").and_then(|v| v.as_str()).map(String::from);
+            Some(InputEvent::MouseWheel { delta_y, delta_x, monitor_id })
+        }
+        "keydown" => {
+            let key = json.get("key")?.as_str()?.to_string();
+            let code = json.get("code").and_then(|v| v.as_str()).map(String::from);
+            
+            // Convert individual modifier flags to modifiers array
+            let mut modifiers = Vec::new();
+            if json.get("ctrlKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Control".to_string());
+            }
+            if json.get("altKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Alt".to_string());
+            }
+            if json.get("shiftKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Shift".to_string());
+            }
+            if json.get("metaKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Meta".to_string());
+            }
+            
+            let repeat = json.get("repeat").and_then(|v| v.as_bool());
+            
+            Some(InputEvent::KeyDown { key, code, modifiers, repeat })
+        }
+        "keyup" => {
+            let key = json.get("key")?.as_str()?.to_string();
+            let code = json.get("code").and_then(|v| v.as_str()).map(String::from);
+            
+            // Convert individual modifier flags to modifiers array
+            let mut modifiers = Vec::new();
+            if json.get("ctrlKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Control".to_string());
+            }
+            if json.get("altKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Alt".to_string());
+            }
+            if json.get("shiftKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Shift".to_string());
+            }
+            if json.get("metaKey").and_then(|v| v.as_bool()).unwrap_or(false) {
+                modifiers.push("Meta".to_string());
+            }
+            
+            Some(InputEvent::KeyUp { key, code, modifiers })
+        }
+        _ => None
     }
 }

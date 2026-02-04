@@ -6,8 +6,9 @@ class KVMClient {
         this.lastFrame = 0;
         this.frameCount = 0;
         this.lastFpsUpdate = Date.now();
-        this.screenWidth = 0;
-        this.screenHeight = 0;
+        // Initialize with sensible defaults - will be updated from server_info or first frame
+        this.screenWidth = 1920;
+        this.screenHeight = 1080;
         this.latency = 0;
         this.lastPingTime = 0;
         this.pingInterval = null;
@@ -48,6 +49,12 @@ class KVMClient {
         this.osdTimer = null;
         this.mouseIdleTimer = null;
         this.lastMouseMove = Date.now();
+        
+        // Connection health monitoring
+        this.lastFrameTime = Date.now();
+        this.connectionHealthInterval = null;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
         
         // Multi-touch and gesture support
         this.touchIdentifiers = new Map();
@@ -424,19 +431,35 @@ class KVMClient {
     handleMouseEvent(e) {
         if (!this.connected) return;
         
-        // Use the appropriate element - canvas fallback or video screen
-        const targetElement = this.fallbackCanvas && this.fallbackCanvas.style.display !== 'none' 
-            ? this.fallbackCanvas 
-            : this.videoScreen;
+        // Use the appropriate element - prefer realCanvas (dynamically created), then fallbackCanvas, then videoScreen
+        let targetElement = null;
+        if (this.realCanvas && this.realCanvas.parentElement) {
+            targetElement = this.realCanvas;
+        } else if (this.fallbackCanvas && this.fallbackCanvas.style.display !== 'none') {
+            targetElement = this.fallbackCanvas;
+        } else {
+            targetElement = this.videoScreen;
+        }
             
         if (!targetElement) return;
         
         const rect = targetElement.getBoundingClientRect();
+        
+        // Ensure valid dimensions to prevent NaN/Infinity
+        if (rect.width <= 0 || rect.height <= 0 || this.screenWidth <= 0 || this.screenHeight <= 0) {
+            console.warn('Invalid dimensions for coordinate calculation');
+            return;
+        }
+        
         const scaleX = this.screenWidth / rect.width;
         const scaleY = this.screenHeight / rect.height;
         
-        const x = Math.floor((e.clientX - rect.left) * scaleX);
-        const y = Math.floor((e.clientY - rect.top) * scaleY);
+        // Calculate position relative to element, clamped to valid range
+        const relX = Math.max(0, e.clientX - rect.left);
+        const relY = Math.max(0, e.clientY - rect.top);
+        
+        const x = Math.floor(Math.min(relX * scaleX, this.screenWidth - 1));
+        const y = Math.floor(Math.min(relY * scaleY, this.screenHeight - 1));
         
         let eventData = {
             x,
@@ -502,15 +525,36 @@ class KVMClient {
         
         if (!this.connected) return;
         
+        // Use the appropriate target element - prefer realCanvas
+        let targetElement = null;
+        if (this.realCanvas && this.realCanvas.parentElement) {
+            targetElement = this.realCanvas;
+        } else if (this.fallbackCanvas && this.fallbackCanvas.style.display !== 'none') {
+            targetElement = this.fallbackCanvas;
+        } else {
+            targetElement = this.videoScreen;
+        }
+        
+        if (!targetElement) return;
+        
         // Handle touch events for mobile devices
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
-            const rect = this.videoScreen.getBoundingClientRect();
+            const rect = targetElement.getBoundingClientRect();
+            
+            // Ensure valid dimensions
+            if (rect.width <= 0 || rect.height <= 0 || this.screenWidth <= 0 || this.screenHeight <= 0) {
+                continue;
+            }
+            
             const scaleX = this.screenWidth / rect.width;
             const scaleY = this.screenHeight / rect.height;
             
-            const x = Math.floor((touch.clientX - rect.left) * scaleX);
-            const y = Math.floor((touch.clientY - rect.top) * scaleY);
+            const relX = Math.max(0, touch.clientX - rect.left);
+            const relY = Math.max(0, touch.clientY - rect.top);
+            
+            const x = Math.floor(Math.min(relX * scaleX, this.screenWidth - 1));
+            const y = Math.floor(Math.min(relY * scaleY, this.screenHeight - 1));
             
             let eventData = {
                 type: e.type,
@@ -708,8 +752,14 @@ class KVMClient {
             this.ws.close();
         }
         
-        // Stop network monitoring
+        // Stop all monitoring intervals
         this.stopNetworkMonitoring();
+        this.stopConnectionHealthMonitoring();
+        
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
         
         window.location.href = '/';
     }
@@ -855,6 +905,7 @@ class KVMClient {
         
         this.ws.onopen = () => {
             this.connected = true;
+            this.reconnectAttempts = 0;
             this.updateStatus('Connected', 'Connection established successfully');
             console.log('WebSocket connection established');
             
@@ -869,6 +920,9 @@ class KVMClient {
 
             // Start network monitoring and adaptive quality
             this.startNetworkMonitoring();
+            
+            // Start connection health monitoring to detect freezes
+            this.startConnectionHealthMonitoring();
             
             // Request monitor list if not received within 2 seconds
             setTimeout(() => {
@@ -909,10 +963,14 @@ class KVMClient {
         
         this.ws.onclose = (event) => {
             this.connected = false;
+            
+            // Stop all monitoring intervals
             if (this.pingInterval) {
                 clearInterval(this.pingInterval);
                 this.pingInterval = null;
             }
+            this.stopNetworkMonitoring();
+            this.stopConnectionHealthMonitoring();
             
             console.log('WebSocket closed. Code:', event.code, 'Reason:', event.reason);
             
@@ -922,14 +980,15 @@ class KVMClient {
                 this.updateStatus('Disconnected', 'Connection closed');
             }
             
-            // Only attempt to reconnect if it was a normal closure, not a connection failure
-            if (event.code !== 1006) {
+            // Attempt to reconnect with backoff
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                const delay = Math.min(3000 * (this.reconnectAttempts + 1), 15000);
                 setTimeout(() => {
                     if (!this.connected) {
-                        console.log('Attempting to reconnect...');
+                        console.log(`Attempting to reconnect... (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
                         this.connect();
                     }
-                }, 3000);
+                }, delay);
             }
         };
         
@@ -978,8 +1037,14 @@ class KVMClient {
     handleServerInfo(data) {
         console.log('Server info received:', data);
         
-        this.screenWidth = data.width;
-        this.screenHeight = data.height;
+        // Update screen dimensions with proper fallbacks
+        if (data.width && data.height) {
+            this.screenWidth = data.width;
+            this.screenHeight = data.height;
+        } else {
+            // Keep default dimensions if server doesn't provide them
+            console.warn('Server info missing dimensions, using defaults:', this.screenWidth, this.screenHeight);
+        }
         
         // Update canvas size if fallback is active
         if (this.fallbackCanvas) {
@@ -990,7 +1055,9 @@ class KVMClient {
         
         // Update UI
         if (this.osdTitle) {
-            this.osdTitle.textContent = `${data.hostname} - Monitor ${data.monitor} (${data.width}x${data.height})`;
+            const hostname = data.hostname || 'KVM Server';
+            const monitor = data.monitor || 0;
+            this.osdTitle.textContent = `${hostname} - Monitor ${monitor} (${this.screenWidth}x${this.screenHeight})`;
         }
         
         // Keep the codec that was initialized - don't override to rgba
@@ -1005,10 +1072,9 @@ class KVMClient {
             this.canvasLayer.height = this.screenHeight;
         }
         
-        // Ensure video element is visible
-        if (this.videoScreen) {
-            this.videoScreen.style.display = 'block';
-        }
+        // Pre-initialize the optimized canvas with server dimensions
+        // This ensures the canvas is ready before frames arrive
+        this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
         
         // Initialize video for codec streaming
         this.initializeVideoStreaming();
@@ -1235,18 +1301,30 @@ class KVMClient {
         
         if (!binaryData || binaryData.byteLength === 0) return;
         
-        // Only log every 300th frame (5 seconds at 60fps) to reduce overhead
-        if (this.frameLogCounter % 300 === 0) {
-            console.log('📺 Frame stream active:', (binaryData.byteLength / 1024).toFixed(1) + 'KB');
+        // Log more frequently initially, then reduce
+        const shouldLog = this.frameLogCounter < 10 || this.frameLogCounter % 300 === 0;
+        if (shouldLog) {
+            console.log('📺 Frame stream active:', (binaryData.byteLength / 1024).toFixed(1) + 'KB', 
+                        'Frame #' + this.frameLogCounter);
+            
+            // Log first few bytes for debugging
+            if (this.frameLogCounter < 5) {
+                const view = new DataView(binaryData);
+                const header = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+                console.log('📺 Frame header:', header, 'bytes:', binaryData.byteLength);
+            }
         }
         this.frameLogCounter++;
+        
+        // Update last frame time for connection health monitoring
+        this.lastFrameTime = Date.now();
 
         try {
             // Check if this is a WebM container frame
             if (this.isWebMFrame(binaryData)) {
                 this.handleWebMFrame(binaryData);
             } else {
-                // Fall back to custom frame parsing
+                // Fall back to custom frame parsing (RGBA frames)
                 this.parseAndRenderFrame(binaryData);
             }
             
@@ -1393,15 +1471,42 @@ class KVMClient {
             const frameNumber = dataView.getBigUint64(offset, true); offset += 8;
             const dataLength = dataView.getUint32(offset, true); offset += 4;
             
-            console.log(`� RGBA frame: ${width}x${height}, frame #${frameNumber}, data: ${dataLength} bytes, total: ${dataView.byteLength} bytes`);
+            // Update screen dimensions from frame data if not set
+            if (!this.screenWidth || !this.screenHeight || 
+                this.screenWidth !== width || this.screenHeight !== height) {
+                this.screenWidth = width;
+                this.screenHeight = height;
+                console.log(`📐 Screen dimensions updated from frame: ${width}x${height}`);
+                
+                // Update canvas sizes
+                if (this.realCanvas) {
+                    this.realCanvas.width = width;
+                    this.realCanvas.height = height;
+                }
+                if (this.fallbackCanvas) {
+                    this.fallbackCanvas.width = width;
+                    this.fallbackCanvas.height = height;
+                }
+            }
+            
+            // Only log occasionally to reduce console spam
+            if (frameNumber % 60 === 0n || frameNumber < 5n) {
+                console.log(`📺 RGBA frame: ${width}x${height}, frame #${frameNumber}, data: ${dataLength} bytes`);
+            }
             
             if (dataView.byteLength < offset + dataLength) {
                 console.error(`❌ RGBA frame truncated: need ${offset + dataLength} bytes, got ${dataView.byteLength} bytes`);
                 return;
             }
             
-            // Direct RGBA data - zero conversion needed!
-            const rgbaData = new Uint8Array(arrayBuffer, offset, dataLength);
+            // Direct RGBA data - MUST copy the data since ArrayBuffer may be reused
+            const rgbaData = new Uint8Array(dataLength);
+            rgbaData.set(new Uint8Array(arrayBuffer, offset, dataLength));
+            
+            // Log first frame for debugging
+            if (frameNumber < 3n) {
+                console.log(`🎨 Frame ${frameNumber} RGBA data: first bytes = [${rgbaData[0]}, ${rgbaData[1]}, ${rgbaData[2]}, ${rgbaData[3]}]`);
+            }
             
             this.frameQueue.push({
                 rgbaData,
@@ -1465,6 +1570,11 @@ class KVMClient {
             this.perfStats.decompressTime = performance.now() - decompressStart;
             
             if (rgbaData) {
+                // Hide status display when we start receiving frames
+                if (this.statusDisplay && this.statusDisplay.style.display !== 'none') {
+                    this.statusDisplay.style.display = 'none';
+                }
+                
                 // Render on next animation frame for smooth 60fps
                 requestAnimationFrame(() => {
                     this.fastRenderFrame(rgbaData, frame.width, frame.height);
@@ -1696,13 +1806,32 @@ class KVMClient {
     fastRenderFrame(rgbaData, width, height) {
         const renderStart = performance.now();
         
+        // Validate input data
+        if (!rgbaData || rgbaData.length === 0) {
+            console.error('❌ fastRenderFrame: No RGBA data provided');
+            return;
+        }
+        
+        const expectedSize = width * height * 4;
+        if (rgbaData.length !== expectedSize) {
+            console.warn(`⚠️ RGBA data size mismatch: got ${rgbaData.length}, expected ${expectedSize}`);
+        }
+        
         // Initialize canvas with optimal settings
-        if (!this.realCanvas) {
+        if (!this.realCanvas || !this.realCtx) {
+            console.log('🎨 Initializing canvas for first frame render:', width, 'x', height);
             this.initializeOptimizedCanvas(width, height);
+        }
+        
+        // Ensure canvas and context are available
+        if (!this.realCanvas || !this.realCtx) {
+            console.error('❌ Failed to initialize canvas for rendering');
+            return;
         }
         
         // Resize canvas if needed (rare case)
         if (this.realCanvas.width !== width || this.realCanvas.height !== height) {
+            console.log('📐 Resizing canvas:', this.realCanvas.width, 'x', this.realCanvas.height, '->', width, 'x', height);
             this.realCanvas.width = width;
             this.realCanvas.height = height;
         }
@@ -1728,7 +1857,17 @@ class KVMClient {
     initializeOptimizedCanvas(width, height) {
         console.log('🚀 Initializing high-performance canvas renderer...');
         
-        this.realCanvas = document.createElement('canvas');
+        // Don't recreate if already exists with same dimensions
+        if (this.realCanvas && this.realCanvas.width === width && this.realCanvas.height === height) {
+            return;
+        }
+        
+        // Create new canvas or reuse existing
+        if (!this.realCanvas) {
+            this.realCanvas = document.createElement('canvas');
+            this.realCanvas.id = 'real-canvas';
+        }
+        
         this.realCanvas.width = width;
         this.realCanvas.height = height;
         
@@ -1736,12 +1875,15 @@ class KVMClient {
         this.realCanvas.style.cssText = `
             width: 100%;
             height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
             object-fit: contain;
             background-color: #000;
             display: block;
             image-rendering: pixelated;
             image-rendering: -moz-crisp-edges;
             image-rendering: crisp-edges;
+            cursor: crosshair;
         `;
         
         // Get context with performance optimizations
@@ -1754,17 +1896,30 @@ class KVMClient {
         // Disable antialiasing for pixel-perfect rendering
         this.realCtx.imageSmoothingEnabled = false;
         
-        // Replace video element with optimized canvas
-        const videoContainer = this.videoScreen.parentElement;
-        if (videoContainer) {
+        // Find the screen container or video parent
+        const screenContainer = document.getElementById('screen');
+        const videoContainer = this.videoScreen ? this.videoScreen.parentElement : screenContainer;
+        
+        if (videoContainer && !this.realCanvas.parentElement) {
             // Remove any existing fallback canvas
             if (this.fallbackCanvas && this.fallbackCanvas.parentElement) {
                 this.fallbackCanvas.parentElement.removeChild(this.fallbackCanvas);
             }
             
+            // Add the canvas to the container
             videoContainer.appendChild(this.realCanvas);
-            this.videoScreen.style.display = 'none';
+            
+            // Hide video element since we're using canvas
+            if (this.videoScreen) {
+                this.videoScreen.style.display = 'none';
+            }
         }
+        
+        // Add mouse event listeners to the new canvas
+        ['mousedown', 'mouseup', 'mousemove', 'wheel'].forEach(event => {
+            this.realCanvas.addEventListener(event, (e) => this.handleMouseEvent(e));
+        });
+        this.realCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
         
         console.log(`✅ Optimized canvas initialized: ${width}x${height}`);
     }
@@ -2640,6 +2795,63 @@ class KVMClient {
             clearInterval(this.networkMonitoringInterval);
             this.networkMonitoringInterval = null;
         }
+    }
+
+    // Start connection health monitoring to detect stream freezes
+    startConnectionHealthMonitoring() {
+        // Check connection health every 3 seconds
+        this.connectionHealthInterval = setInterval(() => {
+            const timeSinceLastFrame = Date.now() - this.lastFrameTime;
+            
+            // If no frames received for more than 10 seconds, consider connection stale
+            if (timeSinceLastFrame > 10000 && this.connected) {
+                console.warn(`⚠️ No frames received for ${(timeSinceLastFrame / 1000).toFixed(1)}s - connection may be stale`);
+                
+                // Try to request a keyframe to refresh the stream
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: 'request_keyframe' }));
+                    console.log('🔄 Requested keyframe to refresh stream');
+                }
+                
+                // If still no frames after 20 seconds, attempt reconnection
+                if (timeSinceLastFrame > 20000) {
+                    console.error('❌ Stream appears frozen - attempting reconnection');
+                    this.attemptReconnection();
+                }
+            }
+        }, 3000);
+    }
+
+    // Stop connection health monitoring
+    stopConnectionHealthMonitoring() {
+        if (this.connectionHealthInterval) {
+            clearInterval(this.connectionHealthInterval);
+            this.connectionHealthInterval = null;
+        }
+    }
+
+    // Attempt to reconnect when connection is stale
+    attemptReconnection() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error('❌ Max reconnection attempts reached');
+            this.updateStatus('Connection Lost', 'Unable to reconnect after multiple attempts. Please refresh the page.');
+            return;
+        }
+        
+        this.reconnectAttempts++;
+        console.log(`🔄 Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+        
+        // Close existing connection
+        if (this.ws) {
+            this.ws.close();
+        }
+        
+        // Wait a moment before reconnecting
+        setTimeout(() => {
+            if (!this.connected) {
+                this.connect();
+            }
+        }, 1000);
     }
 
     // Update network stats display

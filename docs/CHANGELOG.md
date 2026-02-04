@@ -2,7 +2,7 @@
 
 ## Version History
 
-## [3.1.0] - 2025-08-14
+## [4.1.0] - 2025-08-14
 
 ### 🎬 Screen Capture System Overhaul: Native `scap` Integration
 
