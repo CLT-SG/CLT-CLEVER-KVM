@@ -2,6 +2,7 @@
 //!
 //! Uses Actix Web to serve the web dashboard, KVM client, and REST API.
 //! Templates are rendered using Tera templating engine.
+//! Supports both HTTP and HTTPS (for WebCodecs API in browsers).
 
 use crate::device::{DeviceRegistry, DeviceSummary, StreamState};
 use crate::ws_relay::WsRelayState;
@@ -10,6 +11,7 @@ use actix_web::{
     get, post, web, App, HttpRequest, HttpResponse, HttpServer, Responder, Result as ActixResult,
 };
 use lazy_static::lazy_static;
+use rustls::ServerConfig;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tera::{Context, Tera};
@@ -504,6 +506,33 @@ pub async fn run_server(state: AppState, bind_addr: &str) -> std::io::Result<()>
             )
     })
     .bind(bind_addr)?
+    .run()
+    .await
+}
+
+/// Create and run both HTTP and HTTPS servers
+pub async fn run_server_dual(
+    state: AppState,
+    http_bind_addr: &str,
+    https_bind_addr: &str,
+    tls_config: Arc<ServerConfig>,
+) -> std::io::Result<()> {
+    let state_clone = state.clone();
+    let rustls_config = rustls::ServerConfig::clone(&tls_config);
+
+    HttpServer::new(move || {
+        App::new()
+            .configure(|cfg| configure_app(cfg, state_clone.clone()))
+            .wrap(actix_web::middleware::Logger::default())
+            .wrap(
+                actix_web::middleware::DefaultHeaders::new()
+                    .add(("Access-Control-Allow-Origin", "*"))
+                    .add(("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
+                    .add(("Access-Control-Allow-Headers", "Content-Type")),
+            )
+    })
+    .bind(http_bind_addr)?
+    .bind_rustls_0_23(https_bind_addr, rustls_config)?
     .run()
     .await
 }

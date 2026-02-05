@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [4.2.0] - 2026-02-05
 
 ### Added
+- HTTPS/TLS support for relay server with automatic self-signed certificate generation
+- New tls.rs module for TLS configuration and certificate management
+- Dual HTTP (port 8881) and HTTPS (port 8443) server support for relay server
+- CLI arguments for HTTPS configuration (--https, --https-port, --tls-cert, --tls-key)
+- Secure WebSocket (wss://) support for HTTPS connections
+- WebCodecs API secure context detection in H.264 decoder
+- Visual notification in KVM client when using software decoding on HTTP
 - Tauri relay client auto-registration on application startup with mDNS discovery
 - Tauri commands for relay server management (discover, connect, disconnect, status, auto-connect)
 - RelayStatus Vue component for displaying relay connection status in the UI
@@ -30,6 +37,11 @@ All notable changes to this project will be documented in this file.
 - Comprehensive H.264 streaming documentation (docs/H264_STREAMING_IMPLEMENTATION.md)
 
 ### Changed
+- Updated relay server to support both HTTP and HTTPS with single HttpServer instance
+- Updated kvm_client.html template to dynamically select WebSocket protocol (ws:// or wss://) based on page protocol
+- Updated h264-decoder.js with secure context detection for WebCodecs API availability
+- Updated kvm-client.js to show notification when using software decoding on non-HTTPS connections
+- Updated relay server README.md with HTTPS documentation and usage instructions
 - Updated ServerStatus.vue with Direct Access URL label and Local Network badge
 - Replaced emoji icons with text labels in Vue components for professional appearance
 - Updated App.vue to integrate RelayStatus component in Server Status tab
@@ -57,6 +69,8 @@ All notable changes to this project will be documented in this file.
 - Added tokio-tungstenite, tracing, reqwest, hostname dependencies to Tauri app for relay client
 
 ### Fixed
+- Fixed WebCodecs API unavailability in relay server KVM viewer by implementing HTTPS support
+- Fixed mixed content blocking when accessing KVM viewer via HTTPS (WebSocket now uses wss://)
 - Fixed Tauri app devices not appearing in relay server dashboard after launch
 - Fixed Tera template rendering error for boolean values in kvm_client.html (changed | lower filter to conditional block)
 - Fixed server_port rendering as string instead of number in relay KVM client template

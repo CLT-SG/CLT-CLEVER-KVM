@@ -45,13 +45,29 @@ class H264Decoder {
         this.initialize();
     }
     
+    /**
+     * Check if we're in a secure context (HTTPS or localhost)
+     */
+    isSecureContext() {
+        return window.isSecureContext || 
+               window.location.protocol === 'https:' ||
+               window.location.hostname === 'localhost' ||
+               window.location.hostname === '127.0.0.1';
+    }
+    
     async initialize() {
-        // Check for WebCodecs support
-        if ('VideoDecoder' in window) {
+        // Check for WebCodecs support - requires secure context (HTTPS or localhost)
+        if ('VideoDecoder' in window && this.isSecureContext()) {
             this.useWebCodecs = true;
             await this.initializeWebCodecs();
         } else {
-            console.log('ℹ️ WebCodecs API not available in this browser - using software decoding');
+            // Provide helpful message based on the reason
+            if (!('VideoDecoder' in window)) {
+                console.log('ℹ️ WebCodecs API not supported in this browser - using software decoding');
+            } else if (!this.isSecureContext()) {
+                console.log('ℹ️ WebCodecs API requires HTTPS - using software decoding');
+                console.log('   💡 Tip: Access this page via HTTPS (port 8443) for hardware-accelerated decoding');
+            }
             this.useWebCodecs = false;
             this.initializeSoftwareDecoder();
         }

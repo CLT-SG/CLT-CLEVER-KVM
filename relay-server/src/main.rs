@@ -19,6 +19,7 @@ mod http_server;
 mod peer;
 mod protocol;
 mod relay;
+mod tls;
 mod ws_relay;
 
 use anyhow::Result;
@@ -30,7 +31,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use device::DeviceRegistry;
 use discovery::MdnsDiscovery;
-use http_server::{run_server, AppState};
+use http_server::{run_server, run_server_dual, AppState};
 use ws_relay::WsRelayState;
 
 /// CLEVER KVM Relay Server v2.0
@@ -44,6 +45,10 @@ struct Args {
     #[arg(short, long, default_value = "8881")]
     port: u16,
 
+    /// HTTPS port for secure connections (enables WebCodecs API in browsers)
+    #[arg(long, default_value = "8443")]
+    https_port: u16,
+
     /// UDP relay port (optional, for low-latency streaming)
     #[arg(long, default_value = "9922")]
     udp_port: u16,
@@ -51,6 +56,18 @@ struct Args {
     /// Bind address
     #[arg(short, long, default_value = "0.0.0.0")]
     bind: String,
+
+    /// Enable HTTPS server (required for WebCodecs API in browsers)
+    #[arg(long, default_value = "true")]
+    https: bool,
+
+    /// Path to TLS certificate file (PEM format). If not provided, a self-signed cert is generated.
+    #[arg(long)]
+    tls_cert: Option<String>,
+
+    /// Path to TLS private key file (PEM format). If not provided, a self-signed key is generated.
+    #[arg(long)]
+    tls_key: Option<String>,
 
     /// Enable mDNS service discovery
     #[arg(long, default_value = "true")]
@@ -165,18 +182,68 @@ async fn main() -> Result<()> {
 
     // Get local IP addresses for display
     let addresses = discovery::get_local_addresses();
+
+    // Setup HTTPS if enabled
+    let tls_config = if args.https {
+        match tls::load_or_generate_tls(
+            args.tls_cert.as_deref(),
+            args.tls_key.as_deref(),
+            &hostname,
+        ) {
+            Ok(config) => {
+                if config.is_self_signed {
+                    warn!("⚠️  Using self-signed certificate - browsers will show security warning");
+                    warn!("   To use your own certificate, provide --tls-cert and --tls-key options");
+                }
+                Some(config)
+            }
+            Err(e) => {
+                error!("Failed to setup TLS: {}", e);
+                warn!("HTTPS will be disabled - WebCodecs API may not work in browsers");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Print server URLs
     info!(
         "🚀 HTTP server listening on http://{}:{}/",
         hostname, args.port
     );
     info!("   Dashboard: http://{}.local:{}/", hostname, args.port);
-    for addr in &addresses {
-        info!("   Also accessible at: http://{}:{}/", addr, args.port);
+
+    if tls_config.is_some() {
+        info!(
+            "🔒 HTTPS server listening on https://{}:{}/",
+            hostname, args.https_port
+        );
+        info!(
+            "   Secure Dashboard: https://{}.local:{}/",
+            hostname, args.https_port
+        );
+        info!("   ✅ WebCodecs API will be available via HTTPS");
     }
 
-    // Run HTTP server (blocking)
-    let bind_addr = format!("{}:{}", args.bind, args.port);
-    run_server(app_state, &bind_addr).await?;
+    for addr in &addresses {
+        info!("   Also accessible at: http://{}:{}/", addr, args.port);
+        if tls_config.is_some() {
+            info!("                       https://{}:{}/", addr, args.https_port);
+        }
+    }
+
+    // Start servers
+    let http_bind_addr = format!("{}:{}", args.bind, args.port);
+    let https_bind_addr = format!("{}:{}", args.bind, args.https_port);
+
+    if let Some(tls) = tls_config {
+        // Run both HTTP and HTTPS servers
+        run_server_dual(app_state, &http_bind_addr, &https_bind_addr, tls.server_config).await?;
+    } else {
+        // Run only HTTP server
+        run_server(app_state, &http_bind_addr).await?;
+    }
 
     Ok(())
 }
@@ -190,12 +257,19 @@ fn print_banner(args: &Args, hostname: &str) {
         format!("{}.local", hostname)
     );
     info!("║  HTTP Port:       {:<38} ║", args.port);
+    if args.https {
+        info!("║  HTTPS Port:      {:<38} ║", args.https_port);
+    }
     if args.enable_udp {
         info!("║  UDP Port:        {:<38} ║", args.udp_port);
     }
     info!(
         "║  mDNS Discovery:  {:<38} ║",
         if args.mdns { "Enabled" } else { "Disabled" }
+    );
+    info!(
+        "║  HTTPS/TLS:       {:<38} ║",
+        if args.https { "Enabled (WebCodecs ready)" } else { "Disabled" }
     );
     info!(
         "║  Dashboard:       {:<38} ║",
@@ -211,6 +285,13 @@ fn print_banner(args: &Args, hostname: &str) {
         hostname,
         format!("{}/", args.port)
     );
+    if args.https {
+        info!(
+            "║  Secure URL:      https://{}.local:{:<16} ║",
+            hostname,
+            format!("{}/", args.https_port)
+        );
+    }
     info!("║  KVM Client:      /kvm?hostname=<device>                 ║");
     info!("║  API Endpoint:    /api/devices                          ║");
     info!("╚══════════════════════════════════════════════════════════╝");

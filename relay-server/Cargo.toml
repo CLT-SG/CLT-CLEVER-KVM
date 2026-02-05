@@ -11,7 +11,7 @@ license = "MIT"
 tokio = { version = "1.41", features = ["full", "rt-multi-thread", "net", "sync", "time", "macros", "fs"] }
 
 # HTTP Server (Actix Web)
-actix-web = "4"
+actix-web = { version = "4", features = ["rustls-0_23"] }
 actix-files = "0.6"
 actix-ws = "0.3"
 actix-rt = "2"
@@ -61,6 +61,17 @@ lz4_flex = "0.11"
 # Templating for HTML
 tera = "1.20"
 lazy_static = "1.5"
+
+# TLS/SSL support for HTTPS
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
+rcgen = "0.13"
+
+# Directory paths
+dirs = "5"
+
+# Network interface detection
+get_if_addrs = "0.5"
 
 [profile.release]
 opt-level = 3

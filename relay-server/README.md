@@ -127,16 +127,24 @@ cargo build --release
 ## Usage
 
 ```bash
-# Start relay server on default port 8881
+# Start relay server with HTTP (8881) and HTTPS (8443)
 ./clever-relay
 
-# Custom port with verbose logging
-./clever-relay --port 9000 --verbose
+# Custom ports with verbose logging
+./clever-relay --port 9000 --https-port 9443 --verbose
+
+# Disable HTTPS (not recommended - WebCodecs won't work)
+./clever-relay --https false
+
+# Use custom TLS certificates
+./clever-relay --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
 
 # Full options
 ./clever-relay \
     --bind 0.0.0.0 \
     --port 8881 \
+    --https-port 8443 \
+    --https true \
     --mdns true \
     --verbose
 ```
@@ -146,14 +154,59 @@ cargo build --release
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-p, --port` | 8881 | HTTP/WebSocket port |
+| `--https-port` | 8443 | HTTPS port (for WebCodecs API support) |
 | `-b, --bind` | 0.0.0.0 | Address to bind to |
+| `--https` | true | Enable HTTPS server (required for WebCodecs in browsers) |
+| `--tls-cert` | - | Path to TLS certificate file (PEM format). Self-signed if not provided |
+| `--tls-key` | - | Path to TLS private key file (PEM format). Self-signed if not provided |
 | `--mdns` | true | Enable mDNS service advertisement |
 | `--enable-udp` | false | Enable UDP relay on port 9922 |
 | `-v, --verbose` | false | Enable debug logging |
 
+## HTTPS / TLS Support
+
+The relay server includes built-in HTTPS support, which is **required** for the WebCodecs API to work in browsers. WebCodecs provides hardware-accelerated H.264 video decoding for smooth, low-latency video playback.
+
+### How It Works
+
+- **Automatic Certificate Generation**: If no certificate is provided, the server generates a self-signed certificate automatically
+- **Certificate Storage**: Self-signed certificates are saved to the local data directory for reuse across restarts
+- **Dual Server**: Both HTTP (port 8881) and HTTPS (port 8443) servers run simultaneously
+
+### Using Self-Signed Certificates
+
+When you first access the HTTPS URL, your browser will show a security warning. To proceed:
+
+1. **Chrome/Edge**: Click "Advanced" → "Proceed to {hostname} (unsafe)"
+2. **Firefox**: Click "Advanced..." → "Accept the Risk and Continue"
+3. **Safari**: Click "Show Details" → "visit this website"
+
+This warning appears because the certificate is self-signed and not issued by a trusted Certificate Authority. For local network use, this is safe to accept.
+
+### Using Your Own Certificates
+
+For production or to avoid browser warnings, provide your own certificates:
+
+```bash
+./clever-relay --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+```
+
+### WebCodecs API
+
+When accessing the KVM client via HTTPS (`https://{relay}.local:8443/kvm?hostname={device}`):
+
+- **Hardware Acceleration**: WebCodecs API decodes H.264 video using GPU hardware
+- **Lower Latency**: Typically <5ms decode time vs >20ms for software decoding
+- **Lower CPU Usage**: GPU handles video decoding, freeing CPU for other tasks
+- **Better Quality**: Higher frame rates and smoother playback
+
+When accessing via HTTP, the client falls back to software decoding, which still works but may have higher latency and CPU usage.
+
 ## Web Dashboard
 
-Access the dashboard at `http://{hostname}.local:8881/` or `http://{ip}:8881/`
+Access the dashboard at:
+- **HTTP**: `http://{hostname}.local:8881/`
+- **HTTPS**: `https://{hostname}.local:8443/` (recommended for WebCodecs)
 
 ### Features
 
@@ -164,14 +217,17 @@ Access the dashboard at `http://{hostname}.local:8881/` or `http://{ip}:8881/`
 
 ## KVM Client
 
-Access a device's KVM at `http://{relay}.local:8881/kvm?hostname={device}`
+Access a device's KVM at:
+- **HTTP**: `http://{relay}.local:8881/kvm?hostname={device}` (software decoding)
+- **HTTPS**: `https://{relay}.local:8443/kvm?hostname={device}` (hardware-accelerated)
 
 ### Features
 
-- **H.264 Hardware Decoding**: Uses WebCodecs API for smooth playback
+- **H.264 Hardware Decoding**: Uses WebCodecs API for smooth playback (HTTPS required)
 - **Low Latency**: WebSocket-based frame delivery
 - **Input Control**: Mouse and keyboard passthrough
 - **Adaptive Quality**: Auto-adjusts based on network conditions
+- **Automatic Fallback**: Falls back to software decoding on HTTP connections
 
 ## REST API
 

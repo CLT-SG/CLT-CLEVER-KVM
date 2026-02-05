@@ -92,10 +92,108 @@ class RelayKVMClient {
                 },
                 onReady: () => {
                     console.log('✅ H.264 decoder ready');
+                    // Show notification if using software decoding on non-HTTPS
+                    if (this.h264Decoder && !this.h264Decoder.useWebCodecs) {
+                        this.showDecodingModeNotification();
+                    }
                 }
             });
         } else {
             console.warn('⚠️ H264Decoder not available');
+        }
+    }
+    
+    /**
+     * Show notification about decoding mode
+     */
+    showDecodingModeNotification() {
+        // Check if we're not on HTTPS and could benefit from it
+        const isSecure = window.isSecureContext || 
+                         window.location.protocol === 'https:' ||
+                         window.location.hostname === 'localhost' ||
+                         window.location.hostname === '127.0.0.1';
+        
+        if (!isSecure) {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = 'decoding-notification';
+            notification.innerHTML = `
+                <div class="notification-content">
+                    <span class="notification-icon">ℹ️</span>
+                    <span class="notification-text">
+                        Using software decoding. For hardware acceleration, 
+                        <a href="${window.location.href.replace(/:\d+/, ':8443').replace('http:', 'https:')}" class="https-link">
+                            switch to HTTPS
+                        </a>
+                    </span>
+                    <button class="notification-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+                </div>
+            `;
+            
+            // Add styles if not already present
+            if (!document.getElementById('decoding-notification-styles')) {
+                const style = document.createElement('style');
+                style.id = 'decoding-notification-styles';
+                style.textContent = `
+                    .decoding-notification {
+                        position: fixed;
+                        top: 60px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        background: rgba(0, 0, 0, 0.85);
+                        color: #fff;
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        z-index: 10000;
+                        font-size: 13px;
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        animation: slideDown 0.3s ease-out;
+                    }
+                    @keyframes slideDown {
+                        from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+                        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+                    }
+                    .notification-content {
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    }
+                    .notification-icon {
+                        font-size: 16px;
+                    }
+                    .https-link {
+                        color: #4fc3f7;
+                        text-decoration: none;
+                    }
+                    .https-link:hover {
+                        text-decoration: underline;
+                    }
+                    .notification-close {
+                        background: none;
+                        border: none;
+                        color: #888;
+                        cursor: pointer;
+                        padding: 0 4px;
+                        font-size: 14px;
+                        margin-left: 8px;
+                    }
+                    .notification-close:hover {
+                        color: #fff;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            
+            document.body.appendChild(notification);
+            
+            // Auto-dismiss after 10 seconds
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.style.animation = 'slideDown 0.3s ease-out reverse';
+                    setTimeout(() => notification.remove(), 300);
+                }
+            }, 10000);
         }
     }
     

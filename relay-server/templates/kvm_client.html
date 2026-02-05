@@ -47,11 +47,15 @@
 
 {% block scripts %}
 <script>
+    // Determine WebSocket protocol based on page protocol (ws:// for http://, wss:// for https://)
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.host; // Uses the same host:port as the current page
+    
     window.KVM_CONFIG = {
         serverHostname: "{{ server_hostname }}",
         serverPort: {{ server_port }},
         deviceHostname: "{{ device_hostname }}",
-        wsUrl: "ws://{{ server_hostname }}:{{ server_port }}/ws/viewer/{{ device_hostname }}",
+        wsUrl: `${wsProtocol}//${wsHost}/ws/viewer/{{ device_hostname }}`,
         width: {{ width }},
         height: {{ height }},
         audio: {% if audio_enabled %}true{% else %}false{% endif %},

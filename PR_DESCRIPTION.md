@@ -152,6 +152,17 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 ### Deleted Files
 - **src-tauri/web-client/**: Removed unused web-client folder (h264-decoder.js, index.html, kvm-client.css, kvm-client.js, kvm-template-parts.js, kvm-template.html)
 
+### Relay Server HTTPS/TLS Support
+- **relay-server/Cargo.toml**: Added TLS dependencies (rustls 0.23 with ring feature, rustls-pemfile, rcgen, dirs, get_if_addrs)
+- **relay-server/src/tls.rs**: New TLS configuration module with self-signed certificate generation using Ed25519 keys
+- **relay-server/src/main.rs**: Added tls module, HTTPS CLI arguments (--https, --https-port, --tls-cert, --tls-key), dual server startup
+- **relay-server/src/http_server.rs**: Added run_server_dual() function for binding both HTTP and HTTPS ports
+- **relay-server/templates/kvm_client.html**: Fixed WebSocket URL to dynamically use ws:// or wss:// based on page protocol
+- **relay-server/static/h264-decoder.js**: Added isSecureContext() check for WebCodecs API with helpful console messages
+- **relay-server/static/kvm-client.js**: Added showDecodingModeNotification() to suggest HTTPS when using software decoding
+- **relay-server/README.md**: Added comprehensive HTTPS/TLS documentation with usage instructions
+- **src-tauri/web-client/h264-decoder.js**: Added secure context detection for WebCodecs API
+
 ## Testing
 
 - Verified screen capture works correctly on Windows
@@ -177,3 +188,6 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - Verified Tauri relay client sends stream_start message upon WebSocket connection
 - Confirmed devices auto-register when connecting via WebSocket without prior HTTP registration
 - Tested KVM viewer displays proper status messages during connection states
+- Relay server HTTPS works with self-signed certificates on port 8443
+- WebCodecs API available when accessing KVM viewer via HTTPS
+- WebSocket connects via wss:// on HTTPS pages without mixed content errors
