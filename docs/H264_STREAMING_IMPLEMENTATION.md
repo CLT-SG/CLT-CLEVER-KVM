@@ -48,7 +48,7 @@ This implementation supports **all three major platforms**:
 
 ## Solution Architecture
 
-### High-Level Flow
+### High-Level Flow (Direct Connection)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -86,6 +86,94 @@ This implementation supports **all three major platforms**:
 │  └──────────────────────┘                                                 │
 │                                                                           │
 └───────────────────────────────────────────────────────────────────────────┘
+```
+
+### Relay Server Architecture (Multi-Device)
+
+For scenarios requiring centralized device management and remote access, the optional Relay Server provides a hub for multiple KVM devices:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        RELAY SERVER (Rust/Actix Web)                        │
+│                           http://{hostname}.local:8881                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────────┐   │
+│  │   Actix Web 4    │  │   Tera Templates │  │    Device Registry     │   │
+│  │   HTTP Server    │  │   (HTML Views)   │  │    (State Manager)     │   │
+│  │                  │  │                  │  │                        │   │
+│  │  GET /           │  │  base.html       │  │  - Device heartbeats   │   │
+│  │  GET /dashboard  │  │  dashboard.html  │  │  - Viewer tracking     │   │
+│  │  GET /kvm?host.. │  │  kvm_client.html │  │  - Stream config       │   │
+│  │  GET /api/*      │  │  error.html      │  │  - Online status       │   │
+│  │  GET /static/*   │  │                  │  │                        │   │
+│  └────────┬─────────┘  └──────────────────┘  └────────────┬───────────┘   │
+│           │                                               │               │
+│           ▼                                               ▼               │
+│  ┌────────────────────────────────────────────────────────────────────┐   │
+│  │                      WebSocket Relay (actix-ws)                    │   │
+│  │                                                                    │   │
+│  │   GET /ws/device/{hostname}  ←── H.264 frames + heartbeats        │   │
+│  │   GET /ws/viewer/{hostname}  ──→ H.264 frames to browser          │   │
+│  │                              ←── Input events from browser         │   │
+│  │                                                                    │   │
+│  └────────────────────────────────────────────────────────────────────┘   │
+│           │                                               │               │
+│           │  ┌────────────────────────────────────────┐   │               │
+│           └──│         mDNS Discovery (mdns-sd)       │───┘               │
+│              │  Service: _clever-kvm._tcp.local.      │                   │
+│              └────────────────────────────────────────┘                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │                                                      │
+         │ Device Connection                                    │ Viewer Connection
+         │ (Video Producer)                                     │ (Video Consumer)
+         ▼                                                      ▼
+┌─────────────────────┐                              ┌─────────────────────┐
+│   Tauri KVM App     │                              │   Web Browser       │
+│   (Device)          │                              │   (Viewer)          │
+│                     │                              │                     │
+│  ┌───────────────┐  │                              │  ┌───────────────┐  │
+│  │ Screen Capture│  │                              │  │ WebCodecs     │  │
+│  │ H.264 Encoder │  │                              │  │ H.264 Decoder │  │
+│  │ WS Publisher  │  │                              │  │ Input Handler │  │
+│  └───────────────┘  │                              │  └───────────────┘  │
+└─────────────────────┘                              └─────────────────────┘
+```
+
+### Relay Server Technology Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **HTTP Server** | Actix Web 4 | High-performance async web framework (400k+ req/sec) |
+| **WebSocket** | actix-ws | Low-latency bidirectional communication |
+| **Templating** | Tera | Jinja2-style templates with inheritance |
+| **Static Files** | actix-files | Efficient static asset serving |
+| **mDNS** | mdns-sd | Zero-config service discovery |
+| **Async Runtime** | Tokio | Multi-threaded I/O with work-stealing |
+
+### Relay Server Templates
+
+```
+relay-server/templates/
+├── base.html           # Base template with common layout, styles, scripts
+├── dashboard.html      # Device list with status indicators (extends base)
+├── kvm_client.html     # Full KVM viewer with H.264 decoder (extends base)
+└── error.html          # Error pages with user-friendly messages (extends base)
+```
+
+**Template Variables (kvm_client.html):**
+```javascript
+window.KVM_CONFIG = {
+    serverHostname: "{{ server_hostname }}",
+    serverPort: "{{ server_port }}",
+    deviceHostname: "{{ device_hostname }}",
+    wsUrl: "ws://{{ server_hostname }}.local:{{ server_port }}/ws/viewer/{{ device_hostname }}",
+    width: {{ width }},
+    height: {{ height }},
+    audio: {{ audio_enabled | lower }},
+    codec: "{{ codec }}"
+};
 ```
 
 ## Implementation Details

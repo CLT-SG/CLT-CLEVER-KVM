@@ -214,6 +214,27 @@ http://hostname:9921/kvm?quality=balanced&bitrate=1500
 - **Primary**: WebSockets with binary H.264/fMP4 streaming
 - **Control**: JSON command protocol for input events and configuration
 
+### Relay Server (Rust/Actix Web)
+The optional relay server enables multi-device management and remote access:
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **HTTP Server** | Actix Web 4 | High-performance async web framework |
+| **WebSocket** | actix-ws | Real-time bidirectional video/input relay |
+| **Templating** | Tera | Jinja2-style HTML templates with inheritance |
+| **Static Files** | actix-files | CSS, JS, and asset serving |
+| **mDNS** | mdns-sd | Zero-config service discovery on LAN |
+
+**Features:**
+- Web dashboard at `http://{hostname}.local:8881/` showing all connected devices
+- Professional Tera templates (base.html, dashboard.html, kvm_client.html)
+- Device registry with heartbeat monitoring
+- WebSocket relay for video streams and input events
+- REST API for device management
+- mDNS advertisement for automatic discovery
+
+See [relay-server/README.md](relay-server/README.md) for detailed documentation.
+
 ## Building and Distribution
 
 ### Quick Build
@@ -264,6 +285,15 @@ On modern hardware, Clever KVM achieves:
 For detailed build instructions, troubleshooting, platform-specific optimizations, and codec configuration, see [BUILD.md](docs/BUILD.md).
 
 ## Recent Enhancements
+
+### Relay Server v2.0 (February 2026)
+- **Actix Web 4**: High-performance async HTTP server (replaces previous implementation)
+- **Tera Templates**: Professional Jinja2-style HTML templating with inheritance
+- **Web Dashboard**: Modern device management interface at `http://{hostname}.local:8881/`
+- **WebSocket Relay**: Efficient video stream relay using actix-ws
+- **mDNS Discovery**: Zero-config service discovery for automatic device detection
+- **Static File Serving**: Optimized CSS/JS delivery via actix-files
+- See [relay-server/README.md](relay-server/README.md) for detailed documentation
 
 ### H.264 Low-Latency Streaming Pipeline (v4.1.0)
 - **H.264 Hardware Encoding**: Cross-platform hardware-accelerated H.264 encoding

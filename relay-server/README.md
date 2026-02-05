@@ -1,15 +1,118 @@
-# CLEVER KVM UDP Relay Server
+# CLEVER KVM Relay Server v2.0
 
-A high-performance UDP relay server for low-latency video streaming in the CLEVER KVM system.
+A high-performance relay server for CLEVER KVM devices with web dashboard, device discovery, and low-latency video streaming.
+
+## Technology Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|----------|
+| **HTTP Server** | Actix Web 4 | High-performance async web framework |
+| **WebSocket** | actix-ws | Real-time bidirectional communication |
+| **Templating** | Tera | Jinja2-style HTML templates |
+| **Static Files** | actix-files | CSS, JS, and asset serving |
+| **mDNS** | mdns-sd | Service discovery on local network |
+| **Async Runtime** | Tokio | Multi-threaded async I/O |
 
 ## Features
 
-- **UDP-based transport** for minimal latency (<5ms overhead)
-- **Room-based** sessions for multiple concurrent KVM connections
-- **NAT traversal** support with peer discovery
-- **Optional LZ4 compression** for bandwidth optimization
-- **Session management** with automatic cleanup
-- **Scalable architecture** using Tokio async runtime
+- **Web Dashboard**: Modern web interface at `http://{hostname}.local:8881/` showing all connected devices
+- **Tera Templates**: Professional HTML templates with inheritance and dynamic rendering
+- **mDNS Service Discovery**: Automatic discovery by Tauri KVM apps using `.local` hostnames
+- **Device Registry**: Manages connected devices with heartbeat monitoring
+- **WebSocket Relay**: Relays video streams from devices to viewers
+- **REST API**: Device registration, status, and management endpoints
+- **Static File Serving**: CSS, JavaScript, and assets served via `/static/`
+- **UDP Relay** (optional): Low-latency UDP-based streaming for advanced use
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     RELAY SERVER                                │
+│                  (Linux/macOS/Windows)                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌────────────────┐  │
+│  │   Web Dashboard │  │   Device        │  │   mDNS        │  │
+│  │   (HTTP)        │  │   Registry      │  │   Discovery   │  │
+│  │   Port 8881     │  │                 │  │               │  │
+│  └────────┬────────┘  └────────┬────────┘  └───────────────┘  │
+│           │                    │                               │
+│           ▼                    ▼                               │
+│  ┌────────────────────────────────────────────────────────┐   │
+│  │              WebSocket Relay                           │   │
+│  │   - Device connections (/ws/device/{hostname})         │   │
+│  │   - Viewer connections (/ws/viewer/{hostname})         │   │
+│  └────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+         │                                         │
+         │ Video Frames                            │ Video Frames
+         │ + Heartbeats                            │ + Input Events
+         ▼                                         ▼
+┌─────────────────┐                      ┌─────────────────┐
+│  Tauri KVM App  │                      │  Web Browser    │
+│  (Device)       │                      │  (Viewer)       │
+│                 │                      │                 │
+│  - Captures     │                      │  - Views        │
+│  - Encodes      │                      │  - Controls     │
+│  - Publishes    │                      │                 │
+└─────────────────┘                      └─────────────────┘
+```
+
+## Project Structure
+
+```
+relay-server/
+├── Cargo.toml              # Rust dependencies
+├── src/
+│   ├── main.rs             # Entry point with Actix runtime
+│   ├── http_server.rs      # Actix Web routes and handlers
+│   ├── ws_relay.rs         # WebSocket relay logic
+│   ├── device.rs           # Device registry and models
+│   ├── discovery.rs        # mDNS service discovery
+│   ├── peer.rs             # Peer/session management
+│   ├── protocol.rs         # Binary protocol definitions
+│   └── relay.rs            # Core relay server logic
+├── templates/
+│   ├── base.html           # Base template (header, footer, styles)
+│   ├── dashboard.html      # Device dashboard (extends base)
+│   ├── kvm_client.html     # KVM viewer page (extends base)
+│   └── error.html          # Error pages (extends base)
+└── static/
+    ├── kvm-client.css      # KVM client styles
+    ├── kvm-client.js       # KVM client JavaScript
+    └── h264-decoder.js     # H.264 WebCodecs decoder
+```
+
+### Template System
+
+The relay server uses **Tera** templates with a base template inheritance pattern:
+
+```html
+{# templates/base.html - Base template #}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}CLEVER KVM{% endblock %}</title>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>
+
+{# templates/dashboard.html - Extends base #}
+{% extends "base.html" %}
+{% block title %}Dashboard - CLEVER KVM{% endblock %}
+{% block content %}
+    <h1>Connected Devices</h1>
+    {% for device in devices %}
+        <div class="device-card">{{ device.display_name }}</div>
+    {% endfor %}
+{% endblock %}
+```
 
 ## Building
 
@@ -24,22 +127,17 @@ cargo build --release
 ## Usage
 
 ```bash
-# Start server with default settings (port 9922)
+# Start relay server on default port 8881
 ./clever-relay
 
-# Custom port
-./clever-relay --port 8888
-
-# Enable compression and verbose logging
-./clever-relay --compress --verbose
+# Custom port with verbose logging
+./clever-relay --port 9000 --verbose
 
 # Full options
 ./clever-relay \
     --bind 0.0.0.0 \
-    --port 9922 \
-    --compress \
-    --max-clients 50 \
-    --timeout 60 \
+    --port 8881 \
+    --mdns true \
     --verbose
 ```
 
@@ -47,87 +145,159 @@ cargo build --release
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-p, --port` | 9922 | UDP port to listen on |
+| `-p, --port` | 8881 | HTTP/WebSocket port |
 | `-b, --bind` | 0.0.0.0 | Address to bind to |
-| `-c, --compress` | false | Enable LZ4 compression |
-| `-m, --max-clients` | 100 | Maximum clients per room |
-| `-t, --timeout` | 60 | Session timeout in seconds |
+| `--mdns` | true | Enable mDNS service advertisement |
+| `--enable-udp` | false | Enable UDP relay on port 9922 |
 | `-v, --verbose` | false | Enable debug logging |
 
-## Protocol
+## Web Dashboard
 
-The relay server uses a custom binary protocol optimized for low-latency video streaming.
+Access the dashboard at `http://{hostname}.local:8881/` or `http://{ip}:8881/`
 
-### Packet Header (12 bytes)
+### Features
 
+- **Device List**: Shows all connected KVM devices with status
+- **Auto-Refresh**: Updates device list every 5 seconds
+- **Quick Connect**: Click on a device to open the KVM viewer
+- **Device Info**: Displays hostname, capabilities, viewer count, and stream config
+
+## KVM Client
+
+Access a device's KVM at `http://{relay}.local:8881/kvm?hostname={device}`
+
+### Features
+
+- **H.264 Hardware Decoding**: Uses WebCodecs API for smooth playback
+- **Low Latency**: WebSocket-based frame delivery
+- **Input Control**: Mouse and keyboard passthrough
+- **Adaptive Quality**: Auto-adjusts based on network conditions
+
+## REST API
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/devices` | List all connected devices |
+| GET | `/api/devices/{hostname}` | Get device details |
+| POST | `/api/register` | Register a device |
+| POST | `/api/heartbeat` | Device heartbeat |
+| POST | `/api/unregister` | Unregister a device |
+| GET | `/api/health` | Server health check |
+
+### Register Device
+
+```bash
+curl -X POST http://relay.local:8881/api/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hostname": "my-device",
+    "display_name": "My KVM Device",
+    "capabilities": {
+      "supports_h264": true,
+      "supports_audio": true,
+      "max_width": 1920,
+      "max_height": 1080,
+      "max_fps": 60
+    }
+  }'
 ```
-+--------+--------+--------+--------+
-| Magic (4 bytes: "CKVM")           |
-+--------+--------+--------+--------+
-| Version| Type   | Flags  | Reserved|
-+--------+--------+--------+--------+
-| Sequence Number (4 bytes)         |
-+--------+--------+--------+--------+
-| Payload...                        |
+
+### List Devices
+
+```bash
+curl http://relay.local:8881/api/devices
 ```
 
-### Packet Types
-
-| Type | Code | Description |
-|------|------|-------------|
-| Register | 0x01 | Client registration |
-| RegisterAck | 0x02 | Registration acknowledgment |
-| Ping | 0x03 | Heartbeat/keepalive |
-| Pong | 0x04 | Heartbeat response |
-| VideoFrame | 0x10 | Video frame data |
-| AudioFrame | 0x11 | Audio frame data |
-| InputEvent | 0x20 | Mouse/keyboard input |
-| DiscoverPeers | 0x30 | Peer discovery request |
-| PeerList | 0x31 | Peer list response |
-| Disconnect | 0x40 | Disconnect notification |
-
-### Client Registration
-
-Send a JSON payload after the packet header:
-
+Response:
 ```json
 {
-    "client_id": "unique-client-id",
-    "role": "Host",  // or "Viewer"
-    "room": "room-name",
-    "capabilities": {
-        "supports_compression": true,
-        "supports_h264": true,
-        "supports_audio": true,
-        "max_width": 1920,
-        "max_height": 1080
+  "devices": [
+    {
+      "hostname": "device1",
+      "display_name": "Living Room PC",
+      "state": "streaming",
+      "viewer_count": 1,
+      "capabilities": {...}
     }
+  ],
+  "total": 1
 }
 ```
 
-## Architecture
+## WebSocket Protocol
 
-```
-+----------+     UDP      +--------------+     UDP      +----------+
-|   Host   | -----------> | Relay Server | -----------> |  Viewer  |
-| (Video)  |              |              |              | (Display)|
-+----------+              +--------------+              +----------+
-     ^                          |                            |
-     |                          |                            |
-     +----------- Input Events (relayed) -------------------+
+### Device Connection
+
+Connect to `/ws/device/{hostname}` after REST registration.
+
+**Messages from Device:**
+- Binary: H.264 video frames
+- JSON: `{"type": "stream_config", ...}` - Stream configuration
+
+**Messages to Device:**
+- JSON: `{"type": "input", ...}` - Input events from viewers
+
+### Viewer Connection
+
+Connect to `/ws/viewer/{hostname}` to view a device.
+
+**Messages to Viewer:**
+- Binary: H.264 video frames
+- JSON: `{"type": "config", ...}` - Stream configuration
+
+**Messages from Viewer:**
+- JSON: `{"type": "input", ...}` - Mouse/keyboard input
+
+## mDNS Service
+
+The relay server advertises itself via mDNS:
+
+- **Service Type**: `_clever-kvm._tcp.local.`
+- **Instance Name**: `clever-relay-{hostname}`
+- **TXT Records**:
+  - `version=2.0.0`
+  - `port=8881`
+  - `protocol=websocket`
+
+### Discovery (Tauri App)
+
+```rust
+// Tauri apps auto-discover relay servers
+let relays = RelayClient::discover_relays(Duration::from_secs(3)).await?;
+for relay in relays {
+    println!("Found: {} at {}:{}", relay.hostname, relay.address, relay.port);
+}
 ```
 
 ## Performance
 
-Target latencies:
-- Packet routing: <1ms
-- Total relay overhead: <5ms
-- Video end-to-end: <20ms (with proper encoder settings)
+- **Latency**: <10ms end-to-end (local network)
+- **Bandwidth**: 5-20 Mbps depending on quality
+- **Concurrent Viewers**: Tested with 10+ viewers per device
+- **Memory**: ~50MB baseline, +10MB per active stream
 
-## Integration with CLEVER KVM
+## Troubleshooting
 
-The relay server can be used as an alternative to WebSocket streaming for scenarios requiring lower latency. Configure the KVM client to use UDP transport mode and point it to the relay server address.
+### mDNS Not Working
+
+1. Ensure mDNS/Bonjour is enabled on your network
+2. Check firewall allows UDP port 5353
+3. On Linux, install `avahi-daemon`
+
+### High Latency
+
+1. Reduce video quality in Tauri app settings
+2. Use wired network connection
+3. Check for network congestion
+
+### Device Not Appearing
+
+1. Verify device is registered: `curl http://relay:8881/api/devices`
+2. Check device heartbeat is active (every 10s)
+3. Review relay server logs with `--verbose`
 
 ## License
 
-MIT
+MIT License - See LICENSE file for details

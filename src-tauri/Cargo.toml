@@ -31,6 +31,12 @@ tower-http = { version = "0.5.0", features = ["fs", "trace"] }
 lazy_static = "1.4.0"
 gethostname = "0.4.3"
 
+# Relay client dependencies
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+tracing = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+hostname = "0.4"
+
 # Ultra-performance dependencies for streaming
 webrtc = "0.11.0"
 # Use zed-scap fork instead of scap for Windows compatibility

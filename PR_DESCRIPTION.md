@@ -101,6 +101,28 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - **relay-server/src/peer.rs**: Peer and room management with automatic timeout cleanup
 - **relay-server/README.md**: Documentation for relay server usage and protocol specification
 
+### Relay Server v2.0 (Actix Web + Tera Templates)
+- **relay-server/src/device.rs**: Device registry for managing connected KVM devices with capabilities, stream state, and viewer tracking
+- **relay-server/src/discovery.rs**: mDNS service discovery for automatic relay server detection on local network
+- **relay-server/src/http_server.rs**: Actix Web HTTP server with Tera template rendering, REST API, and WebSocket routes
+- **relay-server/src/ws_relay.rs**: WebSocket relay handler for video frame broadcasting and input event forwarding
+- **relay-server/templates/base.html**: Base HTML template with SVG favicon
+- **relay-server/templates/dashboard.html**: Device dashboard with real-time statistics and device cards
+- **relay-server/templates/kvm_client.html**: KVM viewer page with H.264 decoder integration
+- **relay-server/templates/error.html**: Error page template
+- **relay-server/static/dashboard.css**: Dashboard styles with dark theme
+- **relay-server/static/dashboard.js**: Auto-refresh dashboard JavaScript
+- **relay-server/static/kvm-client.css**: KVM client styles
+- **relay-server/static/kvm-client.js**: WebSocket KVM client with input handling
+- **relay-server/static/h264-decoder.js**: H.264 decoder for relay client viewer
+- **relay-server/Cargo.toml**: Added Actix Web 4, actix-ws, actix-files, tera, lazy_static, dashmap, chrono, uuid, mdns-sd, gethostname dependencies
+
+### Tauri Relay Client Integration
+- **src-tauri/src/network/relay_client.rs**: Relay client module for device registration, mDNS discovery, WebSocket streaming, and heartbeat
+- **src-tauri/src/network/mod.rs**: Added relay_client module export
+- **src-tauri/Cargo.toml**: Added tokio-tungstenite 0.24, tracing 0.1, reqwest 0.12, hostname 0.4 dependencies
+- **src-tauri/src/README.md**: Updated with related components table
+
 ## Testing
 
 - Verified screen capture works correctly on Windows
@@ -116,3 +138,6 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - Fixed green screen video output by correcting YUV to RGB color space conversion
 - Built and tested UDP relay server on Windows
 - Verified relay server packet routing and session management
+- Relay server v2.0 with Actix Web compiles and runs successfully
+- Templates embedded at compile time work from any working directory
+- Tauri app compiles with relay client dependencies

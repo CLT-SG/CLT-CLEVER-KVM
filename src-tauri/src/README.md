@@ -2,6 +2,14 @@
 
 This document describes the professional modular structure of the Tauri Rust backend.
 
+## Related Components
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| **Tauri App** | `src-tauri/` | Desktop application with screen capture, encoding, and local server |
+| **Relay Server** | `relay-server/` | Centralized device management with Actix Web (see [relay-server/README.md](../../relay-server/README.md)) |
+| **Web Client** | `src-tauri/web-client/` | Browser-based KVM viewer with H.264 WebCodecs decoder |
+
 ## Directory Structure
 
 ```

@@ -7,6 +7,13 @@ All notable changes to this project will be documented in this file.
 ### Added
 - H.264 hardware-accelerated video encoding with auto-detection for NVENC (NVIDIA), QuickSync (Intel), AMF (AMD), VAAPI (Linux), and VideoToolbox (macOS)
 - Standalone UDP relay server for low-latency P2P video streaming (relay-server/)
+- Relay Server v2.0 with Actix Web 4 and Tera templating engine for centralized device management
+- Web dashboard for viewing connected devices with real-time statistics
+- WebSocket-based video relay for streaming through the relay server
+- mDNS service discovery for automatic relay server detection on local network
+- Device registry with capabilities tracking, stream state management, and viewer counting
+- Tauri relay client module for registering devices with relay server
+- Compile-time template embedding using include_str!() for portable relay server binary
 - Binary protocol with packet fragmentation and LZ4 compression support
 - Room-based session management with automatic peer discovery
 - High-quality YUV420 subsampled encoding with bilinear interpolation upscaling
@@ -37,6 +44,9 @@ All notable changes to this project will be documented in this file.
 - Updated build scripts to reference H.264 instead of VP8/WebM
 - Updated Cargo.toml keywords from vp8 to h264
 - Updated tauri.conf.json description to reference H.264
+- Relay server rewritten from UDP-based to HTTP/WebSocket-based architecture using Actix Web
+- Templates embedded at compile time for working directory independence
+- Added tokio-tungstenite, tracing, reqwest, hostname dependencies to Tauri app for relay client
 
 ### Fixed
 - Fixed green screen issue in H.264 decoder by correcting YUV to RGB color conversion formula
