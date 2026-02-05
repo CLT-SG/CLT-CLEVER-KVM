@@ -1284,6 +1284,7 @@ class KVMClient {
     
     /**
      * Fallback H.264 rendering when WebCodecs is not available
+     * Handles high-quality subsampled YUV420 data with bilinear upscaling
      */
     renderH264Fallback(h264Data, width, height, isKeyframe) {
         // Initialize canvas if needed
@@ -1291,14 +1292,10 @@ class KVMClient {
             this.initializeOptimizedCanvas(width, height);
         }
         
-        // For simplified H.264 (I-PCM mode), extract Y data and render as grayscale
-        const mbWidth = Math.ceil(width / 16);
-        const mbHeight = Math.ceil(height / 16);
-        
-        // Skip NAL headers to find macroblock data
+        // Skip NAL headers to find YUV data
         let offset = 0;
         
-        // Look for slice NAL unit
+        // Look for slice NAL unit (start code + NAL type 5 for IDR or 1 for slice)
         while (offset < h264Data.length - 4) {
             if (h264Data[offset] === 0 && h264Data[offset + 1] === 0 && 
                 h264Data[offset + 2] === 0 && h264Data[offset + 3] === 1) {
@@ -1311,12 +1308,174 @@ class KVMClient {
             offset++;
         }
         
-        // Check if we have enough data
-        if (offset + mbWidth * mbHeight > h264Data.length) {
-            return; // Not enough data for rendering
+        // Read subsampled dimensions from header
+        if (offset + 8 > h264Data.length) {
+            console.warn('Not enough data for YUV header');
+            return;
         }
         
-        // Create image data from macroblock averages
+        const yOutWidth = h264Data[offset] | (h264Data[offset + 1] << 8);
+        const yOutHeight = h264Data[offset + 2] | (h264Data[offset + 3] << 8);
+        const uvOutWidth = h264Data[offset + 4] | (h264Data[offset + 5] << 8);
+        const uvOutHeight = h264Data[offset + 6] | (h264Data[offset + 7] << 8);
+        offset += 8;
+        
+        const yDataSize = yOutWidth * yOutHeight;
+        const uvDataSize = uvOutWidth * uvOutHeight;
+        
+        if (offset + yDataSize + uvDataSize * 2 > h264Data.length) {
+            console.warn('Not enough YUV data:', offset + yDataSize + uvDataSize * 2, '>', h264Data.length);
+            // Try legacy format
+            this.renderH264FallbackLegacy(h264Data, width, height);
+            return;
+        }
+        
+        // Extract YUV planes
+        const yPlane = h264Data.subarray(offset, offset + yDataSize);
+        offset += yDataSize;
+        const uPlane = h264Data.subarray(offset, offset + uvDataSize);
+        offset += uvDataSize;
+        const vPlane = h264Data.subarray(offset, offset + uvDataSize);
+        
+        // Create image data with bilinear upscaling
+        const imageData = this.realCtx.createImageData(width, height);
+        const pixels = imageData.data;
+        
+        // Calculate scaling factors
+        const yScaleX = yOutWidth / width;
+        const yScaleY = yOutHeight / height;
+        const uvScaleX = uvOutWidth / width;
+        const uvScaleY = uvOutHeight / height;
+        
+        // Bilinear interpolation for high-quality upscaling
+        for (let py = 0; py < height; py++) {
+            for (let px = 0; px < width; px++) {
+                // Y plane interpolation
+                const ySrcX = px * yScaleX;
+                const ySrcY = py * yScaleY;
+                const y = this.bilinearSample(yPlane, yOutWidth, yOutHeight, ySrcX, ySrcY);
+                
+                // UV plane interpolation
+                const uvSrcX = px * uvScaleX;
+                const uvSrcY = py * uvScaleY;
+                const u = this.bilinearSample(uPlane, uvOutWidth, uvOutHeight, uvSrcX, uvSrcY);
+                const v = this.bilinearSample(vPlane, uvOutWidth, uvOutHeight, uvSrcX, uvSrcY);
+                
+                // Convert YUV to RGB (BT.601 full range)
+                // Y is already in 0-255 range, U/V centered at 128
+                const yVal = y;
+                const uVal = u - 128;
+                const vVal = v - 128;
+                
+                // Full range BT.601 conversion (no clamping needed for Y)
+                const r = Math.max(0, Math.min(255, Math.round(yVal + 1.402 * vVal)));
+                const g = Math.max(0, Math.min(255, Math.round(yVal - 0.344 * uVal - 0.714 * vVal)));
+                const b = Math.max(0, Math.min(255, Math.round(yVal + 1.772 * uVal)));
+                
+                const pixelIndex = (py * width + px) * 4;
+                pixels[pixelIndex] = r;
+                pixels[pixelIndex + 1] = g;
+                pixels[pixelIndex + 2] = b;
+                pixels[pixelIndex + 3] = 255;
+            }
+        }
+        
+        this.realCtx.putImageData(imageData, 0, 0);
+    }
+    
+    /**
+     * Bilinear sampling for smooth upscaling
+     */
+    bilinearSample(plane, planeWidth, planeHeight, x, y) {
+        const x0 = Math.floor(x);
+        const y0 = Math.floor(y);
+        const x1 = Math.min(x0 + 1, planeWidth - 1);
+        const y1 = Math.min(y0 + 1, planeHeight - 1);
+        
+        const fx = x - x0;
+        const fy = y - y0;
+        
+        const p00 = plane[y0 * planeWidth + x0] || 128;
+        const p10 = plane[y0 * planeWidth + x1] || 128;
+        const p01 = plane[y1 * planeWidth + x0] || 128;
+        const p11 = plane[y1 * planeWidth + x1] || 128;
+        
+        // Bilinear interpolation
+        const top = p00 * (1 - fx) + p10 * fx;
+        const bottom = p01 * (1 - fx) + p11 * fx;
+        return top * (1 - fy) + bottom * fy;
+    }
+    
+    /**
+     * Legacy fallback for old macroblock format
+     */
+    renderH264FallbackLegacy(h264Data, width, height) {
+        const mbWidth = Math.ceil(width / 16);
+        const mbHeight = Math.ceil(height / 16);
+        
+        let offset = 0;
+        while (offset < h264Data.length - 4) {
+            if (h264Data[offset] === 0 && h264Data[offset + 1] === 0 && 
+                h264Data[offset + 2] === 0 && h264Data[offset + 3] === 1) {
+                const nalType = h264Data[offset + 4] & 0x1F;
+                if (nalType === 5 || nalType === 1) {
+                    offset += 9;
+                    break;
+                }
+            }
+            offset++;
+        }
+        
+        const mbDataSize = mbWidth * mbHeight * 3;
+        if (offset + mbDataSize > h264Data.length) {
+            this.renderH264FallbackGrayscale(h264Data, width, height, offset, mbWidth, mbHeight);
+            return;
+        }
+        
+        const imageData = this.realCtx.createImageData(width, height);
+        const pixels = imageData.data;
+        
+        for (let mbY = 0; mbY < mbHeight; mbY++) {
+            for (let mbX = 0; mbX < mbWidth; mbX++) {
+                const mbIndex = (mbY * mbWidth + mbX) * 3;
+                const y = h264Data[offset + mbIndex] || 128;
+                const u = h264Data[offset + mbIndex + 1] || 128;
+                const v = h264Data[offset + mbIndex + 2] || 128;
+                
+                // BT.601 full range conversion
+                const yVal = y;
+                const uVal = u - 128;
+                const vVal = v - 128;
+                
+                const r = Math.max(0, Math.min(255, Math.round(yVal + 1.402 * vVal)));
+                const g = Math.max(0, Math.min(255, Math.round(yVal - 0.344 * uVal - 0.714 * vVal)));
+                const b = Math.max(0, Math.min(255, Math.round(yVal + 1.772 * uVal)));
+                
+                for (let dy = 0; dy < 16; dy++) {
+                    const py = mbY * 16 + dy;
+                    if (py >= height) continue;
+                    
+                    for (let dx = 0; dx < 16; dx++) {
+                        const px = mbX * 16 + dx;
+                        if (px >= width) continue;
+                        
+                        const pixelIndex = (py * width + px) * 4;
+                        pixels[pixelIndex] = r;
+                        pixels[pixelIndex + 1] = g;
+                        pixels[pixelIndex + 2] = b;
+                        pixels[pixelIndex + 3] = 255;
+                    }
+                }
+            }
+        }
+        
+        this.realCtx.putImageData(imageData, 0, 0);
+    }
+    
+    /**
+     * Grayscale fallback for legacy Y-only format
+     */
+    renderH264FallbackGrayscale(h264Data, width, height, offset, mbWidth, mbHeight) {
         const imageData = this.realCtx.createImageData(width, height);
         const pixels = imageData.data;
         
@@ -1325,20 +1484,19 @@ class KVMClient {
                 const mbIndex = mbY * mbWidth + mbX;
                 const yValue = h264Data[offset + mbIndex] || 128;
                 
-                // Fill 16x16 block with this value
                 for (let dy = 0; dy < 16; dy++) {
-                    const y = mbY * 16 + dy;
-                    if (y >= height) continue;
+                    const py = mbY * 16 + dy;
+                    if (py >= height) continue;
                     
                     for (let dx = 0; dx < 16; dx++) {
-                        const x = mbX * 16 + dx;
-                        if (x >= width) continue;
+                        const px = mbX * 16 + dx;
+                        if (px >= width) continue;
                         
-                        const pixelIndex = (y * width + x) * 4;
-                        pixels[pixelIndex] = yValue;     // R
-                        pixels[pixelIndex + 1] = yValue; // G
-                        pixels[pixelIndex + 2] = yValue; // B
-                        pixels[pixelIndex + 3] = 255;    // A
+                        const pixelIndex = (py * width + px) * 4;
+                        pixels[pixelIndex] = yValue;
+                        pixels[pixelIndex + 1] = yValue;
+                        pixels[pixelIndex + 2] = yValue;
+                        pixels[pixelIndex + 3] = 255;
                     }
                 }
             }

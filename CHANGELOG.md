@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - H.264 hardware-accelerated video encoding with auto-detection for NVENC (NVIDIA), QuickSync (Intel), AMF (AMD), VAAPI (Linux), and VideoToolbox (macOS)
+- Standalone UDP relay server for low-latency P2P video streaming (relay-server/)
+- Binary protocol with packet fragmentation and LZ4 compression support
+- Room-based session management with automatic peer discovery
+- High-quality YUV420 subsampled encoding with bilinear interpolation upscaling
 - Low-latency streaming pipeline with target latency under 20ms on LAN
 - WebCodecs-based H.264 decoder for browser-side hardware acceleration
 - fMP4 container format for efficient H.264 frame transport
@@ -33,6 +37,11 @@ All notable changes to this project will be documented in this file.
 - Updated build scripts to reference H.264 instead of VP8/WebM
 - Updated Cargo.toml keywords from vp8 to h264
 - Updated tauri.conf.json description to reference H.264
+
+### Fixed
+- Fixed green screen issue in H.264 decoder by correcting YUV to RGB color conversion formula
+- Changed YUV to RGB conversion from BT.601 limited range to BT.601 full range in kvm-client.js and h264-decoder.js
+- Fixed bilinear sampling in high-quality YUV decoder for smoother video output
 
 ### Removed
 - Deleted enhanced_video_vp8.rs (obsolete VP8 encoder)

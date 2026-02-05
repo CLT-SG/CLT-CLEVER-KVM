@@ -186,13 +186,9 @@ class H264Decoder {
     
     /**
      * Extract pixel data from simplified H.264 stream
-     * This handles the simplified format from our encoder
+     * This handles the high-quality subsampled YUV format from our encoder
      */
     extractPixelData(frameData, metadata) {
-        // Our encoder uses simplified I-PCM mode for compatibility
-        // Parse the NAL units and extract raw pixel data
-        
-        const view = new DataView(frameData.buffer, frameData.byteOffset, frameData.byteLength);
         let offset = 0;
         
         // Find slice data (skip SPS, PPS, etc.)
@@ -205,7 +201,7 @@ class H264Decoder {
                 
                 if (nalType === 5 || nalType === 1) {
                     // IDR or non-IDR slice - contains pixel data
-                    return this.parseSliceData(frameData, offset + 5);
+                    return this.parseHighQualityYUV(frameData, offset + 9);
                 }
                 
                 offset += 4;
@@ -217,46 +213,184 @@ class H264Decoder {
         return null;
     }
     
-    parseSliceData(frameData, offset) {
-        // Skip slice header (simplified)
+    /**
+     * Parse high-quality subsampled YUV data with bilinear upscaling
+     */
+    parseHighQualityYUV(frameData, offset) {
+        // Read subsampled dimensions
+        if (offset + 8 > frameData.length) {
+            return null;
+        }
+        
+        const yOutWidth = frameData[offset] | (frameData[offset + 1] << 8);
+        const yOutHeight = frameData[offset + 2] | (frameData[offset + 3] << 8);
+        const uvOutWidth = frameData[offset + 4] | (frameData[offset + 5] << 8);
+        const uvOutHeight = frameData[offset + 6] | (frameData[offset + 7] << 8);
+        offset += 8;
+        
+        const yDataSize = yOutWidth * yOutHeight;
+        const uvDataSize = uvOutWidth * uvOutHeight;
+        
+        if (offset + yDataSize + uvDataSize * 2 > frameData.length) {
+            // Try legacy format
+            return this.parseSliceDataLegacy(frameData, offset - 8);
+        }
+        
+        // Extract YUV planes
+        const yPlane = frameData.subarray(offset, offset + yDataSize);
+        offset += yDataSize;
+        const uPlane = frameData.subarray(offset, offset + uvDataSize);
+        offset += uvDataSize;
+        const vPlane = frameData.subarray(offset, offset + uvDataSize);
+        
+        // Create RGBA output with bilinear upscaling
+        const rgbaData = new Uint8Array(this.width * this.height * 4);
+        
+        // Calculate scaling factors
+        const yScaleX = yOutWidth / this.width;
+        const yScaleY = yOutHeight / this.height;
+        const uvScaleX = uvOutWidth / this.width;
+        const uvScaleY = uvOutHeight / this.height;
+        
+        // Bilinear interpolation for high-quality upscaling
+        for (let py = 0; py < this.height; py++) {
+            for (let px = 0; px < this.width; px++) {
+                // Y plane interpolation
+                const ySrcX = px * yScaleX;
+                const ySrcY = py * yScaleY;
+                const y = this.bilinearSample(yPlane, yOutWidth, yOutHeight, ySrcX, ySrcY);
+                
+                // UV plane interpolation
+                const uvSrcX = px * uvScaleX;
+                const uvSrcY = py * uvScaleY;
+                const u = this.bilinearSample(uPlane, uvOutWidth, uvOutHeight, uvSrcX, uvSrcY);
+                const v = this.bilinearSample(vPlane, uvOutWidth, uvOutHeight, uvSrcX, uvSrcY);
+                
+                // Convert YUV to RGB (BT.601 full range)
+                const yVal = y;
+                const uVal = u - 128;
+                const vVal = v - 128;
+                
+                const r = Math.max(0, Math.min(255, Math.round(yVal + 1.402 * vVal)));
+                const g = Math.max(0, Math.min(255, Math.round(yVal - 0.344 * uVal - 0.714 * vVal)));
+                const b = Math.max(0, Math.min(255, Math.round(yVal + 1.772 * uVal)));
+                
+                const pixelIndex = (py * this.width + px) * 4;
+                rgbaData[pixelIndex] = r;
+                rgbaData[pixelIndex + 1] = g;
+                rgbaData[pixelIndex + 2] = b;
+                rgbaData[pixelIndex + 3] = 255;
+            }
+        }
+        
+        return rgbaData;
+    }
+    
+    /**
+     * Bilinear sampling for smooth upscaling
+     */
+    bilinearSample(plane, planeWidth, planeHeight, x, y) {
+        const x0 = Math.floor(x);
+        const y0 = Math.floor(y);
+        const x1 = Math.min(x0 + 1, planeWidth - 1);
+        const y1 = Math.min(y0 + 1, planeHeight - 1);
+        
+        const fx = x - x0;
+        const fy = y - y0;
+        
+        const p00 = plane[y0 * planeWidth + x0] || 128;
+        const p10 = plane[y0 * planeWidth + x1] || 128;
+        const p01 = plane[y1 * planeWidth + x0] || 128;
+        const p11 = plane[y1 * planeWidth + x1] || 128;
+        
+        // Bilinear interpolation
+        const top = p00 * (1 - fx) + p10 * fx;
+        const bottom = p01 * (1 - fx) + p11 * fx;
+        return top * (1 - fy) + bottom * fy;
+    }
+    
+    /**
+     * Legacy format parser for backward compatibility
+     */
+    parseSliceDataLegacy(frameData, offset) {
+        // Skip slice header
         offset += 4;
         
-        // Extract macroblock averages
         const mbWidth = Math.ceil(this.width / 16);
         const mbHeight = Math.ceil(this.height / 16);
         const mbCount = mbWidth * mbHeight;
+        const mbDataSize = mbCount * 3;
         
+        if (offset + mbDataSize > frameData.length) {
+            return this.parseSliceDataGrayscale(frameData, offset, mbWidth, mbHeight, mbCount);
+        }
+        
+        const rgbaData = new Uint8Array(this.width * this.height * 4);
+        
+        for (let mbY = 0; mbY < mbHeight; mbY++) {
+            for (let mbX = 0; mbX < mbWidth; mbX++) {
+                const mbIndex = (mbY * mbWidth + mbX) * 3;
+                const y = frameData[offset + mbIndex] || 128;
+                const u = frameData[offset + mbIndex + 1] || 128;
+                const v = frameData[offset + mbIndex + 2] || 128;
+                
+                // BT.601 full range conversion
+                const yVal = y;
+                const uVal = u - 128;
+                const vVal = v - 128;
+                
+                const r = Math.max(0, Math.min(255, Math.round(yVal + 1.402 * vVal)));
+                const g = Math.max(0, Math.min(255, Math.round(yVal - 0.344 * uVal - 0.714 * vVal)));
+                const b = Math.max(0, Math.min(255, Math.round(yVal + 1.772 * uVal)));
+                
+                for (let dy = 0; dy < 16; dy++) {
+                    const py = mbY * 16 + dy;
+                    if (py >= this.height) continue;
+                    
+                    for (let dx = 0; dx < 16; dx++) {
+                        const px = mbX * 16 + dx;
+                        if (px >= this.width) continue;
+                        
+                        const pixelIndex = (py * this.width + px) * 4;
+                        rgbaData[pixelIndex] = r;
+                        rgbaData[pixelIndex + 1] = g;
+                        rgbaData[pixelIndex + 2] = b;
+                        rgbaData[pixelIndex + 3] = 255;
+                    }
+                }
+            }
+        }
+        
+        return rgbaData;
+    }
+    
+    /**
+     * Grayscale fallback for legacy Y-only data
+     */
+    parseSliceDataGrayscale(frameData, offset, mbWidth, mbHeight, mbCount) {
         if (offset + mbCount > frameData.length) {
             return null;
         }
         
-        // Create RGBA output
         const rgbaData = new Uint8Array(this.width * this.height * 4);
         
-        // Expand macroblock averages to full resolution
         for (let mbY = 0; mbY < mbHeight; mbY++) {
             for (let mbX = 0; mbX < mbWidth; mbX++) {
                 const mbIndex = mbY * mbWidth + mbX;
                 const yValue = frameData[offset + mbIndex] || 128;
                 
-                // Convert Y to RGB (grayscale for simplicity)
-                const r = yValue;
-                const g = yValue;
-                const b = yValue;
-                
-                // Fill 16x16 block
                 for (let dy = 0; dy < 16; dy++) {
-                    const y = mbY * 16 + dy;
-                    if (y >= this.height) continue;
+                    const py = mbY * 16 + dy;
+                    if (py >= this.height) continue;
                     
                     for (let dx = 0; dx < 16; dx++) {
-                        const x = mbX * 16 + dx;
-                        if (x >= this.width) continue;
+                        const px = mbX * 16 + dx;
+                        if (px >= this.width) continue;
                         
-                        const pixelIndex = (y * this.width + x) * 4;
-                        rgbaData[pixelIndex] = r;
-                        rgbaData[pixelIndex + 1] = g;
-                        rgbaData[pixelIndex + 2] = b;
+                        const pixelIndex = (py * this.width + px) * 4;
+                        rgbaData[pixelIndex] = yValue;
+                        rgbaData[pixelIndex + 1] = yValue;
+                        rgbaData[pixelIndex + 2] = yValue;
                         rgbaData[pixelIndex + 3] = 255;
                     }
                 }

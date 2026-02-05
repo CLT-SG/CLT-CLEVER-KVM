@@ -685,7 +685,7 @@ impl H264Encoder {
         })
     }
     
-    /// Encode an IDR (keyframe) slice
+    /// Encode an IDR (keyframe) slice with high-quality YUV420 data
     fn encode_idr_slice(&self, output: &mut Vec<u8>, yuv_data: &[u8], frame_num: u64) {
         // Start code + NAL unit header for IDR slice
         output.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
@@ -701,12 +701,11 @@ impl H264Encoder {
         // IDR picture ID
         output.push(((frame_num >> 8) & 0x0F) as u8);
         
-        // Encode macroblocks using simplified I-PCM mode for now
-        // This provides lossless but larger output - good for text/screen content
-        self.encode_macroblocks_ipcm(output, yuv_data);
+        // Encode with high-quality subsampled YUV420
+        self.encode_high_quality_yuv(output, yuv_data);
     }
     
-    /// Encode a P (predicted) slice
+    /// Encode a P (predicted) slice with high-quality YUV420 data
     fn encode_p_slice(&self, output: &mut Vec<u8>, yuv_data: &[u8], frame_num: u64) {
         // Start code + NAL unit header for non-IDR slice
         output.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
@@ -719,47 +718,130 @@ impl H264Encoder {
         // Frame number
         output.push((frame_num & 0xFF) as u8);
         
-        // For P frames, use simple copy mode (skip macroblocks)
-        // This works well when there's little motion
-        self.encode_macroblocks_skip(output, yuv_data);
+        // For P frames, also encode high-quality YUV (no delta encoding for now)
+        self.encode_high_quality_yuv(output, yuv_data);
     }
     
-    /// Encode macroblocks using I-PCM mode (lossless, large)
-    fn encode_macroblocks_ipcm(&self, output: &mut Vec<u8>, yuv_data: &[u8]) {
+    /// Encode high-quality YUV420 data with 4x subsampling for Y and 8x for UV
+    /// 
+    /// This provides much better quality than macroblock averaging:
+    /// - Y plane: sampled every 4 pixels (1/4 resolution) 
+    /// - U plane: sampled every 8 pixels (1/8 resolution)
+    /// - V plane: sampled every 8 pixels (1/8 resolution)
+    /// 
+    /// For 1920x1080:
+    /// - Y: 480x270 = 129,600 bytes
+    /// - U: 240x135 = 32,400 bytes  
+    /// - V: 240x135 = 32,400 bytes
+    /// - Total: ~194KB (vs 8MB raw RGBA, ~24KB macroblock avg)
+    fn encode_high_quality_yuv(&self, output: &mut Vec<u8>, yuv_data: &[u8]) {
         let width = self.config.width as usize;
         let height = self.config.height as usize;
-        let mb_width = (width + 15) / 16;
-        let mb_height = (height + 15) / 16;
+        let y_size = width * height;
         
-        // Use a more efficient encoding for screen content
-        // Downsample to reduce size while maintaining quality for KVM
-        let y_plane = &yuv_data[..width * height];
-        let u_offset = width * height;
-        let v_offset = u_offset + (width * height) / 4;
+        // Validate YUV data size
+        let expected_size = y_size + (y_size / 4) * 2;
+        if yuv_data.len() < expected_size {
+            warn!("YUV data too small: {} < {}", yuv_data.len(), expected_size);
+            self.encode_error_frame(output, width, height);
+            return;
+        }
         
-        // Subsample Y plane to reduce bandwidth
-        for my in 0..mb_height {
-            for mx in 0..mb_width {
-                // Average 16x16 block to 4x4 for significant compression
-                let mut avg_y = 0u32;
+        let y_plane = &yuv_data[..y_size];
+        let u_plane = &yuv_data[y_size..y_size + y_size / 4];
+        let v_plane = &yuv_data[y_size + y_size / 4..];
+        
+        // Subsampling factors - balance between quality and bandwidth
+        const Y_SUBSAMPLE: usize = 4;  // 1/4 resolution for Y
+        const UV_SUBSAMPLE: usize = 8; // 1/8 resolution for UV
+        
+        let y_out_width = (width + Y_SUBSAMPLE - 1) / Y_SUBSAMPLE;
+        let y_out_height = (height + Y_SUBSAMPLE - 1) / Y_SUBSAMPLE;
+        let uv_out_width = (width + UV_SUBSAMPLE - 1) / UV_SUBSAMPLE;
+        let uv_out_height = (height + UV_SUBSAMPLE - 1) / UV_SUBSAMPLE;
+        
+        // Write dimensions header for decoder
+        output.push((y_out_width & 0xFF) as u8);
+        output.push(((y_out_width >> 8) & 0xFF) as u8);
+        output.push((y_out_height & 0xFF) as u8);
+        output.push(((y_out_height >> 8) & 0xFF) as u8);
+        output.push((uv_out_width & 0xFF) as u8);
+        output.push(((uv_out_width >> 8) & 0xFF) as u8);
+        output.push((uv_out_height & 0xFF) as u8);
+        output.push(((uv_out_height >> 8) & 0xFF) as u8);
+        
+        // Encode subsampled Y plane with bilinear filtering
+        for sy in 0..y_out_height {
+            let src_y = sy * Y_SUBSAMPLE;
+            for sx in 0..y_out_width {
+                let src_x = sx * Y_SUBSAMPLE;
+                
+                // Average 4x4 block for better quality
+                let mut sum = 0u32;
                 let mut count = 0u32;
                 
-                for dy in 0..16 {
-                    let y_pos = my * 16 + dy;
-                    if y_pos >= height { continue; }
-                    
-                    for dx in 0..16 {
-                        let x_pos = mx * 16 + dx;
-                        if x_pos >= width { continue; }
-                        
-                        avg_y += y_plane[y_pos * width + x_pos] as u32;
-                        count += 1;
+                for dy in 0..Y_SUBSAMPLE.min(height - src_y) {
+                    for dx in 0..Y_SUBSAMPLE.min(width - src_x) {
+                        let idx = (src_y + dy) * width + (src_x + dx);
+                        if idx < y_plane.len() {
+                            sum += y_plane[idx] as u32;
+                            count += 1;
+                        }
                     }
                 }
                 
-                if count > 0 {
-                    output.push((avg_y / count) as u8);
+                output.push(if count > 0 { (sum / count) as u8 } else { 128 });
+            }
+        }
+        
+        // UV planes are already at half resolution in YUV420
+        let uv_width = width / 2;
+        let uv_height = height / 2;
+        let uv_step = UV_SUBSAMPLE / 2; // Relative to UV plane dimensions
+        
+        // Encode subsampled U plane
+        for sy in 0..uv_out_height {
+            let src_y = sy * uv_step;
+            for sx in 0..uv_out_width {
+                let src_x = sx * uv_step;
+                
+                let mut sum = 0u32;
+                let mut count = 0u32;
+                
+                for dy in 0..uv_step.min(uv_height.saturating_sub(src_y)) {
+                    for dx in 0..uv_step.min(uv_width.saturating_sub(src_x)) {
+                        let idx = (src_y + dy) * uv_width + (src_x + dx);
+                        if idx < u_plane.len() {
+                            sum += u_plane[idx] as u32;
+                            count += 1;
+                        }
+                    }
                 }
+                
+                output.push(if count > 0 { (sum / count) as u8 } else { 128 });
+            }
+        }
+        
+        // Encode subsampled V plane
+        for sy in 0..uv_out_height {
+            let src_y = sy * uv_step;
+            for sx in 0..uv_out_width {
+                let src_x = sx * uv_step;
+                
+                let mut sum = 0u32;
+                let mut count = 0u32;
+                
+                for dy in 0..uv_step.min(uv_height.saturating_sub(src_y)) {
+                    for dx in 0..uv_step.min(uv_width.saturating_sub(src_x)) {
+                        let idx = (src_y + dy) * uv_width + (src_x + dx);
+                        if idx < v_plane.len() {
+                            sum += v_plane[idx] as u32;
+                            count += 1;
+                        }
+                    }
+                }
+                
+                output.push(if count > 0 { (sum / count) as u8 } else { 128 });
             }
         }
         
@@ -767,17 +849,34 @@ impl H264Encoder {
         output.push(0x80);
     }
     
-    /// Encode macroblocks using skip mode for P frames
-    fn encode_macroblocks_skip(&self, output: &mut Vec<u8>, _yuv_data: &[u8]) {
-        let width = self.config.width as usize;
-        let height = self.config.height as usize;
-        let mb_count = ((width + 15) / 16) * ((height + 15) / 16);
+    /// Encode error frame with neutral gray
+    fn encode_error_frame(&self, output: &mut Vec<u8>, width: usize, height: usize) {
+        const Y_SUBSAMPLE: usize = 4;
+        const UV_SUBSAMPLE: usize = 8;
         
-        // Encode skip run (all macroblocks skipped = copy from reference)
-        // This is exp-golomb coded
-        Self::write_exp_golomb(output, mb_count as u32);
+        let y_out_width = (width + Y_SUBSAMPLE - 1) / Y_SUBSAMPLE;
+        let y_out_height = (height + Y_SUBSAMPLE - 1) / Y_SUBSAMPLE;
+        let uv_out_width = (width + UV_SUBSAMPLE - 1) / UV_SUBSAMPLE;
+        let uv_out_height = (height + UV_SUBSAMPLE - 1) / UV_SUBSAMPLE;
         
-        // End of slice
+        // Write dimensions
+        output.push((y_out_width & 0xFF) as u8);
+        output.push(((y_out_width >> 8) & 0xFF) as u8);
+        output.push((y_out_height & 0xFF) as u8);
+        output.push(((y_out_height >> 8) & 0xFF) as u8);
+        output.push((uv_out_width & 0xFF) as u8);
+        output.push(((uv_out_width >> 8) & 0xFF) as u8);
+        output.push((uv_out_height & 0xFF) as u8);
+        output.push(((uv_out_height >> 8) & 0xFF) as u8);
+        
+        // Fill with neutral gray
+        for _ in 0..(y_out_width * y_out_height) {
+            output.push(128);
+        }
+        for _ in 0..(uv_out_width * uv_out_height * 2) {
+            output.push(128);
+        }
+        
         output.push(0x80);
     }
     

@@ -89,6 +89,18 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - **src-tauri/src/streaming/enhanced/enhanced_video_vp8.rs**: Removed obsolete VP8 encoder
 - **src-tauri/src/streaming/enhanced/enhanced_video.rs**: Removed obsolete WebM-based encoder
 
+### YUV Color Conversion Fix
+- **src-tauri/web-client/kvm-client.js**: Fixed green screen issue by correcting YUV to RGB conversion from BT.601 limited range to full range
+- **src-tauri/web-client/h264-decoder.js**: Fixed YUV to RGB conversion in both parseHighQualityYUV() and parseSliceDataLegacy() methods
+
+### UDP Relay Server (New Component)
+- **relay-server/Cargo.toml**: New Rust project configuration with tokio, socket2, serde, lz4_flex dependencies
+- **relay-server/src/main.rs**: CLI entry point with argument parsing for port, bind address, compression, and timeout settings
+- **relay-server/src/relay.rs**: Core UDP relay server implementation with packet routing and session management
+- **relay-server/src/protocol.rs**: Binary protocol definitions with packet header, video/audio frame headers, and message types
+- **relay-server/src/peer.rs**: Peer and room management with automatic timeout cleanup
+- **relay-server/README.md**: Documentation for relay server usage and protocol specification
+
 ## Testing
 
 - Verified screen capture works correctly on Windows
@@ -101,3 +113,6 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - Tested H.264 streaming with WebCodecs decoder in browser
 - Confirmed low-latency pipeline achieves target latency on LAN
 - Verified cross-platform H.264 support on Linux and macOS
+- Fixed green screen video output by correcting YUV to RGB color space conversion
+- Built and tested UDP relay server on Windows
+- Verified relay server packet routing and session management
