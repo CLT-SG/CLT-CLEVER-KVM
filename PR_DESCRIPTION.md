@@ -61,6 +61,34 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - **docs/H264_STREAMING_IMPLEMENTATION.md**: Comprehensive technical documentation for H.264 streaming implementation
 - **README.md**: Updated with H.264 streaming features and removed legacy VP8/WebM references
 
+### H.264-Only Codec Standardization
+- **src-tauri/src/streaming/codecs/realtime_codec.rs**: Changed CodecType enum from VP8 to H264, updated codec string matching
+- **src-tauri/src/streaming/codecs/yuv420_encoder.rs**: Renamed error variants and config fields from WebM to H.264 naming
+- **src-tauri/src/streaming/handlers/realtime_stream.rs**: Updated server_info codec to h264
+- **src-tauri/src/streaming/handlers/integrated_handler.rs**: Changed all config presets to use H.264, renamed methods from webm_* to h264_*
+- **src-tauri/src/streaming/enhanced/mod.rs**: Removed VP8 module references, updated documentation
+- **src-tauri/src/streaming/enhanced/enhanced_audio.rs**: Renamed for_webm() to for_high_quality_streaming()
+- **src-tauri/src/streaming/enhanced/ultra_low_latency.rs**: Updated comments to remove VP8 reference
+- **src-tauri/src/network/server/websocket.rs**: Renamed WebMConfig to H264Config, updated handler function names
+- **src-tauri/src/network/server/handlers.rs**: Changed default codec from vp8 to h264
+- **src-tauri/src/app/state.rs**: Renamed vp8 option to hardware_accel
+- **src-tauri/src/app/commands.rs**: Updated debug logging to use hardware_accel
+- **src-tauri/src/README.md**: Updated directory structure documentation
+- **src-tauri/Cargo.toml**: Updated keywords from vp8 to h264, commented out webm/matroska dependencies
+- **src-tauri/tauri.conf.json**: Updated longDescription to reference H.264
+- **src/composables/useServer.js**: Removed useVP8 setting, changed selectedCodec to h264
+- **src/constants/presets.js**: Removed useVP8 flag from all presets
+- **src/components/server/AdvancedSettings.vue**: Replaced VP8 codec selection with H.264 info badge
+- **src-tauri/web-client/kvm-client.js**: Removed VP8/WebM decoder code, updated to H.264-only
+- **src-tauri/web-client/kvm-template.html**: Updated codec dropdown to H.264 only
+- **src-tauri/web-client/kvm-template-parts.js**: Updated codec initialization to h264
+- **scripts/build.sh**: Updated build messages to reference H.264
+- **scripts/build.bat**: Updated build messages to reference H.264
+
+### Deleted Files
+- **src-tauri/src/streaming/enhanced/enhanced_video_vp8.rs**: Removed obsolete VP8 encoder
+- **src-tauri/src/streaming/enhanced/enhanced_video.rs**: Removed obsolete WebM-based encoder
+
 ## Testing
 
 - Verified screen capture works correctly on Windows

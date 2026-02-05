@@ -464,7 +464,7 @@ impl UltraLowLatencyEncoder {
         // Create ultra-fast RGBA stream format (eliminating ALL conversion overhead)
         let mut stream_frame = Vec::with_capacity(rgba_data.len() + 24);
         
-        // Ultra-fast RGBA frame header (no VP8 overhead)
+        // Ultra-fast RGBA frame header (optimized for raw streaming)
         stream_frame.extend_from_slice(b"RGBA"); // Format signature (4 bytes)
         stream_frame.extend_from_slice(&(width as u32).to_le_bytes()); // Width (4 bytes)
         stream_frame.extend_from_slice(&(height as u32).to_le_bytes()); // Height (4 bytes)

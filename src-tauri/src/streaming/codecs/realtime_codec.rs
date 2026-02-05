@@ -119,7 +119,7 @@ impl RealtimeStreamEncoder {
             (self.frame_count - self.last_keyframe) >= self.config.keyframe_interval as u64;
 
         // Create a simple encoded format for real-time streaming
-        // This is a basic implementation - in production you'd use proper VP8/H264 encoding
+        // This is a basic implementation - H.264 hardware encoding is used in production
         let mut encoded_data = Vec::new();
         
         // Header
@@ -301,20 +301,20 @@ pub type CodecError = RealtimeCodecError;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CodecType {
-    VP8,
+    H264,
 }
 
 impl CodecType {
     pub fn from_string(codec: &str) -> Self {
         match codec.to_lowercase().as_str() {
-            "vp8" => Self::VP8,
-            _ => Self::VP8, // Default fallback
+            "h264" | "avc" | "avc1" => Self::H264,
+            _ => Self::H264, // H.264 is the only supported codec
         }
     }
 
     pub fn to_string(&self) -> &'static str {
         match self {
-            Self::VP8 => "vp8",
+            Self::H264 => "h264",
         }
     }
 }

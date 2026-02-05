@@ -86,8 +86,8 @@ pub fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Op
     
     // Store options
     if let Some(opts) = options {
-        debug!("Server options: delta_encoding={:?}, adaptive_quality={:?}, encryption={:?}, webrtc={:?}, vp8={:?}, monitor={:?}",
-               opts.delta_encoding, opts.adaptive_quality, opts.encryption, opts.webrtc, opts.vp8, opts.monitor);
+        debug!("Server options: delta_encoding={:?}, adaptive_quality={:?}, encryption={:?}, webrtc={:?}, hardware_accel={:?}, monitor={:?}",
+               opts.delta_encoding, opts.adaptive_quality, opts.encryption, opts.webrtc, opts.hardware_accel, opts.monitor);
         state.options = opts;
     }
 

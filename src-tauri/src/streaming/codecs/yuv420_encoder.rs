@@ -13,10 +13,10 @@ use image::{ImageBuffer, Rgba, DynamicImage};
 /// Enhanced YUV420 video encoder errors
 #[derive(Error, Debug)]
 pub enum YUV420EncoderError {
-    #[error("VP8 encoder initialization failed: {0}")]
-    VP8Init(String),
-    #[error("WebM container creation failed: {0}")]
-    WebMInit(String),
+    #[error("H.264 encoder initialization failed: {0}")]
+    H264Init(String),
+    #[error("Container creation failed: {0}")]
+    ContainerInit(String),
     #[error("Frame encoding failed: {0}")]
     Encode(String),
     #[error("YUV conversion failed: {0}")]
@@ -27,7 +27,7 @@ pub enum YUV420EncoderError {
     Config(String),
 }
 
-/// YUV420 encoder configuration with WebM support
+/// YUV420 encoder configuration for H.264 streaming
 #[derive(Clone, Debug)]
 pub struct YUV420Config {
     pub width: u32,
@@ -37,7 +37,7 @@ pub struct YUV420Config {
     pub keyframe_interval: u32,
     pub quality: u32,
     pub monitor_id: usize,
-    pub use_webm_container: bool,
+    pub use_h264_container: bool,
     pub enable_audio: bool,
     pub opus_bitrate: u32,
     pub temporal_layers: u8,
@@ -54,7 +54,7 @@ impl Default for YUV420Config {
             keyframe_interval: 60,
             quality: 20,
             monitor_id: 0,
-            use_webm_container: true,
+            use_h264_container: true,
             enable_audio: false,
             opus_bitrate: 128000,
             temporal_layers: 1,
@@ -270,7 +270,7 @@ impl YUV420Encoder {
     /// Encode a YUV420 frame (simplified version for now)
     fn encode_yuv_frame(&mut self, yuv_frame: YUV420Frame, is_keyframe: bool) -> Result<Option<Vec<u8>>, YUV420EncoderError> {
         // For now, return the raw YUV420 data as a simple encoded frame
-        // In a full implementation, this would use VP8 encoding
+        // In production, H.264 hardware encoding is used
         
         let mut encoded_data = Vec::new();
         

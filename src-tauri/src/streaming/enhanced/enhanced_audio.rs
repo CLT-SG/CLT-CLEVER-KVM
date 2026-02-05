@@ -130,19 +130,19 @@ impl EnhancedAudioConfig {
         }
     }
     
-    /// Configuration optimized for WebM container streaming
-    pub fn for_webm() -> Self {
+    /// Configuration optimized for high-quality streaming
+    pub fn for_high_quality_streaming() -> Self {
         Self {
             sample_rate: 48000,
             channels: 2,
-            bitrate: 320000,       // 320 kbps for excellent WebM quality
-            frame_duration_ms: 20, // Standard frame size for WebM
+            bitrate: 320000,       // 320 kbps for excellent quality
+            frame_duration_ms: 20, // Standard frame size
             application: OpusApplication::Audio,
-            complexity: 10,        // Maximum complexity for WebM quality
+            complexity: 10,        // Maximum complexity for quality
             use_vbr: true,         // VBR for better quality
             use_fec: true,         // FEC for robustness
             use_dtx: true,         // DTX for efficiency
-            enable_webrtc: false,  // Direct WebM container, not WebRTC
+            enable_webrtc: false,  // Direct container streaming
         }
     }
 }

@@ -58,7 +58,7 @@ impl RealtimeStreamHandler {
                 "width": width,
                 "height": height,
                 "hostname": "kvm-server",
-                "codec": "vp8",
+                "codec": "h264",
                 "audio": false,
                 "tile_width": 64,
                 "tile_height": 64,

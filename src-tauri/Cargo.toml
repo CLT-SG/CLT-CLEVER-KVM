@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/CLTSG/CLT-CLEVER-KVM"
 homepage = "https://github.com/CLTSG/CLT-CLEVER-KVM"
 documentation = "https://github.com/CLTSG/CLT-CLEVER-KVM#readme"
-keywords = ["kvm", "remote-desktop", "tauri", "vp8", "streaming"]
+keywords = ["kvm", "remote-desktop", "tauri", "h264", "streaming"]
 categories = ["multimedia", "network-programming"]
 edition = "2021"
 
@@ -40,10 +40,10 @@ zed-scap = "0.0.8-zed"
 anyhow = "1.0.75"
 thiserror = "1.0.50"
 
-# Video encoding and WebM container support
-webm = "1.1" # WebM container format
+# Video encoding and H.264 container support
+# webm = "1.1" # WebM container format (legacy, kept for audio container)
 opus = "0.3" # Opus audio codec
-matroska = "0.14" # Matroska/WebM muxing
+# matroska = "0.14" # Matroska/WebM muxing (legacy)
 image = "0.24" # Image processing for YUV conversion
 av-data = "0.4" # Audio/Video data structures
 

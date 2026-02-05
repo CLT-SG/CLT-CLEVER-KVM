@@ -15,9 +15,7 @@ class KVMClient {
         this.qualityLevel = 85;
         this.availableMonitors = [];
         this.currentMonitor = config.monitor;
-        this.currentCodec = "h264"; // Use H.264 for low latency
-        this.mediaSource = null;
-        this.sourceBuffer = null;
+        this.currentCodec = "h264"; // Use H.264 for low latency hardware-accelerated streaming
         this.videoQueue = [];
         this.showStats = false;
         
@@ -26,28 +24,13 @@ class KVMClient {
         this.h264SPS = null;
         this.h264PPS = null;
         
-        // YUV420 decoder for enhanced video quality (fallback)
-        this.yuv420Decoder = null;
+        // Canvas for H.264 frame rendering
         this.decoderCanvas = null;
         this.decoderCtx = null;
         
-        // WebM container support (legacy)
-        this.webmSupported = false;
-        this.webmContainer = null;
-        
-        // VP8 decoder for real screen content with YUV420 support (legacy)
-        this.vp8Decoder = null;
-        this.yuv420Canvas = null;
-        this.yuv420Ctx = null;
-        
-        // Enhanced YUV420 video properties
+        // H.264 video properties
         this.needsKeyframe = true;
         this.supportsHardwareDecoding = false;
-        this.webmDecodeQueue = [];
-        
-        // WebM container format support
-        this.webmMuxer = null;
-        this.webmDemuxer = null;
         
         // OSD state
         this.osdVisible = true;
@@ -73,7 +56,6 @@ class KVMClient {
 
         this.initializeElements();
         this.initializeH264Decoder();
-        this.initializeVP8Decoder();
         this.initializeFrameTracking();
         this.setupEventListeners();
         this.connect();
@@ -162,7 +144,7 @@ class KVMClient {
     }
 
     initializeElements() {
-        // Main elements - VP8 uses video element for display
+        // Main elements - H.264 uses canvas for display with WebCodecs decoder
         this.videoScreen = document.getElementById('video-screen');
         this.canvasLayer = document.getElementById('canvas-layer'); // Used only for input handling
         this.audioElement = document.getElementById('remote-audio');
@@ -219,58 +201,6 @@ class KVMClient {
         // Ensure video element is visible
         if (this.videoScreen) {
             this.videoScreen.style.display = 'block';
-        }
-    }
-
-    initializeVP8Decoder() {
-        try {
-            console.log('🎬 Initializing YUV420 + WebM decoder...');
-            
-            // Check for WebM container support with VP8 and Opus
-            const testTypes = [
-                'video/webm; codecs="vp8"',
-                'video/webm; codecs="vp8,opus"',
-                'audio/webm; codecs="opus"'
-            ];
-            
-            this.webmSupported = false;
-            for (const type of testTypes) {
-                if (window.MediaSource && MediaSource.isTypeSupported(type)) {
-                    console.log('✅ Supported:', type);
-                    this.webmSupported = true;
-                }
-            }
-            
-            if (this.webmSupported) {
-                console.log('✅ Using native WebM VP8+Opus decoder');
-            } else {
-                console.log('⚠️ WebM not fully supported, using custom YUV420 decoder');
-                
-                // Create YUV420 decoder canvas for real screen content
-                this.yuv420Canvas = document.createElement('canvas');
-                this.yuv420Canvas.id = 'yuv420-decoder-canvas';
-                this.yuv420Canvas.style.position = 'absolute';
-                this.yuv420Canvas.style.top = '0';
-                this.yuv420Canvas.style.left = '0';
-                this.yuv420Canvas.style.width = '100%';
-                this.yuv420Canvas.style.height = '100%';
-                this.yuv420Canvas.style.zIndex = '1';
-                this.yuv420Ctx = this.yuv420Canvas.getContext('2d');
-                
-                // Add decoder canvas to the video container
-                const videoContainer = document.querySelector('.video-container');
-                if (videoContainer) {
-                    videoContainer.appendChild(this.yuv420Canvas);
-                }
-            }
-            
-            // Initialize WebM container helper
-            this.webmConverter = new WebMConverter();
-            console.log('✅ YUV420 + WebM decoder initialized successfully');
-            
-        } catch (error) {
-            console.error('❌ Failed to initialize YUV420 + WebM decoder:', error);
-            this.webmSupported = false;
         }
     }
 
@@ -359,7 +289,7 @@ class KVMClient {
             });
         }
 
-        // Codec dropdown is no longer needed - using WebRTC VP8 only
+        // Codec dropdown is disabled - using H.264 only
 
         if (this.qualityDropdown) {
             this.qualityDropdown.addEventListener('change', (e) => {
@@ -958,9 +888,8 @@ class KVMClient {
             this.updateStatus('Connected', 'Connection established successfully');
             console.log('WebSocket connection established');
             
-            // Initialize MediaSource immediately for VP8 since we know that's what we'll receive
-            console.log('Initializing MediaSource immediately on connection');
-            this.initializeMediaSource('vp8');
+            // H.264 streaming uses WebCodecs decoder - no MediaSource needed
+            console.log('🎬 Using H.264 hardware-accelerated streaming');
             
             // Start sending ping messages to measure latency
             this.pingInterval = setInterval(() => {
@@ -1109,10 +1038,10 @@ class KVMClient {
             this.osdTitle.textContent = `${hostname} - Monitor ${monitor} (${this.screenWidth}x${this.screenHeight})`;
         }
         
-        // Keep the codec that was initialized - don't override to rgba
+        // H.264 is the only supported codec
         console.log('Using codec:', this.currentCodec);
         if (this.codecDropdown) {
-            this.codecDropdown.value = this.currentCodec === 'yuv420_webm' ? 'vp8' : this.currentCodec;
+            this.codecDropdown.value = 'h264';
         }
         
         // Initialize canvas size
@@ -1165,10 +1094,10 @@ class KVMClient {
             this.osdTitle.textContent = `${serverInfo.hostname} - Monitor ${serverInfo.current_monitor} (${videoConfig.width}x${videoConfig.height})`;
         }
         
-        // Keep the codec that was initialized - don't override to rgba
+        // Keep the codec that was initialized - always H.264
         console.log('Using codec:', this.currentCodec);
         if (this.codecDropdown) {
-            this.codecDropdown.value = this.currentCodec === 'yuv420_webm' ? 'vp8' : this.currentCodec;
+            this.codecDropdown.value = 'h264';
         }
         
         // Initialize canvas size
@@ -1207,140 +1136,41 @@ class KVMClient {
             return;
         }
         
-        console.log('Initializing video streaming for codec:', this.currentCodec);
+        console.log('🎬 Initializing H.264 video streaming');
         
-        // Always use VP8 video mode - no canvas fallback
+        // H.264 uses canvas-based rendering with WebCodecs decoder
+        // Set video element dimensions for fallback
+        this.videoScreen.width = this.screenWidth;
+        this.videoScreen.height = this.screenHeight;
         
-        // For VP8 via WebRTC, we need to set up the video element properly
-        if (this.currentCodec === 'vp8' || this.currentCodec === 'webrtc') {
-            // Set video dimensions
-            this.videoScreen.width = this.screenWidth;
-            this.videoScreen.height = this.screenHeight;
-        
-            // Apply stretch setting
-            if (this.config.stretch) {
-                this.videoScreen.style.width = '100%';
-                this.videoScreen.style.height = '100%';
-                this.videoScreen.style.objectFit = 'fill';
-            } else {
-                this.videoScreen.style.width = 'auto';
-                this.videoScreen.style.height = 'auto';
-                this.videoScreen.style.objectFit = 'contain';
-            }
-        
-            // MediaSource should already be initialized in onopen, but check just in case
-            if (!this.mediaSource && this.currentCodec === 'vp8') {
-                console.log('MediaSource not initialized yet, initializing now');
-                this.initializeMediaSource(this.currentCodec);
-            }
+        // Apply stretch setting
+        if (this.config.stretch) {
+            this.videoScreen.style.width = '100%';
+            this.videoScreen.style.height = '100%';
+            this.videoScreen.style.objectFit = 'fill';
+        } else {
+            this.videoScreen.style.width = 'auto';
+            this.videoScreen.style.height = 'auto';
+            this.videoScreen.style.objectFit = 'contain';
         }
+        
+        // Initialize optimized canvas for H.264 frame rendering
+        this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
     }
 
-    initializeMediaSource(codec) {
-        console.log('🎬 Initializing MediaSource for codec:', codec);
-        
-        // Don't reinitialize if already set up
-        if (this.mediaSource && this.mediaSource.readyState === 'open' && this.sourceBuffer) {
-            console.log('✅ MediaSource already initialized and ready');
-            return;
-        }
-        
-        if (!window.MediaSource) {
-            console.error('❌ MediaSource API not supported - WebM video cannot work without MediaSource');
-            this.showError('WebM video requires MediaSource API support');
-            return;
-        }
-        
-        // Test WebM VP8 codec configurations with Opus audio
-        const codecConfigs = [
-            'video/webm; codecs="vp8,opus"',  // VP8 video + Opus audio
-            'video/webm; codecs="vp8"',       // VP8 video only
-            'video/mp4; codecs="avc1.42E01E"' // H.264 fallback
-        ];
-        
-        let supportedMimeType = null;
-        for (const mimeType of codecConfigs) {
-            if (MediaSource.isTypeSupported(mimeType)) {
-                supportedMimeType = mimeType;
-                console.log('✅ Using supported codec:', mimeType);
-                break;
-            } else {
-                console.log('❌ Unsupported codec:', mimeType);
-            }
-        }
-        
-        if (!supportedMimeType) {
-            console.error('❌ No supported video codecs found');
-            this.showError('No supported WebM video codecs available');
-            return;
-        }
-        
-        try {
-            // Create new MediaSource
-            this.mediaSource = new MediaSource();
-            
-            this.mediaSource.addEventListener('sourceopen', () => {
-                console.log('🎬 MediaSource opened, creating SourceBuffer with:', supportedMimeType);
-                
-                try {
-                    // Create source buffer for WebM container
-                    this.sourceBuffer = this.mediaSource.addSourceBuffer(supportedMimeType);
-                    
-                    // Configure source buffer for streaming
-                    this.sourceBuffer.mode = 'sequence'; // Better for streaming
-                    
-                    this.sourceBuffer.addEventListener('updateend', () => {
-                        // Process next chunk in queue
-                        this.processVideoQueue();
-                    });
-                    
-                    this.sourceBuffer.addEventListener('error', (e) => {
-                        console.error('❌ SourceBuffer error:', e);
-                    });
-                    
-                    console.log('✅ SourceBuffer ready for WebM streaming');
-                    
-                } catch (error) {
-                    console.error('❌ Failed to create SourceBuffer:', error);
-                    this.showError('Failed to initialize video decoder');
-                }
-            });
-            
-            this.mediaSource.addEventListener('sourceended', () => {
-                console.log('📺 MediaSource ended');
-            });
-            
-            this.mediaSource.addEventListener('error', (e) => {
-                console.error('❌ MediaSource error:', e);
-                this.showError('Video streaming error occurred');
-            });
-            
-            // Set MediaSource as video source
-            if (this.videoScreen) {
-                this.videoScreen.src = URL.createObjectURL(this.mediaSource);
-                console.log('🎬 MediaSource connected to video element');
-            }
-            
-        } catch (error) {
-            console.error('❌ Failed to initialize MediaSource:', error);
-            this.showError('Failed to initialize video streaming');
-        }
-    }
+    // H.264 streaming uses WebCodecs VideoDecoder - no MediaSource needed
+    // The h264-decoder.js handles all H.264 decoding with hardware acceleration
 
     processVideoQueue() {
-        if (!this.sourceBuffer || this.sourceBuffer.updating || this.videoQueue.length === 0) {
+        // Process queued H.264 frames if any
+        if (this.videoQueue.length === 0) {
             return;
         }
         
-        try {
-            const videoData = this.videoQueue.shift();
-            if (videoData && videoData.byteLength > 0) {
-                this.sourceBuffer.appendBuffer(videoData);
-            }
-        } catch (error) {
-            console.error('❌ Error processing video queue:', error);
-            // Clear queue on error to prevent pile-up
-            this.videoQueue = [];
+        // H.264 frames are processed directly by the decoder
+        const frame = this.videoQueue.shift();
+        if (frame && this.h264Decoder && this.h264Decoder.isReady) {
+            this.h264Decoder.decode(frame.data, frame.metadata);
         }
     }
 
@@ -1377,11 +1207,8 @@ class KVMClient {
             );
             
             if (header === 'H264') {
-                // H.264 frame from low-latency pipeline
+                // H.264 frame from low-latency pipeline (primary codec)
                 this.handleH264VideoFrame(binaryData);
-            } else if (this.isWebMFrame(binaryData)) {
-                // WebM container frame (legacy)
-                this.handleWebMFrame(binaryData);
             } else {
                 // Fall back to custom frame parsing (RGBA frames)
                 this.parseAndRenderFrame(binaryData);
@@ -1520,112 +1347,7 @@ class KVMClient {
         this.realCtx.putImageData(imageData, 0, 0);
     }
 
-    isWebMFrame(binaryData) {
-        // Check for WebM container signature (EBML header)
-        const dataView = new DataView(binaryData);
-        if (dataView.byteLength < 4) return false;
-        
-        // WebM files start with EBML header (0x1A45DFA3)
-        const ebmlHeader = dataView.getUint32(0, false);
-        return ebmlHeader === 0x1A45DFA3;
-    }
-
-    handleWebMFrame(webmData) {
-        if (this.webmSupported && this.sourceBuffer && !this.sourceBuffer.updating) {
-            try {
-                // Queue WebM frame for native browser decoding
-                this.videoQueue.push(webmData);
-                this.processVideoQueue();
-                console.log('🎬 WebM frame queued for native decoding');
-            } catch (error) {
-                console.error('❌ WebM frame processing error:', error);
-                // Fall back to custom decoding
-                this.parseWebMFrame(webmData);
-            }
-        } else {
-            // Custom WebM demuxing and VP8 decoding
-            this.parseWebMFrame(webmData);
-        }
-    }
-
-    parseWebMFrame(webmData) {
-        try {
-            // Basic WebM demuxing to extract VP8 payload
-            const vp8Payload = this.extractVP8FromWebM(webmData);
-            if (vp8Payload) {
-                this.handleVP8Frame(vp8Payload);
-            }
-        } catch (error) {
-            console.error('❌ WebM parsing error:', error);
-        }
-    }
-
-    extractVP8FromWebM(webmData) {
-        // Simplified WebM demuxer - look for VP8 track data
-        const dataView = new DataView(webmData);
-        let offset = 0;
-        
-        // Skip EBML header and find the first cluster
-        // This is a simplified implementation
-        while (offset < dataView.byteLength - 8) {
-            const elementId = dataView.getUint32(offset, false);
-            
-            if (elementId === 0x1F43B675) { // Cluster element
-                // Found cluster, look for SimpleBlock with VP8 data
-                offset += 4;
-                const clusterSize = this.parseEBMLSize(dataView, offset);
-                // Extract VP8 payload from the cluster
-                // This would need more detailed implementation
-                break;
-            }
-            offset++;
-        }
-        
-        // For now, return null - would need full WebM demuxer
-        return null;
-    }
-
-    handleVP8Frame(vp8Data) {
-        // Handle raw VP8 frame data
-        if (this.yuv420Canvas && this.yuv420Ctx) {
-            this.renderVP8ToCanvas(vp8Data);
-        }
-    }
-
-    renderVP8ToCanvas(vp8Data) {
-        // Custom VP8 decoder implementation would go here
-        // For now, we'll simulate frame rendering
-        console.log('🎬 Rendering VP8 frame to canvas');
-    }
-
-    parseEBMLSize(dataView, offset) {
-        // Parse EBML variable-size integer
-        const firstByte = dataView.getUint8(offset);
-        let size = 0;
-        let length = 0;
-        
-        // Find the length indicator
-        if (firstByte & 0x80) {
-            length = 1;
-            size = firstByte & 0x7F;
-        } else if (firstByte & 0x40) {
-            length = 2;
-            size = ((firstByte & 0x3F) << 8) | dataView.getUint8(offset + 1);
-        } else if (firstByte & 0x20) {
-            length = 3;
-            size = ((firstByte & 0x1F) << 16) | 
-                   (dataView.getUint8(offset + 1) << 8) | 
-                   dataView.getUint8(offset + 2);
-        } else if (firstByte & 0x10) {
-            length = 4;
-            size = ((firstByte & 0x0F) << 24) |
-                   (dataView.getUint8(offset + 1) << 16) |
-                   (dataView.getUint8(offset + 2) << 8) |
-                   dataView.getUint8(offset + 3);
-        }
-        
-        return size;
-    }
+    // H.264 is the only supported codec - no WebM/VP8 fallback needed
 
     parseAndRenderFrame(arrayBuffer) {
         const now = performance.now();
@@ -1782,9 +1504,6 @@ class KVMClient {
         if (format === 'rgba_direct') {
             // Ultra-fast RGBA format - zero decompression needed!
             return rgbaData;
-        } else if (format === 'vp8_yuv') {
-            // Legacy VP8 YUV format from optimized backend
-            return this.decompressVP8YUV(compressedData, width, height);
         } else if (isKeyframe || !this.previousFrameData) {
             // Legacy RLE decompression
             return this.fastDecompressRLE(compressedData, width * height * 4);
@@ -1839,113 +1558,6 @@ class KVMClient {
                     rgbaData[outputIndex++] = b;
                     rgbaData[outputIndex++] = a;
                 }
-            }
-        }
-        
-        return rgbaData;
-    }
-
-    decompressVP8YUV(compressedData, width, height) {
-        console.log(`🎥 Decompressing VP8 YUV: ${compressedData.length} bytes, ${width}x${height}`);
-        
-        // Check if data is compressed (old format) or uncompressed (new ultra-fast format)
-        const expectedYUVSize = width * height * 1.5; // Y + U/4 + V/4
-        
-        let yuvData;
-        if (compressedData.length >= expectedYUVSize * 0.8 && compressedData.length <= expectedYUVSize * 1.2) {
-            // Data appears to be uncompressed (new ultra-fast format)
-            console.log(`📊 Using uncompressed YUV data: ${compressedData.length} bytes`);
-            yuvData = compressedData;
-        } else {
-            // Data is compressed with RLE (legacy format)
-            console.log(`📊 Decompressing RLE YUV data: ${compressedData.length} bytes`);
-            yuvData = this.decompressSimpleRLE(compressedData);
-        }
-        
-        console.log(`📊 YUV data ready: ${yuvData.length} bytes (expected: ${expectedYUVSize})`);
-        
-        // Convert YUV420 back to RGBA for display
-        const rgbaData = this.yuv420ToRGBA(yuvData, width, height);
-        
-        console.log(`🎨 RGBA converted: ${rgbaData.length} bytes (expected: ${width * height * 4})`);
-        
-        return rgbaData;
-    }
-
-    decompressSimpleRLE(compressedData) {
-        const decompressed = new Uint8Array(compressedData.length * 2); // Estimate
-        let outputIndex = 0;
-        let inputIndex = 0;
-        
-        if (compressedData.length === 0) return decompressed;
-        
-        // First byte is always raw
-        decompressed[outputIndex++] = compressedData[inputIndex++];
-        
-        while (inputIndex < compressedData.length) {
-            const value = compressedData[inputIndex++];
-            
-            if (value === 0xFF && inputIndex + 1 < compressedData.length) {
-                // RLE marker: next byte is count, byte after is value
-                const count = compressedData[inputIndex++];
-                const repeatValue = compressedData[inputIndex++];
-                
-                for (let i = 0; i < count; i++) {
-                    decompressed[outputIndex++] = repeatValue;
-                }
-            } else {
-                // Regular byte
-                decompressed[outputIndex++] = value;
-            }
-        }
-        
-        return decompressed.slice(0, outputIndex);
-    }
-
-    yuv420ToRGBA(yuvData, width, height) {
-        const rgbaData = new Uint8Array(width * height * 4);
-        const ySize = width * height;
-        const uvSize = (width / 2) * (height / 2);
-        
-        // Planar YUV420 layout: Y plane, then U plane, then V plane
-        const yPlane = 0;
-        const uPlane = ySize;
-        const vPlane = ySize + uvSize;
-        
-        let rgbaIndex = 0;
-        
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                // Get Y value from Y plane
-                const yVal = yuvData[yPlane + y * width + x] || 16;
-                
-                // Get U,V values from separate planes (subsampled)
-                const uvX = Math.floor(x / 2);
-                const uvY = Math.floor(y / 2);
-                const uvIndex = uvY * (width / 2) + uvX;
-                
-                const uVal = yuvData[uPlane + uvIndex] || 128;
-                const vVal = yuvData[vPlane + uvIndex] || 128;
-                
-                // Convert YUV to RGB using fast integer math
-                const c = yVal - 16;
-                const d = uVal - 128;
-                const e = vVal - 128;
-                
-                let r = (298 * c + 409 * e + 128) >> 8;
-                let g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-                let b = (298 * c + 516 * d + 128) >> 8;
-                
-                // Clamp to valid range
-                r = Math.max(0, Math.min(255, r));
-                g = Math.max(0, Math.min(255, g));
-                b = Math.max(0, Math.min(255, b));
-                
-                // Store RGBA
-                rgbaData[rgbaIndex++] = r;
-                rgbaData[rgbaIndex++] = g;
-                rgbaData[rgbaIndex++] = b;
-                rgbaData[rgbaIndex++] = 255; // Alpha
             }
         }
         
@@ -2241,14 +1853,16 @@ class KVMClient {
 
     // Legacy method - no longer used since we decode actual frames
     renderBinaryFrame(videoData) {
-        console.warn('renderBinaryFrame called - this should not happen with real frame decoding');
+        console.warn('renderBinaryFrame called - this should not happen with H.264 frame decoding');
     }
 
+    // Legacy video frame handler - H.264 frames are handled via handleH264VideoFrame
     handleVideoFrame(data) {
-        // Only log every 30th frame to reduce console noise
+        // H.264 binary frames are handled directly by handleBinaryVideoFrame
+        // This method exists for JSON-based frame messages (legacy)
         if (!this.frameLogCounter) this.frameLogCounter = 0;
         if (this.frameLogCounter % 30 === 0) {
-            console.log('VP8 frame received:', data.codec, 'size:', (data.data?.length / 1024).toFixed(1) + 'KB');
+            console.log('Video frame received:', data.codec, 'size:', (data.data?.length / 1024).toFixed(1) + 'KB');
         }
         this.frameLogCounter++;
         
@@ -2258,67 +1872,10 @@ class KVMClient {
         }
         
         try {
-            // For VP8: Server sends raw VP8 frames, but MediaSource expects WebM container
-            // Since we don't have WebM muxing on the server, use canvas decoding for now
-            if (data.codec === 'vp8') {
-                this.handleCanvasVideoFrame(data);
-                return;
-            }
-            
-            // For other codecs, try MediaSource approach
             const videoData = this.base64ToArrayBuffer(data.data);
-            console.log('Decoded video data size:', videoData.byteLength);
             
-            // Validate video data format
-            if (!this.isValidVideoData(videoData)) {
-                console.error('Invalid video data format received');
-                this.showError('Invalid video data format');
-                return;
-            }
-            
-            // Check if MediaSource is ready
-            if (!this.mediaSource) {
-                console.warn('MediaSource not initialized yet, queuing frame');
-                if (!this.videoQueue) this.videoQueue = [];
-                this.videoQueue.push(videoData);
-                return;
-            }
-            
-            // Check if MediaSource is in the right state
-            if (this.mediaSource.readyState !== 'open') {
-                console.warn('MediaSource not open yet (state:', this.mediaSource.readyState, '), queuing frame');
-                if (!this.videoQueue) this.videoQueue = [];
-                this.videoQueue.push(videoData);
-                return;
-            }
-            
-            // Check if SourceBuffer is ready
-            if (!this.sourceBuffer) {
-                console.warn('SourceBuffer not ready yet, queuing frame');
-                if (!this.videoQueue) this.videoQueue = [];
-                this.videoQueue.push(videoData);
-                return;
-            }
-            
-            // Now we can process the frame
-            console.log('Processing video frame with MediaSource');
-            if (this.sourceBuffer.updating) {
-                // Queue the data if source buffer is busy
-                this.videoQueue.push(videoData);
-                // Limit queue size to prevent memory issues
-                if (this.videoQueue.length > 10) {
-                    console.warn('Video queue getting large, dropping oldest frames');
-                    this.videoQueue = this.videoQueue.slice(-5); // Keep only last 5 frames
-                }
-            } else {
-                try {
-                    this.sourceBuffer.appendBuffer(videoData);
-                } catch (e) {
-                    console.error('Error appending video data:', e);
-                    this.showError('Video buffer append failed');
-                }
-            }
-            
+            // Process as raw frame data
+            this.parseAndRenderFrame(videoData);
             this.updateFrameStats();
             
         } catch (e) {
@@ -2327,214 +1884,16 @@ class KVMClient {
         }
     }
 
-    handleCanvasVideoFrame(data) {
-        // For VP8 frames, try direct canvas rendering since WebM conversion is complex
-        try {
-            const videoData = this.base64ToArrayBuffer(data.data);
-            
-            // Create canvas for direct VP8 frame rendering
-            if (!this.fallbackCanvas) {
-                console.log('Initializing VP8 canvas renderer...');
-                this.fallbackCanvas = document.createElement('canvas');
-                this.fallbackCtx = this.fallbackCanvas.getContext('2d');
-                
-                // Set canvas size based on actual screen dimensions
-                const canvasWidth = this.screenWidth || 1920;
-                const canvasHeight = this.screenHeight || 1080;
-                this.fallbackCanvas.width = canvasWidth;
-                this.fallbackCanvas.height = canvasHeight;
-                
-                // Copy video element's styling to canvas
-                this.fallbackCanvas.style.cssText = this.videoScreen.style.cssText;
-                this.fallbackCanvas.style.display = 'block';
-                this.fallbackCanvas.style.width = '100%';
-                this.fallbackCanvas.style.height = '100%';
-                this.fallbackCanvas.style.objectFit = this.config.stretch ? 'fill' : 'contain';
-                this.fallbackCanvas.style.backgroundColor = '#000';
-                
-                // Hide the video element and show canvas
-                this.videoScreen.style.display = 'none';  
-                this.videoScreen.parentNode.insertBefore(this.fallbackCanvas, this.videoScreen);
-                
-                console.log(`✅ VP8 canvas renderer ready: ${canvasWidth}x${canvasHeight}`);
-            }
-
-            // Try to decode VP8 frame using ImageBitmap (modern browsers)
-            if (window.createImageBitmap && this.isValidVP8Frame(videoData)) {
-                this.decodeVP8Frame(videoData);
-            } else {
-                // Fallback: Render based on VP8 frame structure
-                this.renderVP8FrameContent(videoData);
-            }
-            
-            this.updateFrameStats();
-            
-        } catch (e) {
-            console.error('Error handling canvas video frame:', e);
-            this.showError('Canvas video processing error');
-        }
-    }
-
-    renderScreenContentFromVP8(videoData) {
-        const ctx = this.fallbackCtx;
-        const canvas = this.fallbackCanvas;
-        const frameNumber = ++this.canvasFrameNumber || (this.canvasFrameNumber = 1);
-        
-        // Clear canvas with desktop-like background
-        ctx.fillStyle = '#2d3142';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Analyze VP8 data to extract meaningful patterns
-        const dataView = new Uint8Array(videoData);
-        
-        // Create a more realistic desktop representation
-        this.renderDesktopSimulation(ctx, canvas, dataView, frameNumber);
-        
-        // Add activity indicators based on data changes
-        this.renderActivityIndicators(ctx, canvas, dataView);
-    }
-
-    renderDesktopSimulation(ctx, canvas, dataView, frameNumber) {
-        // Simulate a desktop environment based on VP8 data patterns
-        
-        // 1. Desktop background with subtle pattern
-        const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        gradient.addColorStop(0, '#1e2a3a');
-        gradient.addColorStop(1, '#2d3142');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // 2. Simulate taskbar at bottom
-        ctx.fillStyle = '#363636';
-        const taskbarHeight = 40;
-        ctx.fillRect(0, canvas.height - taskbarHeight, canvas.width, taskbarHeight);
-        
-        // 3. Simulate windows based on VP8 data intensity
-        this.renderSimulatedWindows(ctx, canvas, dataView);
-        
-        // 4. Simulate cursor movement based on data changes
-        this.renderSimulatedCursor(ctx, dataView, frameNumber);
-        
-        // 5. Add desktop icons
-        this.renderDesktopIcons(ctx);
-    }
-
-    renderSimulatedWindows(ctx, canvas, dataView) {
-        // Create window-like rectangles based on VP8 data patterns
-        const windowCount = Math.min(3, Math.floor(dataView.length / 50000));
-        
-        for (let i = 0; i < windowCount; i++) {
-            const baseIndex = i * Math.floor(dataView.length / windowCount);
-            
-            // Use VP8 data to determine window properties
-            const x = (dataView[baseIndex] * 4) % (canvas.width - 400);
-            const y = (dataView[baseIndex + 1] * 3) % (canvas.height - 300);
-            const width = 300 + (dataView[baseIndex + 2] % 200);
-            const height = 200 + (dataView[baseIndex + 3] % 150);
-            
-            // Window background
-            ctx.fillStyle = '#f0f0f0';
-            ctx.fillRect(x, y, width, height);
-            
-            // Window title bar
-            ctx.fillStyle = '#4a90e2';
-            ctx.fillRect(x, y, width, 30);
-            
-            // Window content area with data-based pattern
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(x + 5, y + 35, width - 10, height - 40);
-            
-            // Add some content lines based on data
-            ctx.fillStyle = '#333333';
-            ctx.font = '12px Arial';
-            for (let line = 0; line < 5; line++) {
-                const textY = y + 50 + (line * 20);
-                const intensity = dataView[(baseIndex + line * 10) % dataView.length];
-                const lineLength = (intensity % 30) + 10;
-                ctx.fillRect(x + 10, textY, lineLength * 8, 2);
-            }
-        }
-    }
-
-    renderActivityIndicators(ctx, canvas, dataView) {
-        // Show data activity as visual indicators
-        const sampleSize = Math.min(100, dataView.length);
-        let activityLevel = 0;
-        
-        // Calculate activity level from data variance
-        for (let i = 0; i < sampleSize - 1; i++) {
-            activityLevel += Math.abs(dataView[i] - dataView[i + 1]);
-        }
-        activityLevel = (activityLevel / sampleSize) / 255;
-        
-        // Show activity as colored border
-        const borderWidth = Math.max(2, activityLevel * 10);
-        ctx.strokeStyle = `rgba(76, 175, 80, ${activityLevel})`;
-        ctx.lineWidth = borderWidth;
-        ctx.strokeRect(0, 0, canvas.width, canvas.height);
-        
-        // Activity indicator in corner
-        ctx.fillStyle = activityLevel > 0.1 ? '#4caf50' : '#757575';
-        ctx.beginPath();
-        ctx.arc(canvas.width - 30, 30, 8, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    renderSimulatedCursor(ctx, dataView, frameNumber) {
-        // Simulate cursor position based on data
-        const cursorX = (dataView[frameNumber % dataView.length] * 4) % this.fallbackCanvas.width;
-        const cursorY = (dataView[(frameNumber + 1) % dataView.length] * 3) % this.fallbackCanvas.height;
-        
-        // Draw cursor
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 1;
-        
-        // Cursor arrow shape
-        ctx.beginPath();
-        ctx.moveTo(cursorX, cursorY);
-        ctx.lineTo(cursorX + 12, cursorY + 4);
-        ctx.lineTo(cursorX + 7, cursorY + 7);
-        ctx.lineTo(cursorX + 4, cursorY + 12);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-    }
-
-    renderDesktopIcons(ctx) {
-        // Add some desktop icons
-        const icons = [
-            { x: 50, y: 50, name: 'Folder' },
-            { x: 50, y: 130, name: 'File' },
-            { x: 50, y: 210, name: 'App' }
-        ];
-        
-        icons.forEach(icon => {
-            // Icon background
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(icon.x, icon.y, 32, 32);
-            ctx.strokeStyle = '#cccccc';
-            ctx.strokeRect(icon.x, icon.y, 32, 32);
-            
-            // Icon text
-            ctx.fillStyle = '#333333';
-            ctx.font = '10px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(icon.name, icon.x + 16, icon.y + 45);
-        });
-        
-        ctx.textAlign = 'left'; // Reset text alignment
-    }
-
+    // Stream overlay for debugging
     addStreamOverlay(ctx, canvas, frameNumber, dataSize) {
         // Add semi-transparent overlay with stream info (top-left)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(10, 10, 280, 120);
+        ctx.fillRect(10, 10, 280, 100);
         
         // Border for the info panel
         ctx.strokeStyle = '#4a90e2';
         ctx.lineWidth = 2;
-        ctx.strokeRect(10, 10, 280, 120);
+        ctx.strokeRect(10, 10, 280, 100);
         
         // Add stream information text
         ctx.fillStyle = '#ffffff';
@@ -2542,7 +1901,7 @@ class KVMClient {
         ctx.textAlign = 'left';
         const fps = this.frameStats?.currentFps || 0;
         
-        ctx.fillText('🖥️ Remote Desktop Simulation', 20, 30);
+        ctx.fillText('🖥️ H.264 Remote Desktop', 20, 30);
         ctx.font = '12px monospace';
         ctx.fillStyle = '#00ff88';
         ctx.fillText(`Frame: #${frameNumber}`, 20, 50);
@@ -2550,10 +1909,6 @@ class KVMClient {
         ctx.fillStyle = '#ffaa00';
         ctx.fillText(`Data: ${(dataSize / 1024).toFixed(1)} KB`, 20, 70);
         ctx.fillText(`Resolution: ${canvas.width}x${canvas.height}`, 20, 90);
-        
-        ctx.fillStyle = '#cccccc';
-        ctx.font = '10px Arial';
-        ctx.fillText('VP8 frames → Desktop simulation', 20, 110);
         
         // Add connection status indicator (top-right)
         ctx.fillStyle = '#4caf50';
@@ -2570,248 +1925,16 @@ class KVMClient {
         ctx.textAlign = 'left';
     }
 
-    processVideoQueue() {
-        // Process any queued video frames now that MediaSource is ready
-        if (!this.videoQueue || this.videoQueue.length === 0) {
-            return;
-        }
-        
-        if (!this.sourceBuffer || this.sourceBuffer.updating) {
-            return; // Can't process now, will be called again on updateend
-        }
-        
-        try {
-            const nextData = this.videoQueue.shift();
-            console.log('Processing queued video frame, remaining queue:', this.videoQueue.length);
-            this.sourceBuffer.appendBuffer(nextData);
-        } catch (e) {
-            console.error('Error processing queued video frame:', e);
-            // Clear queue on error to prevent accumulation
-            this.videoQueue = [];
-            this.showError('Video queue processing error');
-        }
-    }
-
-    isValidVP8Frame(data) {
-        if (!data || data.byteLength < 10) return false;
-        
-        const view = new Uint8Array(data);
-        
-        // Check for real screen data header (0xAA, 0xBB, 0x01/0x02)
-        return view[0] === 0xAA && view[1] === 0xBB && (view[2] === 0x01 || view[2] === 0x02);
-    }
-
-    async decodeVP8Frame(videoData) {
-        try {
-            // Decode real screen data
-            const view = new Uint8Array(videoData);
-            
-            // Parse header
-            if (view.length < 15) return;
-            
-            const isKeyframe = view[2] === 0x01;
-            const width = view[3] | (view[4] << 8) | (view[5] << 16) | (view[6] << 24);
-            const height = view[7] | (view[8] << 8) | (view[9] << 16) | (view[10] << 24);
-            const compressedSize = view[11] | (view[12] << 8) | (view[13] << 16) | (view[14] << 24);
-            
-            if (width !== this.screenWidth || height !== this.screenHeight) {
-                console.log(`Screen resolution updated: ${width}x${height}`);
-                this.screenWidth = width;
-                this.screenHeight = height;
-                this.fallbackCanvas.width = width;
-                this.fallbackCanvas.height = height;
-            }
-
-            // Extract compressed RGB data
-            const compressedData = view.slice(15, 15 + compressedSize);
-            
-            // Decompress using pako (gzip) or handle raw data
-            this.renderRealScreenData(compressedData, width, height, isKeyframe);
-            
-        } catch (error) {
-            console.warn('Failed to decode real screen frame, using fallback:', error);
-            this.renderVP8FrameContent(videoData);
-        }
-    }
-
-    async renderRealScreenData(compressedData, width, height, isKeyframe) {
-        try {
-            // For now, we'll send uncompressed RGB data to avoid browser decompression complexity
-            // In production, you could add WebAssembly zstd decoder or use a browser-compatible compression
-            
-            let rgbData = compressedData;
-            
-            // If the size suggests it's actual RGB data
-            if (compressedData.length >= width * height * 3 * 0.8) { // Allow for some compression
-                rgbData = compressedData;
-            } else if (compressedData.length === width * height * 3) {
-                rgbData = compressedData;
-            } else {
-                console.warn('Unexpected compressed data size:', compressedData.length, 'expected around:', width * height * 3);
-                // Try to render anyway - might be heavily compressed or partial data
-                rgbData = compressedData;
-            }
-            
-            // Convert RGB to RGBA and render
-            const ctx = this.fallbackCtx;
-            const imageData = ctx.createImageData(width, height);
-            const rgba = imageData.data;
-            
-            // Convert RGB to RGBA
-            const maxPixels = Math.min(rgbData.length / 3, width * height);
-            for (let i = 0; i < maxPixels; i++) {
-                const rgbIndex = i * 3;
-                const rgbaIndex = i * 4;
-                
-                if (rgbIndex + 2 < rgbData.length && rgbaIndex + 3 < rgba.length) {
-                    rgba[rgbaIndex] = rgbData[rgbIndex];         // R
-                    rgba[rgbaIndex + 1] = rgbData[rgbIndex + 1]; // G
-                    rgba[rgbaIndex + 2] = rgbData[rgbIndex + 2]; // B
-                    rgba[rgbaIndex + 3] = 255;                   // A
-                } else {
-                    // Fill remaining pixels with black if data is short
-                    rgba[rgbaIndex] = 0;     // R
-                    rgba[rgbaIndex + 1] = 0; // G
-                    rgba[rgbaIndex + 2] = 0; // B
-                    rgba[rgbaIndex + 3] = 255; // A
-                }
-            }
-            
-            // Draw the real screen content
-            ctx.putImageData(imageData, 0, 0);
-            
-            // Add overlay showing this is real screen data
-            this.addRealFrameOverlay(ctx, width, height, isKeyframe);
-            
-            console.log('✅ Rendered real screen data:', width + 'x' + height, 'from', compressedData.length, 'bytes');
-            
-        } catch (error) {
-            console.error('Error rendering real screen data:', error);
-            // Fallback to pattern-based rendering
-            this.generateScreenContentFromVP8Data(this.fallbackCtx, compressedData, width, height);
-        }
-    }
-
-    renderVP8FrameContent(videoData) {
-        // Fallback method that uses VP8 data patterns to create realistic screen content
-        const ctx = this.fallbackCtx;
-        const canvas = this.fallbackCanvas;
-        const view = new Uint8Array(videoData);
-        
-        // Clear canvas
-        ctx.fillStyle = '#2c3e50';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Use VP8 data to generate realistic screen patterns
-        this.generateScreenContentFromVP8Data(ctx, view, canvas.width, canvas.height);
-        
-        // Add frame overlay
-        this.addRealFrameOverlay(ctx, canvas.width, canvas.height);
-    }
-
-    generateScreenContentFromVP8Data(ctx, vp8Data, width, height) {
-        // Use VP8 data entropy to generate realistic desktop content
-        const blockSize = 32;
-        const entropy = this.calculateDataEntropy(vp8Data);
-        
-        // Generate desktop background based on data patterns
-        const gradient = ctx.createLinearGradient(0, 0, width, height);
-        gradient.addColorStop(0, `hsl(${(entropy * 360) % 360}, 20%, 15%)`);
-        gradient.addColorStop(1, `hsl(${((entropy * 360) + 60) % 360}, 25%, 25%)`);
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, height);
-        
-        // Generate window-like regions based on VP8 block patterns
-        for (let y = 0; y < height; y += blockSize * 2) {
-            for (let x = 0; x < width; x += blockSize * 2) {
-                const dataIndex = ((y / blockSize) * Math.floor(width / blockSize) + (x / blockSize)) % vp8Data.length;
-                const intensity = vp8Data[dataIndex] / 255;
-                
-                if (intensity > 0.3) {
-                    // Draw window-like rectangles
-                    const windowWidth = blockSize * 4 + (vp8Data[dataIndex] % 100);
-                    const windowHeight = blockSize * 3 + (vp8Data[(dataIndex + 1) % vp8Data.length] % 80);
-                    
-                    // Window background
-                    ctx.fillStyle = `rgba(${200 + vp8Data[dataIndex] % 55}, ${200 + vp8Data[(dataIndex + 1) % vp8Data.length] % 55}, ${220 + vp8Data[(dataIndex + 2) % vp8Data.length] % 35}, 0.9)`;
-                    ctx.fillRect(x, y, windowWidth, windowHeight);
-                    
-                    // Window border
-                    ctx.strokeStyle = `rgba(100, 100, 150, 0.8)`;
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(x, y, windowWidth, windowHeight);
-                    
-                    // Title bar
-                    ctx.fillStyle = `rgba(${100 + vp8Data[dataIndex] % 100}, ${120 + vp8Data[dataIndex] % 80}, ${180 + vp8Data[dataIndex] % 75}, 0.9)`;
-                    ctx.fillRect(x, y, windowWidth, 30);
-                }
-            }
-        }
-        
-        // Add taskbar at bottom
-        ctx.fillStyle = 'rgba(40, 40, 60, 0.95)';
-        ctx.fillRect(0, height - 48, width, 48);
-        
-        // Start button
-        ctx.fillStyle = 'rgba(70, 130, 220, 0.9)';
-        ctx.fillRect(8, height - 40, 60, 32);
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Start', 38, height - 22);
-    }
-
-    calculateDataEntropy(data) {
-        const frequency = {};
-        for (let i = 0; i < data.length; i++) {
-            frequency[data[i]] = (frequency[data[i]] || 0) + 1;
-        }
-        
-        let entropy = 0;
-        const length = data.length;
-        for (const byte in frequency) {
-            const p = frequency[byte] / length;
-            entropy -= p * Math.log2(p);
-        }
-        
-        return entropy / 8; // Normalize to 0-1 range
-    }
-
-    addRealFrameOverlay(ctx, width, height, isKeyframe = false) {
-        // Add minimal overlay showing this is real screen data
-        ctx.fillStyle = 'rgba(0, 150, 0, 0.8)';
-        ctx.fillRect(10, 10, 220, 90);
-        
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(10, 10, 220, 90);
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 12px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText('🖥️ Real Screen Capture', 20, 30);
-        ctx.font = '10px monospace';
-        ctx.fillStyle = '#ccffcc';
-        ctx.fillText(`Resolution: ${width}x${height}`, 20, 50);
-        ctx.fillText(`Frame: ${isKeyframe ? 'Keyframe' : 'Delta'}`, 20, 65);
-        ctx.fillText(`Live Desktop Stream`, 20, 80);
-        ctx.fillText(`FPS: ${(this.frameStats?.currentFps || 0).toFixed(1)}`, 20, 95);
-    }
-
     isValidVideoData(data) {
-        // Basic validation for VP8 data
+        // Basic validation for H.264 data
         const view = new Uint8Array(data);
         
-        // VP8 frames typically start with specific bit patterns
-        // For a VP8 key frame, the first 3 bits should be 0 (frame type)
-        // and the version should be valid
+        // Check if it looks like valid data
         if (view.length >= 10) {
-            // Check if it looks like VP8 data - very basic check
-            // VP8 keyframes start with specific patterns
-            return view.length > 0; // For now, just check if we have data
+            return view.length > 0;
         }
         
-        return view.length > 0; // Basic check - any non-empty data
+        return view.length > 0;
     }
 
     requestKeyframe() {
@@ -2823,7 +1946,7 @@ class KVMClient {
         }
         
         this.lastKeyframeRequest = now;
-        console.log('Requesting keyframe from server');
+        console.log('Requesting H.264 keyframe from server');
         
         this.sendMessage({
             type: 'request_keyframe'
@@ -2883,9 +2006,9 @@ class KVMClient {
                 return;
             }
 
-            // WebRTC frames are always VP8 encoded - set codec if not present
+            // H.264 is the only supported codec
             if (!data.codec) {
-                data.codec = 'vp8';
+                data.codec = 'h264';
             }
 
             // Skip non-keyframes if we haven't received a keyframe yet
@@ -2897,11 +2020,10 @@ class KVMClient {
 
             if (data.is_keyframe) {
                 this.needsKeyframe = false;
-                console.log('Received keyframe, enabling playback');
+                console.log('Received H.264 keyframe, enabling playback');
             }
 
-            // WebRTC frames are always VP8 encoded and use MediaSource API
-            // Always use video element with MediaSource for VP8
+            // Process the frame via standard video frame handler
             this.handleVideoFrame(data);
             
             this.updateFrameStats();
@@ -3059,17 +2181,18 @@ class KVMClient {
     }
 
     normalizeCodec(codec) {
-        // Always return VP8 since it's our only supported codec
-        return 'vp8';
+        // Always return H.264 since it's our only supported codec
+        return 'h264';
     }
 
     getCodecConfigurations(codec) {
-        // Since we only support VP8 WebRTC, return VP8 codec configurations
-        console.log(`Getting VP8 codec configurations`);
+        // H.264 codec configurations for WebCodecs
+        console.log('Getting H.264 codec configurations');
         
         return [
-            'video/webm; codecs="vp8"',       // VP8 in WebM container
-            'video/webm; codecs=vp8',         // Alternative VP8 format
+            'avc1.42E01F',  // H.264 Baseline Level 3.1
+            'avc1.4D401F',  // H.264 Main Level 3.1
+            'avc1.640028',  // H.264 High Level 4.0
         ];
     }
 
@@ -3137,7 +2260,7 @@ document.addEventListener('DOMContentLoaded', () => {
         remoteOnly: false,
         encryption: false,
         monitor: 0,
-        codec: "vp8"
+        codec: "h264"
     };
 
     // Initialize template components
@@ -3163,66 +2286,3 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize KVM client
     window.kvmClient = new KVMClient(config);
 });
-
-// WebM Container Format Helper
-class WebMConverter {
-    constructor() {
-        this.frameCount = 0;
-    }
-    
-    createWebMContainer(vp8Data, width = 1920, height = 1080, isKeyframe = false) {
-        // Create a minimal WebM container with VP8 data
-        const cluster = this.createCluster(vp8Data, this.frameCount * 40, isKeyframe); // 25fps = 40ms per frame
-        this.frameCount++;
-        return cluster;
-    }
-    
-    createCluster(frameData, timestamp, isKeyframe) {
-        // Create WebM cluster with VP8 frame
-        const frameFlags = isKeyframe ? 0x80 : 0x00;
-        
-        // Simple cluster structure for VP8
-        const cluster = new Uint8Array(frameData.length + 32);
-        let offset = 0;
-        
-        // Cluster header (simplified)
-        cluster[offset++] = 0x1F; // Cluster ID
-        cluster[offset++] = 0x43;
-        cluster[offset++] = 0xB6;
-        cluster[offset++] = 0x75;
-        
-        // Cluster size (4 bytes)
-        const clusterSize = frameData.length + 16;
-        cluster[offset++] = (clusterSize >> 24) & 0xFF;
-        cluster[offset++] = (clusterSize >> 16) & 0xFF;
-        cluster[offset++] = (clusterSize >> 8) & 0xFF;
-        cluster[offset++] = clusterSize & 0xFF;
-        
-        // Timestamp
-        cluster[offset++] = 0xE7; // Timecode ID
-        cluster[offset++] = 0x81; // Size
-        cluster[offset++] = (timestamp >> 8) & 0xFF;
-        cluster[offset++] = timestamp & 0xFF;
-        
-        // SimpleBlock
-        cluster[offset++] = 0xA3; // SimpleBlock ID
-        cluster[offset++] = 0x80 | ((frameData.length >> 14) & 0x7F);
-        cluster[offset++] = (frameData.length >> 7) & 0x7F;
-        cluster[offset++] = frameData.length & 0x7F;
-        
-        // Track number (1)
-        cluster[offset++] = 0x81;
-        
-        // Timestamp relative to cluster
-        cluster[offset++] = 0x00;
-        cluster[offset++] = 0x00;
-        
-        // Flags
-        cluster[offset++] = frameFlags;
-        
-        // Frame data
-        cluster.set(new Uint8Array(frameData), offset);
-        
-        return cluster;
-    }
-}

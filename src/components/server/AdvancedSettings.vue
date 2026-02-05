@@ -7,13 +7,11 @@
   
   <div v-if="showAdvancedSettings" class="advanced-settings" :class="{ disabled: disabled }">
     <div class="setting-group">
-      <h4>Codec Selection</h4>
-      <label>
-        <input type="radio" v-model="settings.useVP8" :value="true" 
-               :disabled="disabled"
-               checked />
-        WebRTC VP8 (Optimized for real-time streaming)
-      </label>
+      <h4>Video Codec</h4>
+      <div class="codec-info">
+        <span class="codec-badge">H.264</span>
+        <span class="codec-description">Hardware-accelerated encoding (NVENC/QuickSync/AMF/VideoToolbox)</span>
+      </div>
     </div>
     
     <div class="setting-group">
@@ -147,5 +145,29 @@ h4 {
 input:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.codec-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  background-color: #e8f4fd;
+  border-radius: 4px;
+  border-left: 3px solid #3498db;
+}
+
+.codec-badge {
+  background-color: #3498db;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 0.85rem;
+}
+
+.codec-description {
+  color: #555;
+  font-size: 0.85rem;
 }
 </style>

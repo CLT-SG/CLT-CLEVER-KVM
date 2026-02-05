@@ -12,7 +12,7 @@ pub struct ServerOptions {
     pub adaptive_quality: Option<bool>,
     pub encryption: Option<bool>,
     pub webrtc: Option<bool>,
-    pub vp8: Option<bool>,
+    pub hardware_accel: Option<bool>,
     pub monitor: Option<usize>,
 }
 

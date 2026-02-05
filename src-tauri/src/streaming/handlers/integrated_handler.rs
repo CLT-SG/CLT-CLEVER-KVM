@@ -69,7 +69,7 @@ impl IntegratedStreamConfig {
                 quality: 15,   // High quality
                 keyframe_interval: 60,
                 monitor_id,
-                use_webm_container: true,
+                use_h264_container: true,
                 enable_audio: true,
                 opus_bitrate: 256000, // 256 kbps for audio
                 temporal_layers: 1,
@@ -95,7 +95,7 @@ impl IntegratedStreamConfig {
                 quality: 25,   // Balanced quality
                 keyframe_interval: 72, // 3 seconds at 24fps
                 monitor_id,
-                use_webm_container: true,
+                use_h264_container: true,
                 enable_audio: true,
                 opus_bitrate: 128000, // 128 kbps for audio
                 temporal_layers: 1,
@@ -121,7 +121,7 @@ impl IntegratedStreamConfig {
                 quality: 35,   // Lower quality for speed
                 keyframe_interval: 60, // 1 second at 60fps
                 monitor_id,
-                use_webm_container: false, // Skip WebM for lower latency
+                use_h264_container: true, // H.264 for low latency
                 enable_audio: true,
                 opus_bitrate: 96000, // 96 kbps for audio
                 temporal_layers: 1,
@@ -136,54 +136,52 @@ impl IntegratedStreamConfig {
         }
     }
 
-    /// Configuration for WebM streaming with audio
-    pub fn webm_with_audio(monitor_id: usize) -> Self {
+    /// Configuration for H.264 streaming with audio
+    pub fn h264_with_audio(monitor_id: usize) -> Self {
         Self {
             video: YUV420Config {
                 width: 1920,
                 height: 1080,
                 framerate: 30,
-                bitrate: 6000, // 6 Mbps for high quality WebM video
-                quality: 12,   // Very high quality for WebM
+                bitrate: 6000, // 6 Mbps for high quality H.264 video
+                quality: 12,   // Very high quality
                 keyframe_interval: 90, // 3 seconds at 30fps
                 monitor_id,
-                use_webm_container: true, // Enable WebM container
+                use_h264_container: true,
                 enable_audio: true,
                 opus_bitrate: 320000, // 320 kbps for high-quality audio
-                temporal_layers: 2, // Use temporal layering for WebM
+                temporal_layers: 2,
                 spatial_layers: 1,
             },
-            // audio: EnhancedAudioConfig::for_webm(),
             enable_audio: false, // Temporarily disabled
             monitor_id,
             adaptive_quality: true,
-            max_bandwidth_kbps: 7000, // Higher bandwidth for WebM quality
+            max_bandwidth_kbps: 7000,
             video_bitrate: 6000,
         }
     }
 
-    /// Configuration for WebM video-only streaming
-    pub fn webm_video_only(monitor_id: usize) -> Self {
+    /// Configuration for H.264 video-only streaming
+    pub fn h264_video_only(monitor_id: usize) -> Self {
         Self {
             video: YUV420Config {
                 width: 1920,
                 height: 1080,
                 framerate: 60,
-                bitrate: 8000, // 8 Mbps for very high quality WebM video
-                quality: 10,   // Excellent quality for WebM
+                bitrate: 8000, // 8 Mbps for very high quality H.264 video
+                quality: 10,   // Excellent quality
                 keyframe_interval: 120, // 2 seconds at 60fps
                 monitor_id,
-                use_webm_container: true, // Enable WebM container
+                use_h264_container: true,
                 enable_audio: false,
                 opus_bitrate: 0, // No audio
                 temporal_layers: 3, // More temporal layers for smooth playback
                 spatial_layers: 1,
             },
-            // audio: EnhancedAudioConfig::default(),
             enable_audio: false,
             monitor_id,
             adaptive_quality: true,
-            max_bandwidth_kbps: 9000, // High bandwidth for video-only WebM
+            max_bandwidth_kbps: 9000,
             video_bitrate: 8000,
         }
     }
@@ -201,7 +199,7 @@ pub enum StreamPacket {
         frame_number: u64,
         is_keyframe: bool,
         timestamp: u64,
-        format: String, // "yuv420_vp8" or "yuv420_webm"
+        format: String, // "h264"
     },
     
     #[serde(rename = "audio_frame")]
@@ -617,8 +615,8 @@ impl IntegratedStreamHandler {
             height: self.config.video.height,
             framerate: self.config.video.framerate,
             bitrate: self.config.video.bitrate,
-            codec: "VP8".to_string(),
-            format: if self.config.video.use_webm_container { "webm" } else { "raw_vp8" }.to_string(),
+            codec: "H264".to_string(),
+            format: "h264".to_string(),
         };
         
         let audio_config = if self.config.enable_audio {
@@ -639,8 +637,8 @@ impl IntegratedStreamHandler {
             monitor_count: ScreenCapture::get_all_monitors().map(|m| m.len()).unwrap_or(1),
             current_monitor: self.config.monitor_id,
             capabilities: vec![
-                "yuv420_vp8".to_string(),
-                "webm_container".to_string(),
+                "h264".to_string(),
+                "hardware_acceleration".to_string(),
                 if self.config.enable_audio { "opus_audio" } else { "no_audio" }.to_string(),
                 "adaptive_quality".to_string(),
                 "native_gdi_capture".to_string(),
@@ -782,7 +780,7 @@ impl IntegratedStreamHandler {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_micros() as u64,
-            format: if self.config.video.use_webm_container { "yuv420_webm" } else { "yuv420_vp8" }.to_string(),
+            format: "h264".to_string(),
         };
         
         let json = serde_json::to_string(&packet)

@@ -40,7 +40,7 @@ pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -
     let remote_only = params.get("remoteOnly").map(|v| v == "true").unwrap_or(false);
     let encryption = params.get("encryption").map(|v| v == "true").unwrap_or(false);
     let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
-    let codec = params.get("codec").unwrap_or(&"vp8".to_string()).clone();
+    let codec = params.get("codec").unwrap_or(&"h264".to_string()).clone();
     
     log::debug!("KVM client configuration - stretch: {}, mute: {}, audio: {}, monitor: {}, codec: {}", 
                stretch, mute, audio, monitor, codec);    // Prepare template replacements
@@ -133,8 +133,8 @@ pub async fn static_file_handler(
 pub async fn ws_handler(ws: WebSocketUpgrade, Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     // Extract monitor parameter
     let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
-    // Parse codec parameter and default to vp8 if not specified
-    let codec = params.get("codec").unwrap_or(&"vp8".to_string()).clone();
+    // Parse codec parameter and default to h264 if not specified
+    let codec = params.get("codec").unwrap_or(&"h264".to_string()).clone();
     let audio = params.get("audio").map(|v| v == "true").unwrap_or(false);
     
     log::debug!("WebSocket connection - monitor: {}, codec: {}, audio: {}", monitor, codec, audio);
@@ -150,8 +150,8 @@ pub async fn ws_handler_with_stop(
 ) -> impl IntoResponse {
     // Extract monitor parameter
     let monitor = params.get("monitor").map(|v| v.parse::<usize>().unwrap_or(0)).unwrap_or(0);
-    // Parse codec parameter and default to vp8 if not specified
-    let codec = params.get("codec").unwrap_or(&"vp8".to_string()).clone();
+    // Parse codec parameter and default to h264 if not specified
+    let codec = params.get("codec").unwrap_or(&"h264".to_string()).clone();
     let audio = params.get("audio").map(|v| v == "true").unwrap_or(false);
     
     log::info!("WebSocket connection request - monitor: {}, codec: {}, audio: {}", monitor, codec, audio);

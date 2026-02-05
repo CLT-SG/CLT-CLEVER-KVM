@@ -26,8 +26,7 @@ export function useServer() {
     adaptiveQuality: true,
     encryptionEnabled: false,
     useWebRTC: true,
-    useVP8: true,
-    hardwareAcceleration: false,
+    hardwareAcceleration: true,
     selectedMonitor: 0,
     audioBitrate: 128,
     videoBitrate: 4000,
@@ -35,7 +34,7 @@ export function useServer() {
   });
 
   const selectedCodec = computed(() => {
-    return 'vp8'; // Only WebRTC VP8 is supported
+    return 'h264'; // H.264 is the only supported codec
   });
 
   async function loadMonitors() {
@@ -117,7 +116,7 @@ export function useServer() {
           adaptiveQuality: settings.adaptiveQuality,
           encryption: settings.encryptionEnabled,
           webrtc: settings.useWebRTC,
-          vp8: true, // Always use VP8 via WebRTC
+          hardware_accel: settings.hardwareAcceleration, // H.264 hardware acceleration
           hardwareAcceleration: settings.hardwareAcceleration,
           monitor: settings.selectedMonitor,
           audioBitrate: settings.audioBitrate * 1000,

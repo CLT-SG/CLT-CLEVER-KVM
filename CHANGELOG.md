@@ -19,6 +19,26 @@ All notable changes to this project will be documented in this file.
 - Updated kvm-client.js with H.264 frame handling support
 - Updated README.md with H.264 streaming features
 - Removed legacy VP8/WebM codec references in favor of H.264-only streaming
+- Changed CodecType enum from VP8 to H264 in realtime_codec.rs
+- Renamed YUV420 encoder error variants and config fields from WebM to H.264 naming
+- Updated all streaming handler config presets to use H.264 container
+- Renamed webm_with_audio() and webm_video_only() to h264_with_audio() and h264_video_only()
+- Updated VideoStreamInfo codec/format to H264/h264 in integrated_handler.rs
+- Renamed WebMConfig to H264Config in websocket.rs
+- Changed default codec from vp8 to h264 in HTTP handlers
+- Renamed vp8 server option to hardware_accel in state.rs
+- Updated useServer.js to use hardware acceleration instead of VP8 flag
+- Removed useVP8 flag from all presets in presets.js
+- Replaced VP8 codec selection with H.264 info badge in AdvancedSettings.vue
+- Updated build scripts to reference H.264 instead of VP8/WebM
+- Updated Cargo.toml keywords from vp8 to h264
+- Updated tauri.conf.json description to reference H.264
+
+### Removed
+- Deleted enhanced_video_vp8.rs (obsolete VP8 encoder)
+- Deleted enhanced_video.rs (obsolete WebM-based encoder)
+- Removed VP8/WebM decoder code from kvm-client.js
+- Removed webm and matroska dependencies from Cargo.toml (commented out)
 
 ## [4.1.0] - 2026-02-04
 

@@ -35,17 +35,17 @@ src-tauri/src/
 │   ├── mod.rs                     # Streaming module exports (organized)
 │   ├── codecs/                    # Encoding/decoding implementations
 │   │   ├── mod.rs                 # Codecs module exports
+│   │   ├── h264_encoder.rs        # H.264 hardware-accelerated encoder
 │   │   ├── realtime_codec.rs      # Real-time codec implementation
 │   │   └── yuv420_encoder.rs      # YUV420 video encoder
 │   ├── enhanced/                  # High-performance implementations
 │   │   ├── mod.rs                 # Enhanced module exports
 │   │   ├── enhanced_audio.rs      # Enhanced audio processing
-│   │   ├── enhanced_video.rs      # Enhanced video processing (disabled)
-│   │   ├── enhanced_video_vp8.rs  # VP8 video processing (disabled)
 │   │   └── ultra_low_latency.rs   # Ultra-low latency encoder
 │   └── handlers/                  # Stream management handlers
 │       ├── mod.rs                 # Handlers module exports
-│       ├── integrated_handler.rs  # Integrated streaming handler
+│       ├── integrated_handler.rs  # Integrated H.264 streaming handler
+│       ├── low_latency_pipeline.rs # Low-latency H.264 pipeline
 │       ├── realtime_stream.rs     # Real-time stream handler
 │       └── ultra_stream.rs        # Ultra-performance stream handler
 └── system/                       # System optimization functionality

@@ -31,9 +31,9 @@ pub enum ControlMessage {
     #[serde(rename = "bitrate_setting")]
     BitrateSetting { bitrate: u32 },
     
-    #[serde(rename = "webm_config")]
-    WebMConfig { 
-        enable_vp8: bool,
+    #[serde(rename = "h264_config")]
+    H264Config { 
+        enable_hw_accel: bool,
         enable_opus: bool,
         target_bitrate: Option<u32>
     },
@@ -46,17 +46,17 @@ pub enum ControlMessage {
     },
 }
 
-// Helper function to make the future Send - now uses integrated YUV420 + WebM streaming
+// Helper function to make the future Send - uses H.264 streaming
 pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
-    info!("🎬 New YUV420 + WebM streaming WebSocket connection - Monitor: {}, Codec: {}, Audio: {}", 
+    info!("🎬 New H.264 streaming WebSocket connection - Monitor: {}, Codec: {}, Audio: {}", 
           monitor, codec, enable_audio);
     
-    handle_integrated_webm_socket(socket, monitor, enable_audio, None).await;
+    handle_h264_socket(socket, monitor, enable_audio, None).await;
     
-    info!("✅ YUV420 + WebM streaming WebSocket connection closed - Monitor: {}", monitor);
+    info!("✅ H.264 streaming WebSocket connection closed - Monitor: {}", monitor);
 }
 
-// New helper function with stop signal - uses integrated WebM streaming
+// Helper function with stop signal - uses H.264 streaming
 pub async fn handle_socket_wrapper_with_stop(
     socket: WebSocket, 
     monitor: usize, 
@@ -64,12 +64,12 @@ pub async fn handle_socket_wrapper_with_stop(
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
-    info!("🎬 New YUV420 + WebM streaming WebSocket connection with stop signal - Monitor: {}, Codec: {}, Audio: {}", 
+    info!("🎬 New H.264 streaming WebSocket connection with stop signal - Monitor: {}, Codec: {}, Audio: {}", 
           monitor, codec, enable_audio);
     
-    handle_integrated_webm_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
+    handle_h264_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
     
-    info!("✅ YUV420 + WebM streaming WebSocket connection with stop signal closed - Monitor: {}", monitor);
+    info!("✅ H.264 streaming WebSocket connection with stop signal closed - Monitor: {}", monitor);
 }
 
 pub async fn handle_socket_with_stop(
@@ -82,20 +82,20 @@ pub async fn handle_socket_with_stop(
     info!("🎬 New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Always use integrated WebM streaming for connections with stop signal
-    handle_integrated_webm_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
+    // Use H.264 streaming for connections with stop signal
+    handle_h264_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
 }
 
 pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
     info!("🎬 New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Always use integrated WebM streaming for direct connections
-    handle_integrated_webm_socket(socket, monitor, enable_audio, None).await;
+    // Use H.264 streaming for direct connections
+    handle_h264_socket(socket, monitor, enable_audio, None).await;
 }
 
-// New integrated YUV420 + WebM streaming socket handler
-async fn handle_integrated_webm_socket(
+// H.264 streaming socket handler
+async fn handle_h264_socket(
     socket: WebSocket, 
     monitor: usize, 
     enable_audio: bool,
@@ -177,35 +177,35 @@ pub async fn handle_socket_ultra(
 }
 
 async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("⚡ Starting ultra-performance YUV420 + WebM streaming for monitor {}", monitor);
+    info!("⚡ Starting ultra-performance H.264 streaming for monitor {}", monitor);
     
-    // Try ultra-performance WebM streaming first
+    // Try ultra-performance H.264 streaming first
     match crate::streaming::UltraStreamHandler::new(monitor) {
         Ok(ultra_handler) => {
-            info!("🚀 Using ULTRA-PERFORMANCE YUV420 + WebM streaming mode");
+            info!("🚀 Using ULTRA-PERFORMANCE H.264 streaming mode");
             ultra_handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;
         },
         Err(e) => {
-            warn!("⚠️  Ultra-performance WebM mode failed: {} - falling back to enhanced mode", e);
+            warn!("⚠️  Ultra-performance H.264 mode failed: {} - falling back to enhanced mode", e);
             
-            // Fallback to enhanced real-time streaming with WebM support
+            // Fallback to enhanced real-time streaming
             let enhanced_config = crate::streaming::RealtimeConfig {
                 monitor_id: monitor,
                 width: 1920,
                 height: 1080,  
-                bitrate: 10000, // Very high bitrate for excellent WebM quality
+                bitrate: 10000, // Very high bitrate for excellent quality
                 framerate: 60,  // Smooth framerate
-                keyframe_interval: 60, // Frequent keyframes for WebM stability
-                target_latency_ms: 120, // Optimized latency for WebM
+                keyframe_interval: 60, // Frequent keyframes for stability
+                target_latency_ms: 120, // Optimized latency
             };
             
             match crate::streaming::RealtimeStreamHandler::new(enhanced_config) {
                 Ok(fallback_handler) => {
-                    info!("🔄 Using ENHANCED WebM real-time streaming mode");
+                    info!("🔄 Using ENHANCED H.264 real-time streaming mode");
                     fallback_handler.handle_connection(socket, Some(tokio::sync::broadcast::channel(1).1)).await;
                 },
                 Err(e) => {
-                    error!("❌ Both ultra and enhanced WebM streaming failed: {}", e);
+                    error!("❌ Both ultra and enhanced H.264 streaming failed: {}", e);
                     return Err(e.into());
                 }
             }

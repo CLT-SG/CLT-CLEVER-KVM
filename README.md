@@ -1,6 +1,6 @@
 # Clever KVM
 
-A high-performance remote desktop system built with Tauri, featuring native H.264/WebM video encoding with hardware acceleration and ultra-low latency streaming.
+A high-performance remote desktop system built with Tauri, featuring native H.264 video encoding with hardware acceleration and ultra-low latency streaming.
 
 ## Quick Start
 
@@ -34,7 +34,6 @@ npm run tauri dev
 
 🎥 **Advanced Video Streaming**
 - **H.264 Encoding** with hardware acceleration (NVENC, QuickSync, AMF, VAAPI, VideoToolbox)
-- Native WebM + VP8 encoding as fallback option
 - YUV420 color space optimization (50% better compression than RGB)
 - Ultra-low latency mode (<20ms end-to-end on LAN)
 - WebCodecs-based browser decoding with hardware acceleration
@@ -49,7 +48,7 @@ npm run tauri dev
 - **Monitor Detection**: Automatic display enumeration with fallback for headless systems
 
 🎵 **Professional Audio**
-- Native Opus codec with WebM container
+- Native Opus codec for high-quality audio streaming
 - Multiple quality modes: High (320kbps), Balanced (256kbps), Low Latency (96kbps)
 - Perfect audio/video synchronization
 
@@ -190,10 +189,10 @@ http://hostname:9921/kvm?quality=balanced&bitrate=1500
   - Hardware acceleration and SIMD optimizations via `rayon`
   - Real-time bitrate adaptation (1-10 Mbps) based on network conditions
 - **Audio Encoding**:
-  - Native Opus codec using `opus` crate with WebM container
+  - Native Opus codec using `opus` crate for high-quality streaming
   - CD-quality audio (320 kbps) with Forward Error Correction (FEC)
   - Multiple quality profiles: High (320k), Balanced (256k), Low Latency (96k)
-  - WebRTC peer connection fallback for browser compatibility
+  - WebRTC peer connection for browser compatibility
 - **Streaming Handlers**:
   - **Low-Latency H.264 Pipeline**: Sub-20ms streaming with fMP4 container format
   - **Realtime Handler**: Standard WebSocket streaming with graceful degradation

@@ -46,9 +46,8 @@ class TemplateInitializer {
         // Initialize codec dropdown with correct value
         const codecDropdown = document.getElementById('codec-dropdown');
         if (codecDropdown && config.codec) {
-            // Map codec values to dropdown options
-            const codecValue = config.codec === 'vp8' ? 'vp8' : 'vp8'; // Only VP8 is supported now
-            codecDropdown.value = codecValue;
+            // H.264 is the only supported codec
+            codecDropdown.value = 'h264';
         }
     }
     
