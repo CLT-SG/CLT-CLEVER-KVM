@@ -15,22 +15,27 @@ class KVMClient {
         this.qualityLevel = 85;
         this.availableMonitors = [];
         this.currentMonitor = config.monitor;
-        this.currentCodec = "yuv420_webm"; // Use YUV420 with WebM container for best quality
+        this.currentCodec = "h264"; // Use H.264 for low latency
         this.mediaSource = null;
         this.sourceBuffer = null;
         this.videoQueue = [];
         this.showStats = false;
         
-        // YUV420 decoder for enhanced video quality
+        // H.264 decoder for low-latency streaming
+        this.h264Decoder = null;
+        this.h264SPS = null;
+        this.h264PPS = null;
+        
+        // YUV420 decoder for enhanced video quality (fallback)
         this.yuv420Decoder = null;
         this.decoderCanvas = null;
         this.decoderCtx = null;
         
-        // WebM container support
+        // WebM container support (legacy)
         this.webmSupported = false;
         this.webmContainer = null;
         
-        // VP8 decoder for real screen content with YUV420 support
+        // VP8 decoder for real screen content with YUV420 support (legacy)
         this.vp8Decoder = null;
         this.yuv420Canvas = null;
         this.yuv420Ctx = null;
@@ -67,10 +72,54 @@ class KVMClient {
         this.audioStream = null;
 
         this.initializeElements();
+        this.initializeH264Decoder();
         this.initializeVP8Decoder();
         this.initializeFrameTracking();
         this.setupEventListeners();
         this.connect();
+    }
+    
+    // Initialize H.264 decoder
+    initializeH264Decoder() {
+        console.log('🎬 Initializing H.264 decoder...');
+        
+        // Check if H264Decoder class is available
+        if (typeof H264Decoder !== 'undefined') {
+            this.h264Decoder = new H264Decoder({
+                width: this.screenWidth,
+                height: this.screenHeight,
+                onFrame: (frame, metadata) => this.handleH264Frame(frame, metadata),
+                onError: (error) => console.error('H.264 decode error:', error),
+                onReady: () => {
+                    console.log('✅ H.264 decoder ready');
+                    this.supportsHardwareDecoding = this.h264Decoder?.useWebCodecs || false;
+                }
+            });
+        } else {
+            console.warn('⚠️ H264Decoder not loaded, will use fallback');
+        }
+    }
+    
+    // Handle decoded H.264 frame
+    handleH264Frame(frame, metadata) {
+        if (!this.realCanvas || !this.realCtx) {
+            this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
+        }
+        
+        if (frame instanceof VideoFrame) {
+            // WebCodecs VideoFrame - render directly
+            this.realCtx.drawImage(frame, 0, 0);
+            frame.close(); // Important: close to free resources
+        } else if (frame instanceof ImageBitmap) {
+            // Software-decoded ImageBitmap
+            this.realCtx.drawImage(frame, 0, 0);
+            frame.close();
+        } else if (frame instanceof ImageData) {
+            // Raw ImageData
+            this.realCtx.putImageData(frame, 0, 0);
+        }
+        
+        this.updateFrameStats();
     }
 
     // Initialize frame tracking variables
@@ -1320,8 +1369,18 @@ class KVMClient {
         this.lastFrameTime = Date.now();
 
         try {
-            // Check if this is a WebM container frame
-            if (this.isWebMFrame(binaryData)) {
+            // Check frame type by header
+            const view = new DataView(binaryData);
+            const header = String.fromCharCode(
+                view.getUint8(0), view.getUint8(1), 
+                view.getUint8(2), view.getUint8(3)
+            );
+            
+            if (header === 'H264') {
+                // H.264 frame from low-latency pipeline
+                this.handleH264VideoFrame(binaryData);
+            } else if (this.isWebMFrame(binaryData)) {
+                // WebM container frame (legacy)
                 this.handleWebMFrame(binaryData);
             } else {
                 // Fall back to custom frame parsing (RGBA frames)
@@ -1336,6 +1395,129 @@ class KVMClient {
                 console.error('Frame processing error:', e.message);
             }
         }
+    }
+    
+    /**
+     * Handle H.264 video frame from low-latency pipeline
+     * Frame format:
+     * [4 bytes] Magic: "H264"
+     * [4 bytes] Width (little-endian)
+     * [4 bytes] Height (little-endian)
+     * [8 bytes] Timestamp (little-endian, microseconds)
+     * [4 bytes] Frame size (little-endian)
+     * [1 byte]  Flags (bit 0: keyframe)
+     * [N bytes] H.264 NAL units
+     */
+    handleH264VideoFrame(binaryData) {
+        const view = new DataView(binaryData);
+        let offset = 4; // Skip "H264" header
+        
+        // Parse frame header
+        const width = view.getUint32(offset, true); offset += 4;
+        const height = view.getUint32(offset, true); offset += 4;
+        const timestamp = Number(view.getBigUint64(offset, true)); offset += 8;
+        const frameSize = view.getUint32(offset, true); offset += 4;
+        const flags = view.getUint8(offset); offset += 1;
+        const isKeyframe = (flags & 0x01) !== 0;
+        
+        // Update dimensions if changed
+        if (this.screenWidth !== width || this.screenHeight !== height) {
+            console.log(`📐 H.264 dimensions: ${width}x${height}`);
+            this.screenWidth = width;
+            this.screenHeight = height;
+            
+            if (this.h264Decoder) {
+                this.h264Decoder.setDimensions(width, height);
+            }
+            
+            this.initializeOptimizedCanvas(width, height);
+        }
+        
+        // Extract H.264 data
+        const h264Data = new Uint8Array(binaryData, offset, frameSize);
+        
+        // Log keyframes
+        if (isKeyframe && this.frameLogCounter < 20) {
+            console.log(`🔑 H.264 keyframe: ${width}x${height}, size=${frameSize}`);
+        }
+        
+        // Decode with H.264 decoder if available
+        if (this.h264Decoder && this.h264Decoder.isReady) {
+            this.h264Decoder.decode(h264Data, {
+                isKeyframe,
+                timestamp,
+                width,
+                height
+            });
+        } else {
+            // Fallback: try to render simplified H.264 data directly
+            this.renderH264Fallback(h264Data, width, height, isKeyframe);
+        }
+    }
+    
+    /**
+     * Fallback H.264 rendering when WebCodecs is not available
+     */
+    renderH264Fallback(h264Data, width, height, isKeyframe) {
+        // Initialize canvas if needed
+        if (!this.realCanvas || !this.realCtx) {
+            this.initializeOptimizedCanvas(width, height);
+        }
+        
+        // For simplified H.264 (I-PCM mode), extract Y data and render as grayscale
+        const mbWidth = Math.ceil(width / 16);
+        const mbHeight = Math.ceil(height / 16);
+        
+        // Skip NAL headers to find macroblock data
+        let offset = 0;
+        
+        // Look for slice NAL unit
+        while (offset < h264Data.length - 4) {
+            if (h264Data[offset] === 0 && h264Data[offset + 1] === 0 && 
+                h264Data[offset + 2] === 0 && h264Data[offset + 3] === 1) {
+                const nalType = h264Data[offset + 4] & 0x1F;
+                if (nalType === 5 || nalType === 1) { // IDR or Slice
+                    offset += 9; // Skip NAL header and slice header
+                    break;
+                }
+            }
+            offset++;
+        }
+        
+        // Check if we have enough data
+        if (offset + mbWidth * mbHeight > h264Data.length) {
+            return; // Not enough data for rendering
+        }
+        
+        // Create image data from macroblock averages
+        const imageData = this.realCtx.createImageData(width, height);
+        const pixels = imageData.data;
+        
+        for (let mbY = 0; mbY < mbHeight; mbY++) {
+            for (let mbX = 0; mbX < mbWidth; mbX++) {
+                const mbIndex = mbY * mbWidth + mbX;
+                const yValue = h264Data[offset + mbIndex] || 128;
+                
+                // Fill 16x16 block with this value
+                for (let dy = 0; dy < 16; dy++) {
+                    const y = mbY * 16 + dy;
+                    if (y >= height) continue;
+                    
+                    for (let dx = 0; dx < 16; dx++) {
+                        const x = mbX * 16 + dx;
+                        if (x >= width) continue;
+                        
+                        const pixelIndex = (y * width + x) * 4;
+                        pixels[pixelIndex] = yValue;     // R
+                        pixels[pixelIndex + 1] = yValue; // G
+                        pixels[pixelIndex + 2] = yValue; // B
+                        pixels[pixelIndex + 3] = 255;    // A
+                    }
+                }
+            }
+        }
+        
+        this.realCtx.putImageData(imageData, 0, 0);
     }
 
     isWebMFrame(binaryData) {

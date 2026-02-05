@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2.0] - 2026-02-05
+
+### Added
+- H.264 hardware-accelerated video encoding with auto-detection for NVENC (NVIDIA), QuickSync (Intel), AMF (AMD), VAAPI (Linux), and VideoToolbox (macOS)
+- Low-latency streaming pipeline with target latency under 20ms on LAN
+- WebCodecs-based H.264 decoder for browser-side hardware acceleration
+- fMP4 container format for efficient H.264 frame transport
+- New h264_encoder.rs module with cross-platform hardware encoder support
+- New low_latency_pipeline.rs module for optimized streaming
+- New h264-decoder.js for browser WebCodecs integration
+- Comprehensive H.264 streaming documentation (docs/H264_STREAMING_IMPLEMENTATION.md)
+
+### Changed
+- Updated WebSocket handler to use new H.264 low-latency pipeline
+- Updated kvm-client.js with H.264 frame handling support
+- Updated README.md with H.264 streaming features
+- Removed legacy VP8/WebM codec references in favor of H.264-only streaming
+
 ## [4.1.0] - 2026-02-04
 
 ### Fixed

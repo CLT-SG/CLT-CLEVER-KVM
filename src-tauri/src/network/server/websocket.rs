@@ -4,8 +4,8 @@ use crate::streaming::{
     IntegratedStreamConfig,
     RealtimeStreamHandler,
     UltraStreamHandler,
-    // EnhancedVideoEncoder,
-    // EnhancedAudioEncoder
+    LowLatencyPipeline,
+    PipelineConfig,
 };
 use axum::extract::ws::WebSocket;
 use tokio::{sync::broadcast};
@@ -101,39 +101,58 @@ async fn handle_integrated_webm_socket(
     enable_audio: bool,
     stop_rx: Option<broadcast::Receiver<()>>
 ) {
-    info!("🚀 WebM streaming requested for monitor {} - falling back to RGBA streaming for now", monitor);
+    info!("🚀 Initializing low-latency H.264 streaming for monitor {}", monitor);
     
-    // TODO: Implement proper WebM/VP8 encoding
-    // For now, fall back to working RGBA streaming
-    info!("🔄 Using RGBA streaming until WebM/VP8 encoding is implemented");
+    // Use the new low-latency H.264 pipeline as primary
+    let pipeline_config = PipelineConfig {
+        monitor_id: monitor,
+        framerate: 30,
+        bitrate_kbps: 4000,
+        keyframe_interval_sec: 2,
+        enable_audio,
+        enable_hw_accel: true,
+        target_latency_ms: 20,
+        ..PipelineConfig::default()
+    };
     
-    match UltraStreamHandler::new(monitor) {
-        Ok(handler) => {
-            info!("✅ RGBA streaming handler initialized successfully");
-            handler.handle_connection(socket, stop_rx).await;
+    match LowLatencyPipeline::new(pipeline_config) {
+        Ok(pipeline) => {
+            info!("✅ Low-latency H.264 pipeline initialized successfully");
+            pipeline.handle_connection(socket, stop_rx).await;
         }
         Err(e) => {
-            error!("❌ Failed to create RGBA streaming handler: {}", e);
+            warn!("⚠️ Low-latency pipeline failed: {} - falling back to RGBA streaming", e);
             
-            // Final fallback to standard real-time streaming with enhanced quality
-            info!("🔄 Final fallback to enhanced real-time streaming...");
-            let enhanced_config = RealtimeConfig {
-                monitor_id: monitor,
-                width: 1920,
-                height: 1080,  
-                bitrate: 8000, // High bitrate for quality
-                framerate: 30,  // Stable framerate
-                keyframe_interval: 30, // Frequent keyframes
-                target_latency_ms: 150, // Balanced latency
-            };
-            
-            match RealtimeStreamHandler::new(enhanced_config) {
+            // Fallback to RGBA streaming
+            match UltraStreamHandler::new(monitor) {
                 Ok(handler) => {
-                    info!("✅ Enhanced real-time fallback handler initialized");
+                    info!("✅ RGBA fallback streaming handler initialized");
                     handler.handle_connection(socket, stop_rx).await;
                 }
                 Err(e) => {
-                    error!("❌ All streaming handlers failed to initialize: {}", e);
+                    error!("❌ Failed to create fallback streaming handler: {}", e);
+                    
+                    // Final fallback to standard real-time streaming
+                    info!("🔄 Final fallback to real-time streaming...");
+                    let enhanced_config = RealtimeConfig {
+                        monitor_id: monitor,
+                        width: 1920,
+                        height: 1080,  
+                        bitrate: 8000,
+                        framerate: 30,
+                        keyframe_interval: 30,
+                        target_latency_ms: 150,
+                    };
+                    
+                    match RealtimeStreamHandler::new(enhanced_config) {
+                        Ok(handler) => {
+                            info!("✅ Real-time fallback handler initialized");
+                            handler.handle_connection(socket, stop_rx).await;
+                        }
+                        Err(e) => {
+                            error!("❌ All streaming handlers failed to initialize: {}", e);
+                        }
+                    }
                 }
             }
         }

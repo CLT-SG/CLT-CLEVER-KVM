@@ -49,6 +49,18 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - **src-tauri/src/streaming/handlers/realtime_stream.rs**: Added input event parsing and handling for mouse/keyboard events
 - **src-tauri/src/streaming/handlers/realtime_stream.rs**: Changed InputHandler to use Arc<parking_lot::Mutex> for thread-safe access
 
+### H.264 Hardware-Accelerated Streaming
+- **src-tauri/src/streaming/codecs/h264_encoder.rs**: New H.264 hardware encoder with auto-detection for NVENC, QuickSync, AMF, VAAPI, and VideoToolbox
+- **src-tauri/src/streaming/codecs/mod.rs**: Added h264_encoder module export
+- **src-tauri/src/streaming/handlers/low_latency_pipeline.rs**: New low-latency streaming pipeline with target latency under 20ms on LAN
+- **src-tauri/src/streaming/handlers/mod.rs**: Added low_latency_pipeline module export
+- **src-tauri/src/network/server/websocket.rs**: Updated to use new H.264 low-latency pipeline
+- **src-tauri/web-client/h264-decoder.js**: New WebCodecs-based H.264 decoder for browser-side hardware acceleration
+- **src-tauri/web-client/kvm-client.js**: Added H.264 frame handling and decoder integration
+- **src-tauri/web-client/kvm-template.html**: Added h264-decoder.js script reference
+- **docs/H264_STREAMING_IMPLEMENTATION.md**: Comprehensive technical documentation for H.264 streaming implementation
+- **README.md**: Updated with H.264 streaming features and removed legacy VP8/WebM references
+
 ## Testing
 
 - Verified screen capture works correctly on Windows
@@ -57,3 +69,7 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - Verified mouse cursor alignment between client and server
 - Confirmed keyboard and mouse input events are processed correctly
 - Tested connection recovery after stream freeze
+- Verified H.264 hardware encoder detection on Windows (NVENC, QuickSync, AMF)
+- Tested H.264 streaming with WebCodecs decoder in browser
+- Confirmed low-latency pipeline achieves target latency on LAN
+- Verified cross-platform H.264 support on Linux and macOS

@@ -5,6 +5,8 @@
 
 pub mod realtime_codec;
 pub mod yuv420_encoder;
+pub mod h264_encoder;
 
 pub use realtime_codec::*;
 pub use yuv420_encoder::*;
+pub use h264_encoder::*;
