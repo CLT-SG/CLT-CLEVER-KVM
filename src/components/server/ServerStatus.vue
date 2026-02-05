@@ -6,12 +6,18 @@
     </div>
     
     <div v-if="serverStatus" class="server-info">
-      <p>Server URL:</p>
+      <div class="info-header">
+        <span class="info-label">Direct Access URL</span>
+        <span class="info-badge">Local Network</span>
+      </div>
       <div class="url-display">
         <span class="url">{{ displayUrl }}</span>
-        <button class="icon-button" @click="openUrl" title="Open in browser">🌐</button>
-        <button class="icon-button" @click="copyUrl" title="Copy URL">📋</button>
+        <button class="icon-button" @click="openUrl" title="Open in browser">Open</button>
+        <button class="icon-button" @click="copyUrl" title="Copy URL">Copy</button>
       </div>
+      <p class="info-hint">
+        Use this URL to connect directly from devices on the same network
+      </p>
     </div>
 
     <div class="actions">
@@ -96,39 +102,70 @@ const displayUrl = computed(() => {
 }
 
 .server-info {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   padding: 1rem;
   background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.info-label {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.info-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  background: #e3f2fd;
+  color: #1976d2;
   border-radius: 4px;
 }
 
 .url-display {
   display: flex;
   align-items: center;
-  background-color: #ecf0f1;
+  background-color: #fff;
   padding: 0.5rem;
   border-radius: 4px;
-  margin-top: 0.5rem;
+  border: 1px solid #dee2e6;
 }
 
 .url {
   flex: 1;
   font-family: monospace;
+  font-size: 0.9rem;
   word-break: break-all;
+  color: #2c3e50;
+}
+
+.info-hint {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin: 0.5rem 0 0 0;
 }
 
 .icon-button {
-  background: none;
-  border: none;
+  background: #e9ecef;
+  border: 1px solid #dee2e6;
   cursor: pointer;
-  font-size: 1.2rem;
+  font-size: 0.75rem;
   margin-left: 0.5rem;
-  padding: 0.25rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  color: #495057;
+  font-weight: 500;
 }
 
 .icon-button:hover {
-  background-color: #dfe6e9;
-  border-radius: 4px;
+  background-color: #dee2e6;
 }
 
 .actions {

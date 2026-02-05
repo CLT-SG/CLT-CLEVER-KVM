@@ -49,12 +49,12 @@
 <script>
     window.KVM_CONFIG = {
         serverHostname: "{{ server_hostname }}",
-        serverPort: "{{ server_port }}",
+        serverPort: {{ server_port }},
         deviceHostname: "{{ device_hostname }}",
-        wsUrl: "ws://{{ server_hostname }}.local:{{ server_port }}/ws/viewer/{{ device_hostname }}",
+        wsUrl: "ws://{{ server_hostname }}:{{ server_port }}/ws/viewer/{{ device_hostname }}",
         width: {{ width }},
         height: {{ height }},
-        audio: {{ audio_enabled | lower }},
+        audio: {% if audio_enabled %}true{% else %}false{% endif %},
         codec: "{{ codec }}"
     };
 </script>

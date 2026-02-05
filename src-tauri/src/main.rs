@@ -56,7 +56,13 @@ fn main() {
             get_network_interfaces,
             test_network_connectivity,
             get_system_info,
-            check_firewall_status
+            check_firewall_status,
+            // Relay server commands
+            discover_relay_servers,
+            connect_to_relay,
+            disconnect_from_relay,
+            get_relay_status,
+            auto_connect_relay
         ])
         .setup(|app| {
             info!("✅ Tauri application initialized successfully");
@@ -67,6 +73,27 @@ fn main() {
             match start_server(app_handle.clone(), Some(9921), None) {
                 Ok(url) => {
                     info!("🚀 Auto-started KVM server at: {}", url);
+                    
+                    // Auto-connect to relay server after KVM server starts
+                    let handle_clone = app_handle.clone();
+                    std::thread::spawn(move || {
+                        // Give the server a moment to fully initialize
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        
+                        // Call sync relay connection function
+                        match auto_connect_relay(handle_clone) {
+                            Ok(status) => {
+                                if status.connected {
+                                    info!("📡 Auto-connected to relay: {:?}", status.relay_url);
+                                } else {
+                                    info!("📡 No relay servers found - device will only be accessible via direct connection");
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("⚠️ Failed to auto-connect to relay: {}", e);
+                            }
+                        }
+                    });
                 },
                 Err(e) => {
                     log::warn!("Failed to auto-start server: {}", e);

@@ -123,6 +123,24 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - **src-tauri/Cargo.toml**: Added tokio-tungstenite 0.24, tracing 0.1, reqwest 0.12, hostname 0.4 dependencies
 - **src-tauri/src/README.md**: Updated with related components table
 
+### Tauri Relay Client Auto-Registration and UI
+- **src-tauri/src/app/state.rs**: Added RelayClient and RelayStatus to ServerState for relay connection tracking
+- **src-tauri/src/app/commands.rs**: Added Tauri commands for relay management (discover_relay_servers, connect_to_relay, disconnect_from_relay, get_relay_status, auto_connect_relay)
+- **src-tauri/src/main.rs**: Registered relay commands and added auto-connect to relay server on startup
+- **src/components/server/RelayStatus.vue**: New Vue component for displaying relay connection status with discover, connect, disconnect actions
+- **src/components/server/ServerStatus.vue**: Updated with Direct Access URL label, Local Network badge, and text-based buttons
+- **src/components/server/index.js**: Added RelayStatus component export
+- **src/composables/useServer.js**: Added relay state management and functions (discoverRelays, connectToRelay, disconnectFromRelay, autoConnectRelay)
+- **src/App.vue**: Integrated RelayStatus component into Server Status tab
+
+### Relay Server Template Fix
+- **relay-server/templates/kvm_client.html**: Fixed Tera template syntax for boolean rendering (changed "{{ audio_enabled | lower }}" to conditional block)
+- **relay-server/templates/kvm_client.html**: Fixed server_port to render as number instead of string
+- **relay-server/templates/kvm_client.html**: Fixed wsUrl to use correct server hostname format
+
+### Deleted Files
+- **src-tauri/web-client/**: Removed unused web-client folder (h264-decoder.js, index.html, kvm-client.css, kvm-client.js, kvm-template-parts.js, kvm-template.html)
+
 ## Testing
 
 - Verified screen capture works correctly on Windows
@@ -141,3 +159,7 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - Relay server v2.0 with Actix Web compiles and runs successfully
 - Templates embedded at compile time work from any working directory
 - Tauri app compiles with relay client dependencies
+- Tauri app auto-registers with relay server on startup via mDNS discovery
+- Vue RelayStatus component displays connection status correctly
+- Relay server dashboard shows connected devices after Tauri app launch
+- Template rendering works correctly with boolean values using Tera conditional syntax

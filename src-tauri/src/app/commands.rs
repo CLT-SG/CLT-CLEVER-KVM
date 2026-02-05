@@ -2,10 +2,12 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use log::{debug, error, info, warn};
 use local_ip_address::local_ip;
+use tokio::sync::RwLock;
 
-use crate::app::{ServerState, ServerOptions, MonitorInfo};
+use crate::app::{ServerState, ServerOptions, MonitorInfo, RelayStatus};
 use crate::core::ScreenCapture;
 use crate::network::WebSocketServer;
+use crate::network::relay_client::{RelayClient, RelayState, DiscoveredRelay, get_hostname};
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -530,5 +532,176 @@ pub fn get_available_network_interfaces() -> Result<Vec<String>, String> {
         Err("No network interfaces found".to_string())
     } else {
         Ok(interfaces)
+    }
+}
+
+// ============================================================================
+// Relay Server Commands
+// ============================================================================
+
+/// Discover available relay servers on the network
+#[tauri::command]
+pub fn discover_relay_servers(app_handle: tauri::AppHandle, timeout_ms: Option<u64>) -> Result<Vec<serde_json::Value>, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state_guard = state.lock().unwrap();
+    
+    let timeout = timeout_ms.unwrap_or(3000);
+    let port = state_guard.port;
+    let hostname = get_hostname();
+    
+    // Run async operation in the runtime
+    let relays = state_guard.runtime.block_on(async {
+        let client = RelayClient::new(hostname, "CLEVER KVM".to_string(), port);
+        client.discover_relays(timeout).await
+    });
+    
+    let relay_list: Vec<serde_json::Value> = relays.iter().map(|r| {
+        serde_json::json!({
+            "hostname": r.hostname,
+            "port": r.port,
+            "url": r.url,
+            "addresses": r.addresses
+        })
+    }).collect();
+    
+    info!("📡 Discovered {} relay server(s)", relay_list.len());
+    Ok(relay_list)
+}
+
+/// Connect to a relay server
+#[tauri::command]
+pub fn connect_to_relay(
+    app_handle: tauri::AppHandle, 
+    relay_url: String
+) -> Result<RelayStatus, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state_guard = state.lock().unwrap();
+    
+    let port = state_guard.port;
+    let hostname = get_hostname();
+    let display_name = format!("CLEVER KVM - {}", hostname);
+    
+    info!("🔌 Connecting to relay server: {}", relay_url);
+    
+    // Parse relay URL to create DiscoveredRelay
+    let relay = DiscoveredRelay {
+        hostname: relay_url.replace("http://", "").split(':').next().unwrap_or("localhost").to_string(),
+        port: relay_url.split(':').last()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(8881),
+        addresses: vec![relay_url.replace("http://", "").split(':').next().unwrap_or("localhost").to_string()],
+        url: relay_url.clone(),
+    };
+    
+    // Create relay client and connect in runtime
+    let connect_result = state_guard.runtime.block_on(async {
+        let mut relay_client = RelayClient::new(hostname.clone(), display_name, port);
+        match relay_client.connect(relay.clone()).await {
+            Ok(()) => Ok(relay_client),
+            Err(e) => Err(e),
+        }
+    });
+    
+    match connect_result {
+        Ok(relay_client) => {
+            let status = RelayStatus {
+                connected: true,
+                relay_url: Some(relay_url.clone()),
+                relay_hostname: Some(relay.hostname.clone()),
+                state: "connected".to_string(),
+            };
+            
+            state_guard.relay_client = Some(Arc::new(RwLock::new(relay_client)));
+            state_guard.relay_status = status.clone();
+            
+            info!("✅ Connected to relay server: {}", relay_url);
+            Ok(status)
+        }
+        Err(e) => {
+            error!("❌ Failed to connect to relay: {}", e);
+            Err(format!("Failed to connect to relay: {}", e))
+        }
+    }
+}
+
+/// Disconnect from relay server
+#[tauri::command]
+pub fn disconnect_from_relay(app_handle: tauri::AppHandle) -> Result<RelayStatus, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state_guard = state.lock().unwrap();
+    
+    if let Some(client) = state_guard.relay_client.take() {
+        state_guard.runtime.block_on(async {
+            let mut client = client.write().await;
+            client.disconnect().await;
+        });
+    }
+    
+    let status = RelayStatus::default();
+    state_guard.relay_status = status.clone();
+    
+    info!("📡 Disconnected from relay server");
+    Ok(status)
+}
+
+/// Get current relay connection status
+#[tauri::command]
+pub fn get_relay_status(app_handle: tauri::AppHandle) -> Result<RelayStatus, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state_guard = state.lock().unwrap();
+    Ok(state_guard.relay_status.clone())
+}
+
+/// Auto-connect to relay server (discovers and connects to first available)
+#[tauri::command]
+pub fn auto_connect_relay(app_handle: tauri::AppHandle) -> Result<RelayStatus, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state_guard = state.lock().unwrap();
+    
+    let port = state_guard.port;
+    let hostname = get_hostname();
+    let display_name = format!("CLEVER KVM - {}", hostname);
+    
+    info!("🔍 Auto-discovering relay servers...");
+    
+    // Run discovery and connection in runtime
+    let result = state_guard.runtime.block_on(async {
+        let mut relay_client = RelayClient::new(hostname.clone(), display_name, port);
+        let relays = relay_client.discover_relays(3000).await;
+        
+        if relays.is_empty() {
+            info!("📡 No relay servers found on network");
+            return Ok((None, RelayStatus::default()));
+        }
+        
+        let relay = relays.into_iter().next().unwrap();
+        info!("📡 Found relay server: {} - attempting connection", relay.url);
+        
+        match relay_client.connect(relay.clone()).await {
+            Ok(()) => {
+                let status = RelayStatus {
+                    connected: true,
+                    relay_url: Some(relay.url.clone()),
+                    relay_hostname: Some(relay.hostname.clone()),
+                    state: "connected".to_string(),
+                };
+                Ok((Some(relay_client), status))
+            }
+            Err(e) => {
+                warn!("⚠️ Auto-connect failed: {}", e);
+                Ok((None, RelayStatus::default()))
+            }
+        }
+    });
+    
+    match result {
+        Ok((Some(relay_client), status)) => {
+            state_guard.relay_client = Some(Arc::new(RwLock::new(relay_client)));
+            state_guard.relay_status = status.clone();
+            info!("✅ Auto-connected to relay server: {:?}", status.relay_url);
+            Ok(status)
+        }
+        Ok((None, status)) => Ok(status),
+        Err(e) => Err(e),
     }
 }

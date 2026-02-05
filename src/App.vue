@@ -10,7 +10,8 @@ import {
   ConnectionOptions,
   LogViewer,
   UpdaterDialog,
-  UpdateChecker
+  UpdateChecker,
+  RelayStatus
 } from "./components";
 
 const {
@@ -26,7 +27,15 @@ const {
   startServer,
   stopServer,
   openUrl,
-  copyUrl
+  copyUrl,
+  // Relay
+  relayStatus,
+  discoveredRelays,
+  relayLoading,
+  discoverRelays,
+  connectToRelay,
+  disconnectFromRelay,
+  autoConnectRelay
 } = useServer();
 
 // The status checking is now automatic, but we can still call it manually if needed
@@ -86,6 +95,17 @@ const tabs = computed(() => {
           :copy-url="copyUrl"
         />
         
+        <!-- Relay Status Section -->
+        <RelayStatus
+          :relay-status="relayStatus"
+          :discovered-relays="discoveredRelays"
+          :relay-loading="relayLoading"
+          :discover-relays="discoverRelays"
+          :connect-to-relay="connectToRelay"
+          :disconnect-from-relay="disconnectFromRelay"
+          :auto-connect-relay="autoConnectRelay"
+        />
+        
         <!-- Update checker section -->
         <div class="update-section">
           <h3>Application Updates</h3>
@@ -97,7 +117,7 @@ const tabs = computed(() => {
         <div class="config-content">
           <h2>Server Configuration</h2>
           <div v-if="serverStatus" class="config-warning">
-            <p>⚠️ Server is currently running. Stop the server to modify these settings.</p>
+            <p>Server is currently running. Stop the server to modify these settings.</p>
           </div>
           <ServerConfiguration 
             :server-port="serverPort"

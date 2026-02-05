@@ -10,6 +10,16 @@ export function useServer() {
   const monitors = ref([]);
   const loadingMonitors = ref(false);
 
+  // Relay server state
+  const relayStatus = reactive({
+    connected: false,
+    relayUrl: null,
+    relayHostname: null,
+    state: "disconnected"
+  });
+  const discoveredRelays = ref([]);
+  const relayLoading = ref(false);
+
   // Status check interval
   let statusCheckInterval = null;
 
@@ -54,6 +64,20 @@ export function useServer() {
     }
   }
 
+  async function checkRelayStatus() {
+    try {
+      const status = await invoke("get_relay_status");
+      relayStatus.connected = status.connected;
+      relayStatus.relayUrl = status.relay_url;
+      relayStatus.relayHostname = status.relay_hostname;
+      relayStatus.state = status.state;
+    } catch (error) {
+      console.warn("Failed to check relay status:", error);
+      relayStatus.connected = false;
+      relayStatus.state = "error";
+    }
+  }
+
   async function checkServerStatus() {
     try {
       const status = await invoke("get_server_status");
@@ -74,6 +98,7 @@ export function useServer() {
       }
       
       await loadMonitors();
+      await checkRelayStatus();
     } catch (error) {
       console.error("Failed to check server status:", error);
       errorMessage.value = `Failed to check server status: ${error}`;
@@ -211,6 +236,73 @@ export function useServer() {
     }
   }
 
+  // Relay server functions
+  async function discoverRelays() {
+    relayLoading.value = true;
+    try {
+      const relays = await invoke("discover_relay_servers", { timeoutMs: 3000 });
+      discoveredRelays.value = relays;
+      return relays;
+    } catch (error) {
+      console.error("Failed to discover relay servers:", error);
+      return [];
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
+  async function connectToRelay(relayUrl) {
+    relayLoading.value = true;
+    try {
+      const status = await invoke("connect_to_relay", { relayUrl });
+      relayStatus.connected = status.connected;
+      relayStatus.relayUrl = status.relay_url;
+      relayStatus.relayHostname = status.relay_hostname;
+      relayStatus.state = status.state;
+      return status;
+    } catch (error) {
+      console.error("Failed to connect to relay:", error);
+      errorMessage.value = `Failed to connect to relay: ${error}`;
+      throw error;
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
+  async function disconnectFromRelay() {
+    relayLoading.value = true;
+    try {
+      const status = await invoke("disconnect_from_relay");
+      relayStatus.connected = false;
+      relayStatus.relayUrl = null;
+      relayStatus.relayHostname = null;
+      relayStatus.state = "disconnected";
+      return status;
+    } catch (error) {
+      console.error("Failed to disconnect from relay:", error);
+      throw error;
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
+  async function autoConnectRelay() {
+    relayLoading.value = true;
+    try {
+      const status = await invoke("auto_connect_relay");
+      relayStatus.connected = status.connected;
+      relayStatus.relayUrl = status.relay_url;
+      relayStatus.relayHostname = status.relay_hostname;
+      relayStatus.state = status.state;
+      return status;
+    } catch (error) {
+      console.error("Failed to auto-connect to relay:", error);
+      return { connected: false };
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
   // Initialize monitoring when composable is created
   checkServerStatus().then(() => {
     startStatusMonitoring();
@@ -233,6 +325,15 @@ export function useServer() {
     copyUrl,
     loadMonitors,
     startStatusMonitoring,
-    stopStatusMonitoring
+    stopStatusMonitoring,
+    // Relay exports
+    relayStatus,
+    discoveredRelays,
+    relayLoading,
+    discoverRelays,
+    connectToRelay,
+    disconnectFromRelay,
+    autoConnectRelay,
+    checkRelayStatus
   };
 }

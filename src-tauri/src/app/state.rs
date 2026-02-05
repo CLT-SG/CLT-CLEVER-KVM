@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
+use tokio::sync::RwLock;
 
 use crate::network::WebSocketServer;
+use crate::network::relay_client::{RelayClient, RelayState, DiscoveredRelay};
 use crate::lib::DEFAULT_SERVER_PORT;
 
 /// Server configuration options
@@ -28,6 +30,26 @@ pub struct MonitorInfo {
     pub position_y: i32,
 }
 
+/// Relay connection status for the frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelayStatus {
+    pub connected: bool,
+    pub relay_url: Option<String>,
+    pub relay_hostname: Option<String>,
+    pub state: String,
+}
+
+impl Default for RelayStatus {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            relay_url: None,
+            relay_hostname: None,
+            state: "disconnected".to_string(),
+        }
+    }
+}
+
 /// Shared state between Tauri and WebSocket server
 pub struct ServerState {
     pub runtime: Runtime,
@@ -35,6 +57,8 @@ pub struct ServerState {
     pub port: u16,
     pub running: bool,
     pub options: ServerOptions,
+    pub relay_client: Option<Arc<RwLock<RelayClient>>>,
+    pub relay_status: RelayStatus,
 }
 
 impl ServerState {
@@ -48,6 +72,8 @@ impl ServerState {
             port: DEFAULT_SERVER_PORT,
             running: false,
             options: ServerOptions::default(),
+            relay_client: None,
+            relay_status: RelayStatus::default(),
         }
     }
 }

@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [4.2.0] - 2026-02-05
 
 ### Added
+- Tauri relay client auto-registration on application startup with mDNS discovery
+- Tauri commands for relay server management (discover, connect, disconnect, status, auto-connect)
+- RelayStatus Vue component for displaying relay connection status in the UI
+- Relay server connection state tracking in ServerState with RelayStatus struct
 - H.264 hardware-accelerated video encoding with auto-detection for NVENC (NVIDIA), QuickSync (Intel), AMF (AMD), VAAPI (Linux), and VideoToolbox (macOS)
 - Standalone UDP relay server for low-latency P2P video streaming (relay-server/)
 - Relay Server v2.0 with Actix Web 4 and Tera templating engine for centralized device management
@@ -26,6 +30,10 @@ All notable changes to this project will be documented in this file.
 - Comprehensive H.264 streaming documentation (docs/H264_STREAMING_IMPLEMENTATION.md)
 
 ### Changed
+- Updated ServerStatus.vue with Direct Access URL label and Local Network badge
+- Replaced emoji icons with text labels in Vue components for professional appearance
+- Updated App.vue to integrate RelayStatus component in Server Status tab
+- Updated useServer.js composable with relay state management and functions
 - Updated WebSocket handler to use new H.264 low-latency pipeline
 - Updated kvm-client.js with H.264 frame handling support
 - Updated README.md with H.264 streaming features
@@ -49,11 +57,16 @@ All notable changes to this project will be documented in this file.
 - Added tokio-tungstenite, tracing, reqwest, hostname dependencies to Tauri app for relay client
 
 ### Fixed
+- Fixed Tauri app devices not appearing in relay server dashboard after launch
+- Fixed Tera template rendering error for boolean values in kvm_client.html (changed | lower filter to conditional block)
+- Fixed server_port rendering as string instead of number in relay KVM client template
+- Fixed wsUrl format in relay KVM client template to use correct server hostname
 - Fixed green screen issue in H.264 decoder by correcting YUV to RGB color conversion formula
 - Changed YUV to RGB conversion from BT.601 limited range to BT.601 full range in kvm-client.js and h264-decoder.js
 - Fixed bilinear sampling in high-quality YUV decoder for smoother video output
 
 ### Removed
+- Deleted src-tauri/web-client folder (unused duplicate files)
 - Deleted enhanced_video_vp8.rs (obsolete VP8 encoder)
 - Deleted enhanced_video.rs (obsolete WebM-based encoder)
 - Removed VP8/WebM decoder code from kvm-client.js
