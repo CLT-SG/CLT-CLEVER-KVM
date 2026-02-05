@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use crate::app::{ServerState, ServerOptions, MonitorInfo, RelayStatus};
 use crate::core::ScreenCapture;
 use crate::network::WebSocketServer;
-use crate::network::relay_client::{RelayClient, RelayState, DiscoveredRelay, get_hostname};
+use crate::network::relay_client::{RelayClient, RelayState, DiscoveredRelay, get_hostname, ReconnectConfig};
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -596,6 +596,8 @@ pub fn connect_to_relay(
     // Create relay client and connect in runtime
     let connect_result = state_guard.runtime.block_on(async {
         let mut relay_client = RelayClient::new(hostname.clone(), display_name, port);
+        // Enable auto-reconnect by default
+        relay_client.set_reconnect_config(ReconnectConfig::default()).await;
         match relay_client.connect(relay.clone()).await {
             Ok(()) => Ok(relay_client),
             Err(e) => Err(e),
@@ -609,6 +611,8 @@ pub fn connect_to_relay(
                 relay_url: Some(relay_url.clone()),
                 relay_hostname: Some(relay.hostname.clone()),
                 state: "connected".to_string(),
+                auto_reconnect: true,
+                reconnect_attempts: 0,
             };
             
             state_guard.relay_client = Some(Arc::new(RwLock::new(relay_client)));
@@ -648,7 +652,48 @@ pub fn disconnect_from_relay(app_handle: tauri::AppHandle) -> Result<RelayStatus
 #[tauri::command]
 pub fn get_relay_status(app_handle: tauri::AppHandle) -> Result<RelayStatus, String> {
     let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state_guard = state.lock().unwrap();
+    let mut state_guard = state.lock().unwrap();
+    
+    // Get real-time status from the relay client if available
+    if let Some(ref client) = state_guard.relay_client {
+        let client_clone = client.clone();
+        let (relay_state, relay_info, reconnect_attempts) = state_guard.runtime.block_on(async {
+            let client_guard = client_clone.read().await;
+            let state = client_guard.get_state().await;
+            let relay = client_guard.get_relay().await;
+            let attempts = client_guard.get_reconnect_attempts();
+            (state, relay, attempts)
+        });
+        
+        let state_str = match relay_state {
+            RelayState::Connected => "connected",
+            RelayState::Connecting => "connecting",
+            RelayState::Reconnecting => "reconnecting",
+            RelayState::Disconnected => "disconnected",
+            RelayState::Streaming => "streaming",
+            RelayState::Discovering => "discovering",
+            RelayState::Error(_) => "error",
+        };
+        
+        let is_connected = matches!(relay_state, RelayState::Connected | RelayState::Streaming);
+        let is_reconnecting = matches!(relay_state, RelayState::Reconnecting);
+        
+        // Update the stored status
+        state_guard.relay_status.connected = is_connected;
+        state_guard.relay_status.state = state_str.to_string();
+        state_guard.relay_status.reconnect_attempts = reconnect_attempts;
+        
+        // Update relay info if available
+        if let Some(relay) = relay_info {
+            state_guard.relay_status.relay_url = Some(relay.url);
+            state_guard.relay_status.relay_hostname = Some(relay.hostname);
+        } else if !is_connected && !is_reconnecting {
+            // Clear relay info if disconnected and not reconnecting
+            state_guard.relay_status.relay_url = None;
+            state_guard.relay_status.relay_hostname = None;
+        }
+    }
+    
     Ok(state_guard.relay_status.clone())
 }
 
@@ -677,6 +722,9 @@ pub fn auto_connect_relay(app_handle: tauri::AppHandle) -> Result<RelayStatus, S
         let relay = relays.into_iter().next().unwrap();
         info!("📡 Found relay server: {} - attempting connection", relay.url);
         
+        // Enable auto-reconnect by default
+        relay_client.set_reconnect_config(ReconnectConfig::default()).await;
+        
         match relay_client.connect(relay.clone()).await {
             Ok(()) => {
                 let status = RelayStatus {
@@ -684,6 +732,8 @@ pub fn auto_connect_relay(app_handle: tauri::AppHandle) -> Result<RelayStatus, S
                     relay_url: Some(relay.url.clone()),
                     relay_hostname: Some(relay.hostname.clone()),
                     state: "connected".to_string(),
+                    auto_reconnect: true,
+                    reconnect_attempts: 0,
                 };
                 Ok((Some(relay_client), status))
             }
@@ -704,4 +754,24 @@ pub fn auto_connect_relay(app_handle: tauri::AppHandle) -> Result<RelayStatus, S
         Ok((None, status)) => Ok(status),
         Err(e) => Err(e),
     }
+}
+
+/// Toggle auto-reconnect for relay connection
+#[tauri::command]
+pub fn set_relay_auto_reconnect(app_handle: tauri::AppHandle, enabled: bool) -> Result<RelayStatus, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state_guard = state.lock().unwrap();
+    
+    if let Some(ref client) = state_guard.relay_client {
+        let client_clone = client.clone();
+        state_guard.runtime.block_on(async {
+            let client_guard = client_clone.read().await;
+            client_guard.set_auto_reconnect(enabled).await;
+        });
+        
+        state_guard.relay_status.auto_reconnect = enabled;
+        info!("🔄 Auto-reconnect {}", if enabled { "enabled" } else { "disabled" });
+    }
+    
+    Ok(state_guard.relay_status.clone())
 }

@@ -37,6 +37,8 @@ pub struct RelayStatus {
     pub relay_url: Option<String>,
     pub relay_hostname: Option<String>,
     pub state: String,
+    pub auto_reconnect: bool,
+    pub reconnect_attempts: u32,
 }
 
 impl Default for RelayStatus {
@@ -46,6 +48,8 @@ impl Default for RelayStatus {
             relay_url: None,
             relay_hostname: None,
             state: "disconnected".to_string(),
+            auto_reconnect: true,
+            reconnect_attempts: 0,
         }
     }
 }

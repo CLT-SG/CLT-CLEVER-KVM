@@ -133,6 +133,15 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - **src/composables/useServer.js**: Added relay state management and functions (discoverRelays, connectToRelay, disconnectFromRelay, autoConnectRelay)
 - **src/App.vue**: Integrated RelayStatus component into Server Status tab
 
+### Relay Client Auto-Reconnection
+- **src-tauri/src/network/relay_client.rs**: Added ReconnectConfig struct, RelayState::Reconnecting state, exponential backoff reconnection logic (2s-60s), heartbeat-based connection loss detection
+- **src-tauri/src/app/state.rs**: Extended RelayStatus with auto_reconnect and reconnect_attempts fields
+- **src-tauri/src/app/commands.rs**: Added set_relay_auto_reconnect command, updated get_relay_status to return real-time client state
+- **src-tauri/src/main.rs**: Registered set_relay_auto_reconnect command in invoke_handler
+- **src/composables/useServer.js**: Added setRelayAutoReconnect function, extended relayStatus with autoReconnect and reconnectAttempts
+- **src/components/server/RelayStatus.vue**: Added reconnecting UI state with attempt counter, auto-reconnect toggle checkbox, cancel reconnection button
+- **src/App.vue**: Added setRelayAutoReconnect prop to RelayStatus component
+
 ### Relay Server Template Fix
 - **relay-server/templates/kvm_client.html**: Fixed Tera template syntax for boolean rendering (changed "{{ audio_enabled | lower }}" to conditional block)
 - **relay-server/templates/kvm_client.html**: Fixed server_port to render as number instead of string
@@ -191,3 +200,6 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - Relay server HTTPS works with self-signed certificates on port 8443
 - WebCodecs API available when accessing KVM viewer via HTTPS
 - WebSocket connects via wss:// on HTTPS pages without mixed content errors
+- Relay client auto-reconnects when relay server restarts or becomes available
+- Auto-reconnect toggle persists user preference
+- Reconnection attempts display correctly in UI with exponential backoff timing

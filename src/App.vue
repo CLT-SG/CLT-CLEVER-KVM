@@ -35,7 +35,8 @@ const {
   discoverRelays,
   connectToRelay,
   disconnectFromRelay,
-  autoConnectRelay
+  autoConnectRelay,
+  setRelayAutoReconnect
 } = useServer();
 
 // The status checking is now automatic, but we can still call it manually if needed
@@ -104,6 +105,7 @@ const tabs = computed(() => {
           :connect-to-relay="connectToRelay"
           :disconnect-from-relay="disconnectFromRelay"
           :auto-connect-relay="autoConnectRelay"
+          :set-relay-auto-reconnect="setRelayAutoReconnect"
         />
         
         <!-- Update checker section -->

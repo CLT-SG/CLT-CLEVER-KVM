@@ -23,14 +23,41 @@
       </p>
     </div>
 
+    <div v-else-if="isReconnecting" class="relay-reconnecting">
+      <div class="info-row">
+        <span class="label">Server:</span>
+        <span class="value">{{ relayStatus.relayHostname || 'Unknown' }}</span>
+      </div>
+      <p class="info-note warning">
+        <span class="reconnect-icon">🔄</span>
+        Connection lost. Auto-reconnecting...
+        <span v-if="relayStatus.reconnectAttempts > 0" class="attempt-count">
+          (Attempt {{ relayStatus.reconnectAttempts }})
+        </span>
+      </p>
+    </div>
+
     <div v-else class="relay-disconnected">
       <p class="info-note">
         Connect to a relay server to make your device accessible from a centralized dashboard.
       </p>
     </div>
 
+    <!-- Auto-reconnect toggle -->
+    <div v-if="relayStatus.connected || isReconnecting" class="auto-reconnect-toggle">
+      <label class="toggle-label">
+        <input 
+          type="checkbox" 
+          :checked="relayStatus.autoReconnect"
+          @change="handleAutoReconnectToggle"
+          :disabled="relayLoading"
+        />
+        <span class="toggle-text">Auto-reconnect when server is down</span>
+      </label>
+    </div>
+
     <div class="relay-actions">
-      <template v-if="!relayStatus.connected">
+      <template v-if="!relayStatus.connected && !isReconnecting">
         <button 
           class="secondary-button"
           @click="handleDiscover"
@@ -44,6 +71,15 @@
           :disabled="relayLoading"
         >
           {{ relayLoading ? 'Connecting...' : 'Auto Connect' }}
+        </button>
+      </template>
+      <template v-else-if="isReconnecting">
+        <button 
+          class="secondary-button"
+          @click="handleDisconnect"
+          :disabled="relayLoading"
+        >
+          Cancel Reconnection
         </button>
       </template>
       <template v-else>
@@ -64,7 +100,7 @@
     </div>
 
     <!-- Discovered relays list -->
-    <div v-if="discoveredRelays.length > 0 && !relayStatus.connected" class="discovered-relays">
+    <div v-if="discoveredRelays.length > 0 && !relayStatus.connected && !isReconnecting" class="discovered-relays">
       <h4>Available Relay Servers</h4>
       <ul class="relay-list">
         <li 
@@ -120,12 +156,22 @@ const props = defineProps({
   autoConnectRelay: {
     type: Function,
     required: true
+  },
+  setRelayAutoReconnect: {
+    type: Function,
+    required: false,
+    default: () => {}
   }
+});
+
+const isReconnecting = computed(() => {
+  return props.relayStatus.state === 'reconnecting';
 });
 
 const statusClass = computed(() => {
   if (props.relayStatus.connected) return 'connected';
   if (props.relayStatus.state === 'connecting') return 'connecting';
+  if (props.relayStatus.state === 'reconnecting') return 'reconnecting';
   if (props.relayStatus.state === 'error') return 'error';
   return 'disconnected';
 });
@@ -133,6 +179,7 @@ const statusClass = computed(() => {
 const statusText = computed(() => {
   if (props.relayStatus.connected) return 'Connected';
   if (props.relayStatus.state === 'connecting') return 'Connecting...';
+  if (props.relayStatus.state === 'reconnecting') return 'Reconnecting...';
   if (props.relayStatus.state === 'error') return 'Error';
   return 'Disconnected';
 });
@@ -151,6 +198,11 @@ async function handleDisconnect() {
 
 async function handleAutoConnect() {
   await props.autoConnectRelay();
+}
+
+async function handleAutoReconnectToggle(event) {
+  const enabled = event.target.checked;
+  await props.setRelayAutoReconnect(enabled);
 }
 
 function openDashboard() {
@@ -196,6 +248,17 @@ function openDashboard() {
 .status-badge.connecting {
   background: #fff3cd;
   color: #856404;
+}
+
+.status-badge.reconnecting {
+  background: #fff3cd;
+  color: #856404;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .status-badge.disconnected {
@@ -255,6 +318,56 @@ function openDashboard() {
 .info-note.success {
   background: #d4edda;
   color: #155724;
+}
+
+.info-note.warning {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.relay-reconnecting {
+  margin-bottom: 1rem;
+}
+
+.reconnect-icon {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.attempt-count {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.auto-reconnect-toggle {
+  margin: 0.75rem 0;
+  padding: 0.5rem;
+  background: #fff;
+  border-radius: 4px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #2c3e50;
+}
+
+.toggle-label input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.toggle-text {
+  user-select: none;
 }
 
 .relay-disconnected {

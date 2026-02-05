@@ -2,9 +2,12 @@
 //!
 //! Handles auto-discovery of relay servers via mDNS and registration
 //! of this device for remote viewing through the relay server.
+//! 
+//! Features auto-reconnection when relay server becomes unavailable.
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
@@ -19,6 +22,15 @@ const DEFAULT_RELAY_PORT: u16 = 8881;
 
 /// Heartbeat interval in seconds
 const HEARTBEAT_INTERVAL: u64 = 10;
+
+/// Initial reconnection delay in seconds
+const INITIAL_RECONNECT_DELAY: u64 = 2;
+
+/// Maximum reconnection delay in seconds (cap for exponential backoff)
+const MAX_RECONNECT_DELAY: u64 = 60;
+
+/// Maximum consecutive reconnection failures before giving up
+const MAX_RECONNECT_ATTEMPTS: u32 = 0; // 0 = unlimited
 
 /// Device capabilities for registration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,7 +107,32 @@ pub enum RelayState {
     Connecting,
     Connected,
     Streaming,
+    Reconnecting,
     Error(String),
+}
+
+/// Auto-reconnection configuration
+#[derive(Debug, Clone)]
+pub struct ReconnectConfig {
+    /// Whether auto-reconnect is enabled
+    pub enabled: bool,
+    /// Initial delay before first reconnection attempt (seconds)
+    pub initial_delay: u64,
+    /// Maximum delay between reconnection attempts (seconds)
+    pub max_delay: u64,
+    /// Maximum reconnection attempts (0 = unlimited)
+    pub max_attempts: u32,
+}
+
+impl Default for ReconnectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            initial_delay: INITIAL_RECONNECT_DELAY,
+            max_delay: MAX_RECONNECT_DELAY,
+            max_attempts: MAX_RECONNECT_ATTEMPTS,
+        }
+    }
 }
 
 /// Relay client for connecting to relay servers
@@ -116,6 +153,14 @@ pub struct RelayClient {
     frame_tx: Option<mpsc::Sender<Vec<u8>>>,
     /// Shutdown signal
     shutdown_tx: Option<mpsc::Sender<()>>,
+    /// Auto-reconnection configuration
+    reconnect_config: Arc<RwLock<ReconnectConfig>>,
+    /// Flag to signal reconnection task to stop
+    reconnect_shutdown: Arc<AtomicBool>,
+    /// Current reconnection attempt count
+    reconnect_attempts: Arc<AtomicU32>,
+    /// Last known relay for reconnection
+    last_relay: Arc<RwLock<Option<DiscoveredRelay>>>,
 }
 
 impl RelayClient {
@@ -130,12 +175,35 @@ impl RelayClient {
             local_ws_port,
             frame_tx: None,
             shutdown_tx: None,
+            reconnect_config: Arc::new(RwLock::new(ReconnectConfig::default())),
+            reconnect_shutdown: Arc::new(AtomicBool::new(false)),
+            reconnect_attempts: Arc::new(AtomicU32::new(0)),
+            last_relay: Arc::new(RwLock::new(None)),
         }
     }
     
     /// Set device capabilities
     pub fn set_capabilities(&mut self, caps: DeviceCapabilities) {
         self.capabilities = caps;
+    }
+    
+    /// Configure auto-reconnection settings
+    pub async fn set_reconnect_config(&self, config: ReconnectConfig) {
+        *self.reconnect_config.write().await = config;
+    }
+    
+    /// Enable or disable auto-reconnection
+    pub async fn set_auto_reconnect(&self, enabled: bool) {
+        self.reconnect_config.write().await.enabled = enabled;
+        if !enabled {
+            // Stop any ongoing reconnection attempts
+            self.reconnect_shutdown.store(true, Ordering::SeqCst);
+        }
+    }
+    
+    /// Check if auto-reconnect is enabled
+    pub async fn is_auto_reconnect_enabled(&self) -> bool {
+        self.reconnect_config.read().await.enabled
     }
     
     /// Get current connection state
@@ -146,6 +214,11 @@ impl RelayClient {
     /// Get connected relay info
     pub async fn get_relay(&self) -> Option<DiscoveredRelay> {
         self.relay.read().await.clone()
+    }
+    
+    /// Get current reconnection attempt count
+    pub fn get_reconnect_attempts(&self) -> u32 {
+        self.reconnect_attempts.load(Ordering::SeqCst)
     }
     
     /// Discover relay servers on the network
@@ -228,6 +301,13 @@ impl RelayClient {
     pub async fn connect(&mut self, relay: DiscoveredRelay) -> Result<(), String> {
         *self.state.write().await = RelayState::Connecting;
         
+        // Reset reconnection state
+        self.reconnect_shutdown.store(false, Ordering::SeqCst);
+        self.reconnect_attempts.store(0, Ordering::SeqCst);
+        
+        // Store the relay for potential reconnection
+        *self.last_relay.write().await = Some(relay.clone());
+        
         // Register with the relay server
         let register_url = format!("{}/api/register", relay.url);
         let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
@@ -259,8 +339,8 @@ impl RelayClient {
                             *self.relay.write().await = Some(relay.clone());
                             *self.state.write().await = RelayState::Connected;
                             
-                            // Start heartbeat task
-                            self.start_heartbeat(relay.clone());
+                            // Start heartbeat task with auto-reconnection
+                            self.start_heartbeat_with_reconnect(relay.clone());
                             
                             return Ok(());
                         } else {
@@ -396,7 +476,7 @@ impl RelayClient {
         }
     }
     
-    /// Start heartbeat task
+    /// Start heartbeat task (legacy, without auto-reconnect)
     fn start_heartbeat(&self, relay: DiscoveredRelay) {
         let hostname = self.hostname.clone();
         let state = self.state.clone();
@@ -436,8 +516,131 @@ impl RelayClient {
         });
     }
     
+    /// Start heartbeat task with auto-reconnection support
+    fn start_heartbeat_with_reconnect(&self, relay: DiscoveredRelay) {
+        let hostname = self.hostname.clone();
+        let display_name = self.display_name.clone();
+        let capabilities = self.capabilities.clone();
+        let local_ws_port = self.local_ws_port;
+        let state = self.state.clone();
+        let relay_arc = self.relay.clone();
+        let reconnect_config = self.reconnect_config.clone();
+        let reconnect_shutdown = self.reconnect_shutdown.clone();
+        let reconnect_attempts = self.reconnect_attempts.clone();
+        let last_relay = self.last_relay.clone();
+        
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            let mut consecutive_failures: u32 = 0;
+            let max_consecutive_failures: u32 = 3;
+            
+            let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL));
+            
+            loop {
+                interval.tick().await;
+                
+                // Check if shutdown was requested
+                if reconnect_shutdown.load(Ordering::SeqCst) {
+                    debug!("Heartbeat task shutdown requested for {}", hostname);
+                    break;
+                }
+                
+                // Check current state
+                let current_state = state.read().await.clone();
+                if current_state == RelayState::Disconnected {
+                    break;
+                }
+                
+                // Skip heartbeat during reconnection
+                if current_state == RelayState::Reconnecting {
+                    continue;
+                }
+                
+                // Get current relay URL
+                let relay_info = relay_arc.read().await.clone();
+                let heartbeat_url = match &relay_info {
+                    Some(r) => format!("{}/api/heartbeat/{}", r.url, hostname),
+                    None => {
+                        debug!("No relay configured, skipping heartbeat");
+                        continue;
+                    }
+                };
+                
+                // Send heartbeat
+                match client.post(&heartbeat_url)
+                    .timeout(Duration::from_secs(5))
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.status().is_success() {
+                            // Reset failure counter on success
+                            consecutive_failures = 0;
+                            reconnect_attempts.store(0, Ordering::SeqCst);
+                        } else {
+                            warn!("Heartbeat failed: HTTP {}", response.status());
+                            consecutive_failures += 1;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Heartbeat error: {}", e);
+                        consecutive_failures += 1;
+                    }
+                }
+                
+                // Check if we need to trigger reconnection
+                if consecutive_failures >= max_consecutive_failures {
+                    info!("🔄 Connection lost to relay server after {} failed heartbeats", consecutive_failures);
+                    
+                    let config = reconnect_config.read().await.clone();
+                    if config.enabled {
+                        // Trigger reconnection
+                        let hostname_clone = hostname.clone();
+                        let display_name_clone = display_name.clone();
+                        let capabilities_clone = capabilities.clone();
+                        let state_clone = state.clone();
+                        let relay_arc_clone = relay_arc.clone();
+                        let reconnect_shutdown_clone = reconnect_shutdown.clone();
+                        let reconnect_attempts_clone = reconnect_attempts.clone();
+                        let last_relay_clone = last_relay.clone();
+                        let config_clone = config.clone();
+                        
+                        tokio::spawn(async move {
+                            attempt_reconnection(
+                                hostname_clone,
+                                display_name_clone,
+                                capabilities_clone,
+                                local_ws_port,
+                                state_clone,
+                                relay_arc_clone,
+                                reconnect_shutdown_clone,
+                                reconnect_attempts_clone,
+                                last_relay_clone,
+                                config_clone,
+                            ).await;
+                        });
+                        
+                        // Reset failure counter after triggering reconnection
+                        consecutive_failures = 0;
+                    } else {
+                        // Auto-reconnect disabled, just mark as disconnected
+                        *state.write().await = RelayState::Disconnected;
+                        *relay_arc.write().await = None;
+                        info!("📡 Relay connection lost (auto-reconnect disabled)");
+                        break;
+                    }
+                }
+            }
+            
+            debug!("Heartbeat task ended for {}", hostname);
+        });
+    }
+    
     /// Disconnect from relay server
     pub async fn disconnect(&mut self) {
+        // Stop reconnection attempts
+        self.reconnect_shutdown.store(true, Ordering::SeqCst);
+        
         // Send shutdown signal
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
@@ -455,9 +658,128 @@ impl RelayClient {
         
         *self.state.write().await = RelayState::Disconnected;
         *self.relay.write().await = None;
+        *self.last_relay.write().await = None;
         self.frame_tx = None;
         
         info!("📡 Disconnected from relay server");
+    }
+}
+
+/// Attempt to reconnect to the relay server with exponential backoff
+async fn attempt_reconnection(
+    hostname: String,
+    display_name: String,
+    capabilities: DeviceCapabilities,
+    local_ws_port: u16,
+    state: Arc<RwLock<RelayState>>,
+    relay_arc: Arc<RwLock<Option<DiscoveredRelay>>>,
+    reconnect_shutdown: Arc<AtomicBool>,
+    reconnect_attempts: Arc<AtomicU32>,
+    last_relay: Arc<RwLock<Option<DiscoveredRelay>>>,
+    config: ReconnectConfig,
+) {
+    // Set state to reconnecting
+    *state.write().await = RelayState::Reconnecting;
+    
+    let client = reqwest::Client::new();
+    let mut current_delay = config.initial_delay;
+    
+    loop {
+        // Check if shutdown was requested
+        if reconnect_shutdown.load(Ordering::SeqCst) {
+            info!("🔄 Reconnection cancelled");
+            *state.write().await = RelayState::Disconnected;
+            return;
+        }
+        
+        let attempt = reconnect_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        
+        // Check max attempts (0 = unlimited)
+        if config.max_attempts > 0 && attempt > config.max_attempts {
+            error!("❌ Max reconnection attempts ({}) reached, giving up", config.max_attempts);
+            *state.write().await = RelayState::Error("Max reconnection attempts reached".to_string());
+            return;
+        }
+        
+        info!("🔄 Reconnection attempt {} (delay: {}s)", attempt, current_delay);
+        
+        // Wait before attempting
+        tokio::time::sleep(Duration::from_secs(current_delay)).await;
+        
+        // Check again after sleep
+        if reconnect_shutdown.load(Ordering::SeqCst) {
+            info!("🔄 Reconnection cancelled during wait");
+            *state.write().await = RelayState::Disconnected;
+            return;
+        }
+        
+        // Get the last known relay
+        let relay = match last_relay.read().await.clone() {
+            Some(r) => r,
+            None => {
+                warn!("No relay information available for reconnection");
+                *state.write().await = RelayState::Error("No relay information".to_string());
+                return;
+            }
+        };
+        
+        // First, check if the relay server is up
+        let health_url = format!("{}/api/health", relay.url);
+        let health_check = client.get(&health_url)
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await;
+        
+        if health_check.is_err() || !health_check.unwrap().status().is_success() {
+            debug!("Relay server not available yet, will retry...");
+            // Exponential backoff with cap
+            current_delay = std::cmp::min(current_delay * 2, config.max_delay);
+            continue;
+        }
+        
+        // Relay is up, attempt to register
+        let register_url = format!("{}/api/register", relay.url);
+        let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+        
+        let request = RegisterRequest {
+            hostname: hostname.clone(),
+            display_name: Some(display_name.clone()),
+            ip_address: local_ip,
+            ws_port: local_ws_port,
+            capabilities: capabilities.clone(),
+        };
+        
+        match client.post(&register_url)
+            .json(&request)
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success() {
+                    if let Ok(reg_response) = response.json::<RegisterResponse>().await {
+                        if reg_response.success {
+                            info!("✅ Successfully reconnected to relay server: {} (ID: {})", 
+                                  relay.hostname, reg_response.device_id);
+                            
+                            // Update state
+                            *relay_arc.write().await = Some(relay.clone());
+                            *state.write().await = RelayState::Connected;
+                            reconnect_attempts.store(0, Ordering::SeqCst);
+                            
+                            return;
+                        }
+                    }
+                }
+                warn!("Registration failed during reconnection, will retry...");
+            }
+            Err(e) => {
+                warn!("Reconnection attempt failed: {}", e);
+            }
+        }
+        
+        // Exponential backoff with cap
+        current_delay = std::cmp::min(current_delay * 2, config.max_delay);
     }
 }
 

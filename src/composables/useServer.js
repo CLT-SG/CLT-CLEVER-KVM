@@ -15,7 +15,9 @@ export function useServer() {
     connected: false,
     relayUrl: null,
     relayHostname: null,
-    state: "disconnected"
+    state: "disconnected",
+    autoReconnect: true,
+    reconnectAttempts: 0
   });
   const discoveredRelays = ref([]);
   const relayLoading = ref(false);
@@ -71,6 +73,8 @@ export function useServer() {
       relayStatus.relayUrl = status.relay_url;
       relayStatus.relayHostname = status.relay_hostname;
       relayStatus.state = status.state;
+      relayStatus.autoReconnect = status.auto_reconnect ?? true;
+      relayStatus.reconnectAttempts = status.reconnect_attempts ?? 0;
     } catch (error) {
       console.warn("Failed to check relay status:", error);
       relayStatus.connected = false;
@@ -259,6 +263,8 @@ export function useServer() {
       relayStatus.relayUrl = status.relay_url;
       relayStatus.relayHostname = status.relay_hostname;
       relayStatus.state = status.state;
+      relayStatus.autoReconnect = status.auto_reconnect ?? true;
+      relayStatus.reconnectAttempts = status.reconnect_attempts ?? 0;
       return status;
     } catch (error) {
       console.error("Failed to connect to relay:", error);
@@ -294,12 +300,25 @@ export function useServer() {
       relayStatus.relayUrl = status.relay_url;
       relayStatus.relayHostname = status.relay_hostname;
       relayStatus.state = status.state;
+      relayStatus.autoReconnect = status.auto_reconnect ?? true;
+      relayStatus.reconnectAttempts = status.reconnect_attempts ?? 0;
       return status;
     } catch (error) {
       console.error("Failed to auto-connect to relay:", error);
       return { connected: false };
     } finally {
       relayLoading.value = false;
+    }
+  }
+
+  async function setRelayAutoReconnect(enabled) {
+    try {
+      const status = await invoke("set_relay_auto_reconnect", { enabled });
+      relayStatus.autoReconnect = status.auto_reconnect ?? enabled;
+      return status;
+    } catch (error) {
+      console.error("Failed to set auto-reconnect:", error);
+      throw error;
     }
   }
 
@@ -334,6 +353,7 @@ export function useServer() {
     connectToRelay,
     disconnectFromRelay,
     autoConnectRelay,
-    checkRelayStatus
+    checkRelayStatus,
+    setRelayAutoReconnect
   };
 }

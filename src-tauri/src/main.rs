@@ -62,7 +62,8 @@ fn main() {
             connect_to_relay,
             disconnect_from_relay,
             get_relay_status,
-            auto_connect_relay
+            auto_connect_relay,
+            set_relay_auto_reconnect
         ])
         .setup(|app| {
             info!("✅ Tauri application initialized successfully");

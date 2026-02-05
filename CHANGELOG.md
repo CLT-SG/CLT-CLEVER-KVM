@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [4.2.0] - 2026-02-05
 
 ### Added
+- Relay client auto-reconnection when relay server goes down with exponential backoff (2s to 60s)
+- ReconnectConfig struct for configurable auto-reconnect settings (enabled, initial_delay, max_delay, max_attempts)
+- RelayState::Reconnecting state for tracking reconnection progress
+- set_relay_auto_reconnect Tauri command for toggling auto-reconnect feature
+- Auto-reconnect toggle checkbox in RelayStatus Vue component
+- Reconnection attempt counter display in UI during reconnection
 - HTTPS/TLS support for relay server with automatic self-signed certificate generation
 - New tls.rs module for TLS configuration and certificate management
 - Dual HTTP (port 8881) and HTTPS (port 8443) server support for relay server
@@ -37,6 +43,10 @@ All notable changes to this project will be documented in this file.
 - Comprehensive H.264 streaming documentation (docs/H264_STREAMING_IMPLEMENTATION.md)
 
 ### Changed
+- Enhanced relay client heartbeat to detect connection loss after 3 consecutive failures
+- Extended RelayStatus struct with auto_reconnect and reconnect_attempts fields
+- Updated get_relay_status command to return real-time status from relay client
+- Updated RelayStatus.vue with reconnecting state UI and visual feedback
 - Updated relay server to support both HTTP and HTTPS with single HttpServer instance
 - Updated kvm_client.html template to dynamically select WebSocket protocol (ws:// or wss://) based on page protocol
 - Updated h264-decoder.js with secure context detection for WebCodecs API availability
@@ -69,6 +79,7 @@ All notable changes to this project will be documented in this file.
 - Added tokio-tungstenite, tracing, reqwest, hostname dependencies to Tauri app for relay client
 
 ### Fixed
+- Fixed relay client not recovering when relay server restarts or becomes unavailable
 - Fixed WebCodecs API unavailability in relay server KVM viewer by implementing HTTPS support
 - Fixed mixed content blocking when accessing KVM viewer via HTTPS (WebSocket now uses wss://)
 - Fixed Tauri app devices not appearing in relay server dashboard after launch
