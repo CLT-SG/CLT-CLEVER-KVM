@@ -48,11 +48,10 @@ class H264Decoder {
     async initialize() {
         // Check for WebCodecs support
         if ('VideoDecoder' in window) {
-            console.log('🎬 WebCodecs API available - using hardware decoding');
             this.useWebCodecs = true;
             await this.initializeWebCodecs();
         } else {
-            console.log('⚠️ WebCodecs not available - using software decoding');
+            console.log('ℹ️ WebCodecs API not available in this browser - using software decoding');
             this.useWebCodecs = false;
             this.initializeSoftwareDecoder();
         }
@@ -72,12 +71,12 @@ class H264Decoder {
             const support = await VideoDecoder.isConfigSupported(config);
             
             if (!support.supported) {
-                console.warn('H.264 Baseline not supported, trying Main profile');
-                config.codec = 'avc1.4D001E'; // Main profile
+                // Try Main profile
+                config.codec = 'avc1.4D001E';
                 const mainSupport = await VideoDecoder.isConfigSupported(config);
                 
                 if (!mainSupport.supported) {
-                    throw new Error('H.264 decoding not supported');
+                    throw new Error('H.264 decoding not supported by WebCodecs');
                 }
             }
             
@@ -89,11 +88,11 @@ class H264Decoder {
             this.decoder.configure(config);
             this.isReady = true;
             
-            console.log('✅ WebCodecs H.264 decoder initialized:', config.codec);
+            console.log('🎬 WebCodecs H.264 decoder initialized (hardware accelerated)');
             this.onReady();
             
         } catch (error) {
-            console.error('WebCodecs initialization failed:', error);
+            console.log('ℹ️ WebCodecs initialization unavailable, using software decoder');
             this.useWebCodecs = false;
             this.initializeSoftwareDecoder();
         }
@@ -110,7 +109,7 @@ class H264Decoder {
         });
         
         this.isReady = true;
-        console.log('✅ Software decoder initialized');
+        console.log('✅ Software decoder ready');
         this.onReady();
     }
     

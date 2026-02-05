@@ -64,6 +64,11 @@ All notable changes to this project will be documented in this file.
 - Fixed green screen issue in H.264 decoder by correcting YUV to RGB color conversion formula
 - Changed YUV to RGB conversion from BT.601 limited range to BT.601 full range in kvm-client.js and h264-decoder.js
 - Fixed bilinear sampling in high-quality YUV decoder for smoother video output
+- Fixed relay server KVM viewer "Device is not streaming" error by adding stream_start message to Tauri relay client WebSocket connection
+- Fixed devices not appearing in registry when connecting via WebSocket without prior HTTP registration by adding ensure_device() auto-registration
+- Fixed WebSocket connection handling to properly update device heartbeat and state on connect
+- Improved relay KVM client error handling to show informational messages instead of errors for non-critical issues
+- Changed WebCodecs unavailability message from warning to informational in h264-decoder.js
 
 ### Removed
 - Deleted src-tauri/web-client folder (unused duplicate files)

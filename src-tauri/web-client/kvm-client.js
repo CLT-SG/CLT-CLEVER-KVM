@@ -71,7 +71,12 @@ class KVMClient {
                 width: this.screenWidth,
                 height: this.screenHeight,
                 onFrame: (frame, metadata) => this.handleH264Frame(frame, metadata),
-                onError: (error) => console.error('H.264 decode error:', error),
+                onError: (error) => {
+                    // Only log actual decode errors, not initialization warnings
+                    if (error && error.message) {
+                        console.warn('H.264 decode warning:', error.message);
+                    }
+                },
                 onReady: () => {
                     console.log('✅ H.264 decoder ready');
                     this.supportsHardwareDecoding = this.h264Decoder?.useWebCodecs || false;

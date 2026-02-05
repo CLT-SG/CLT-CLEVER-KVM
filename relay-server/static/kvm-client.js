@@ -10,6 +10,7 @@ class RelayKVMClient {
         this.ws = null;
         this.connected = false;
         this.h264Decoder = null;
+        this.receivedFirstFrame = false;
         
         // Display elements
         this.videoScreen = document.getElementById('video-screen');
@@ -83,10 +84,14 @@ class RelayKVMClient {
                 width: this.streamWidth,
                 height: this.streamHeight,
                 onFrame: (frame, metadata) => this.handleDecodedFrame(frame, metadata),
-                onError: (error) => console.error('H.264 decode error:', error),
+                onError: (error) => {
+                    // Only log actual decode errors, not initialization warnings
+                    if (error && error.message) {
+                        console.warn('H.264 decode warning:', error.message);
+                    }
+                },
                 onReady: () => {
                     console.log('✅ H.264 decoder ready');
-                    this.hideStatus();
                 }
             });
         } else {
@@ -270,7 +275,7 @@ class RelayKVMClient {
         this.ws.onopen = () => {
             console.log('✅ Connected to relay server');
             this.connected = true;
-            this.showStatus('Connected', 'Waiting for video stream...');
+            this.showStatus('Connected', 'Waiting for video stream from device...');
             this.startPing();
         };
         
@@ -283,15 +288,24 @@ class RelayKVMClient {
         };
         
         this.ws.onclose = (event) => {
-            console.log('🔌 Disconnected from relay server');
             this.connected = false;
-            this.showStatus('Disconnected', 'Connection to relay server closed.');
             this.stopPing();
+            
+            // Check if this was an abnormal closure
+            if (event.code === 1000) {
+                console.log('🔌 Disconnected from relay server (normal closure)');
+                this.showStatus('Disconnected', 'Connection closed.');
+            } else if (event.code === 1006) {
+                console.log('🔌 Connection to relay server lost');
+                this.showStatus('Connection Lost', 'Unable to reach the relay server. Please check your network connection.');
+            } else {
+                console.log(`🔌 Disconnected from relay server (code: ${event.code})`);
+                this.showStatus('Disconnected', 'Connection to relay server closed.');
+            }
         };
         
         this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            this.showStatus('Error', 'Failed to connect to relay server.');
+            console.warn('WebSocket connection issue:', error);
         };
     }
     
@@ -312,6 +326,12 @@ class RelayKVMClient {
      */
     handleBinaryMessage(data) {
         const bytes = new Uint8Array(data);
+        
+        // Hide status overlay on first frame received
+        if (!this.receivedFirstFrame) {
+            this.receivedFirstFrame = true;
+            this.hideStatus();
+        }
         
         // Check for H.264 magic header
         if (bytes.length > 4) {
@@ -338,16 +358,16 @@ class RelayKVMClient {
             switch (msg.type) {
                 case 'connected':
                     console.log(`✅ Connected to device: ${msg.device_name}`);
-                    this.streamWidth = msg.width;
-                    this.streamHeight = msg.height;
+                    this.streamWidth = msg.width || this.streamWidth;
+                    this.streamHeight = msg.height || this.streamHeight;
                     this.setupCanvas();
-                    this.hideStatus();
+                    this.showStatus('Connected', 'Waiting for video stream from device...');
                     break;
                     
                 case 'stream_init':
                     console.log(`📺 Stream initialized: ${msg.width}x${msg.height} @ ${msg.framerate}fps`);
-                    this.streamWidth = msg.width;
-                    this.streamHeight = msg.height;
+                    this.streamWidth = msg.width || this.streamWidth;
+                    this.streamHeight = msg.height || this.streamHeight;
                     this.setupCanvas();
                     if (this.h264Decoder) {
                         this.h264Decoder.updateDimensions(msg.width, msg.height);
@@ -360,16 +380,23 @@ class RelayKVMClient {
                     break;
                     
                 case 'error':
-                    console.error('Server error:', msg.message);
-                    this.showStatus('Error', msg.message);
+                    console.warn('Server message:', msg.message);
+                    // Only show critical errors to user
+                    if (msg.message.includes('offline') || msg.message.includes('not found')) {
+                        this.showStatus('Error', msg.message);
+                    }
                     break;
                     
                 case 'device_offline':
-                    this.showStatus('Device Offline', 'The device has disconnected.');
+                    this.showStatus('Device Offline', 'The device has disconnected. Waiting for reconnection...');
                     break;
+                    
+                default:
+                    // Unknown message type, log for debugging
+                    console.log('Received message:', msg);
             }
         } catch (e) {
-            console.error('Failed to parse message:', e);
+            // Non-JSON message, ignore silently
         }
     }
     

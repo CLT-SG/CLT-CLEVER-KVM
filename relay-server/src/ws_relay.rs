@@ -200,6 +200,9 @@ pub async fn handle_device_connection(
     let hostname = hostname.to_lowercase();
     info!("🔌 Device connected: {}", hostname);
 
+    // Ensure device exists in registry (auto-register if needed)
+    let _ = registry.ensure_device(&hostname).await;
+
     // Create input channel for receiving input events from viewers
     let (input_tx, mut input_rx) = mpsc::channel::<Vec<u8>>(100);
 
@@ -360,15 +363,10 @@ pub async fn handle_viewer_connection(
         }
     };
 
-    // Subscribe to device's video stream
-    let mut video_rx = match ws_state.subscribe_to_device(&hostname) {
-        Some(rx) => rx,
-        None => {
-            error!("Device {} is not streaming", hostname);
-            let _ = send_error(&mut session, "Device is not streaming").await;
-            return;
-        }
-    };
+    // Get or create broadcast channel for this device
+    // This ensures viewers can connect even if device hasn't sent frames yet
+    let broadcast_tx = ws_state.get_device_broadcast(&hostname);
+    let mut video_rx = broadcast_tx.subscribe();
 
     // Register viewer
     let viewer = Viewer::new(SocketAddr::from(([0, 0, 0, 0], 0)), hostname.clone());

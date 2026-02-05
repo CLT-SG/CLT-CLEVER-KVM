@@ -319,7 +319,7 @@ impl DeviceRegistry {
         }
     }
     
-    /// Update device heartbeat
+    /// Update device heartbeat (returns true if device exists)
     pub async fn heartbeat(&self, hostname: &str) -> bool {
         let hostname = hostname.to_lowercase();
         if let Some(device) = self.devices.get(&hostname) {
@@ -328,6 +328,23 @@ impl DeviceRegistry {
         } else {
             false
         }
+    }
+    
+    /// Ensure a device exists in the registry, creating it if necessary
+    /// This is called when a device connects via WebSocket
+    pub async fn ensure_device(&self, hostname: &str) -> Device {
+        let hostname = hostname.to_lowercase();
+        
+        // Check if device already exists
+        if let Some(device) = self.devices.get(&hostname) {
+            let mut d = device.write().await;
+            d.touch();
+            return d.clone();
+        }
+        
+        // Create a new device with minimal info
+        let device = Device::new(hostname.clone(), "0.0.0.0".to_string(), 0);
+        self.register_device(device).await
     }
     
     /// Update device stream state

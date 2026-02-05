@@ -48,6 +48,18 @@ impl Default for DeviceCapabilities {
     }
 }
 
+/// Stream start message to relay server
+#[derive(Debug, Serialize)]
+struct StreamStartMessage {
+    #[serde(rename = "type")]
+    msg_type: String,
+    width: u32,
+    height: u32,
+    framerate: u32,
+    bitrate_kbps: u32,
+    codec: String,
+}
+
 /// Registration request to relay server
 #[derive(Debug, Serialize)]
 pub struct RegisterRequest {
@@ -267,6 +279,17 @@ impl RelayClient {
     
     /// Connect via WebSocket for streaming
     pub async fn connect_ws(&mut self) -> Result<mpsc::Sender<Vec<u8>>, String> {
+        self.connect_ws_with_config(1920, 1080, 60, 6000).await
+    }
+    
+    /// Connect via WebSocket for streaming with specific configuration
+    pub async fn connect_ws_with_config(
+        &mut self,
+        width: u32,
+        height: u32,
+        framerate: u32,
+        bitrate_kbps: u32,
+    ) -> Result<mpsc::Sender<Vec<u8>>, String> {
         let relay = self.relay.read().await.clone()
             .ok_or("Not connected to relay server")?;
         
@@ -283,6 +306,25 @@ impl RelayClient {
                 let (mut ws_tx, mut ws_rx) = ws_stream.split();
                 let (frame_tx, mut frame_rx) = mpsc::channel::<Vec<u8>>(100);
                 let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+                
+                // Send stream_start message to notify relay server of stream configuration
+                let stream_start = StreamStartMessage {
+                    msg_type: "stream_start".to_string(),
+                    width,
+                    height,
+                    framerate,
+                    bitrate_kbps,
+                    codec: "h264".to_string(),
+                };
+                
+                if let Ok(json) = serde_json::to_string(&stream_start) {
+                    if let Err(e) = ws_tx.send(Message::Text(json)).await {
+                        warn!("Failed to send stream_start message: {}", e);
+                    } else {
+                        info!("📺 Sent stream_start: {}x{} @ {}fps, {} kbps", 
+                              width, height, framerate, bitrate_kbps);
+                    }
+                }
                 
                 let state = self.state.clone();
                 let hostname = self.hostname.clone();

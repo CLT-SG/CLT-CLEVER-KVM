@@ -138,6 +138,17 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - **relay-server/templates/kvm_client.html**: Fixed server_port to render as number instead of string
 - **relay-server/templates/kvm_client.html**: Fixed wsUrl to use correct server hostname format
 
+### Relay Server WebSocket Connection Fix
+- **src-tauri/src/network/relay_client.rs**: Added StreamStartMessage struct for sending stream configuration to relay server
+- **src-tauri/src/network/relay_client.rs**: Added connect_ws_with_config() method that sends stream_start message immediately upon WebSocket connection
+- **relay-server/src/device.rs**: Added ensure_device() method for auto-registering devices connecting via WebSocket without prior HTTP registration
+- **relay-server/src/ws_relay.rs**: Updated device WebSocket handler to call ensure_device() to ensure device exists in registry
+- **relay-server/static/kvm-client.js**: Improved WebSocket connection error handling with better status messages
+- **relay-server/static/kvm-client.js**: Added receivedFirstFrame tracking to properly manage status overlay visibility
+- **relay-server/static/h264-decoder.js**: Changed WebCodecs unavailability warning to informational message
+- **src-tauri/web-client/h264-decoder.js**: Changed WebCodecs unavailability warning to informational message
+- **src-tauri/web-client/kvm-client.js**: Improved H.264 decoder error handling
+
 ### Deleted Files
 - **src-tauri/web-client/**: Removed unused web-client folder (h264-decoder.js, index.html, kvm-client.css, kvm-client.js, kvm-template-parts.js, kvm-template.html)
 
@@ -163,3 +174,6 @@ Replaced the problematic `scap`/`zed-scap` dependency with native platform-speci
 - Vue RelayStatus component displays connection status correctly
 - Relay server dashboard shows connected devices after Tauri app launch
 - Template rendering works correctly with boolean values using Tera conditional syntax
+- Verified Tauri relay client sends stream_start message upon WebSocket connection
+- Confirmed devices auto-register when connecting via WebSocket without prior HTTP registration
+- Tested KVM viewer displays proper status messages during connection states
