@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use tokio::{
     sync::{mpsc, broadcast},
     task::JoinHandle,
-    net::TcpListener
 };
 use tauri::AppHandle;
 use tower_http::trace::TraceLayer;
@@ -16,6 +15,7 @@ use tower_http::services::ServeDir;
 use std::convert::Infallible;
 use axum::http::{StatusCode, Response};
 use axum::body::Body;
+use axum_server::tls_rustls::RustlsConfig;
 
 use super::handlers::{kvm_client_handler, static_file_handler, ws_handler_with_stop};
 
@@ -54,6 +54,44 @@ async fn handle_404() -> Result<Response<Body>, Infallible> {
         .unwrap())
 }
 
+/// Generate a self-signed TLS certificate for HTTPS.
+/// WebCodecs API requires a secure context (HTTPS) when accessed from non-localhost.
+fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>), String> {
+    use rcgen::generate_simple_self_signed;
+    
+    let mut subject_alt_names = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+    ];
+    
+    // Add local network IP so the cert is valid for LAN access
+    if let Ok(ip) = local_ip_address::local_ip() {
+        subject_alt_names.push(ip.to_string());
+    }
+    
+    // Add all network interface IPs for broader LAN compatibility
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (_, ip) in interfaces {
+            let ip_str = ip.to_string();
+            if !ip.is_loopback() && !subject_alt_names.contains(&ip_str) {
+                subject_alt_names.push(ip_str);
+            }
+        }
+    }
+    
+    log::info!("Generating self-signed TLS certificate with SANs: {:?}", subject_alt_names);
+    
+    let cert = generate_simple_self_signed(subject_alt_names)
+        .map_err(|e| format!("Failed to generate self-signed certificate: {}", e))?;
+    
+    let cert_pem = cert.serialize_pem().map_err(|e| format!("Failed to serialize cert PEM: {}", e))?.into_bytes();
+    let key_pem = cert.serialize_private_key_pem().into_bytes();
+    
+    log::info!("✅ Self-signed TLS certificate generated for HTTPS (WebCodecs secure context)");
+    
+    Ok((cert_pem, key_pem))
+}
+
 impl WebSocketServer {
     pub async fn new(port: u16, _app_handle: AppHandle) -> Result<Self, String> {
         // Channel for shutdown signal
@@ -82,40 +120,39 @@ impl WebSocketServer {
             )
             .layer(TraceLayer::new_for_http());
 
-        // Create TCP listener - bind to all interfaces (0.0.0.0)
+        // Bind address to all interfaces (0.0.0.0)
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        log::info!("Attempting to bind server to address: {}", addr);
+        log::info!("Attempting to bind HTTPS server to address: {}", addr);
         
-        let listener = match TcpListener::bind(addr).await {
-            Ok(listener) => {
-                log::info!("Successfully bound to address: {}", addr);
-                match listener.local_addr() {
-                    Ok(local_addr) => log::info!("Server listening on local address: {}", local_addr),
-                    Err(e) => log::warn!("Could not get local address: {}", e),
-                }
-                listener
-            },
-            Err(e) => {
-                log::error!("Failed to bind to address {}: {}", addr, e);
-                return Err(format!("Failed to bind to address {}: {}. Make sure port {} is not in use and you have permission to bind to it.", addr, e, port));
-            },
-        };
+        // Generate self-signed TLS certificate
+        let (cert_pem, key_pem) = generate_self_signed_cert()?;
+        let tls_config = RustlsConfig::from_pem(cert_pem, key_pem).await
+            .map_err(|e| format!("Failed to configure TLS: {}", e))?;
         
-        log::info!("WebSocket server listening on {}", addr);
+        log::info!("🔒 HTTPS/WSS server listening on {}", addr);
+        log::info!("   WebCodecs API will be available (secure context)");
 
-        // Create server with axum
-        let server = axum::serve(
-            listener,
-            app.into_make_service()
-        ).with_graceful_shutdown(async move {
-            shutdown_rx.recv().await;
-        });
+        // Create HTTPS server with axum-server
+        let handle = axum_server::Handle::new();
+        let shutdown_handle = handle.clone();
+        
+        let server = axum_server::bind_rustls(addr, tls_config)
+            .handle(handle)
+            .serve(app.into_make_service());
 
         // Spawn the server task
         let server_handle = tokio::spawn(async move {
             if let Err(e) = server.await {
                 log::error!("Server error: {}", e);
             }
+        });
+        
+        // Spawn a task to listen for shutdown signal
+        let shutdown_tx_clone = shutdown_tx.clone();
+        tokio::spawn(async move {
+            shutdown_rx.recv().await;
+            log::info!("Shutdown signal received, stopping HTTPS server...");
+            shutdown_handle.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
         });
 
         Ok(WebSocketServer {
@@ -142,6 +179,6 @@ impl WebSocketServer {
             log::error!("Failed to join server task: {}", e);
         }
 
-        log::info!("WebSocket server shut down");
+        log::info!("HTTPS server shut down");
     }
 }

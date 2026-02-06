@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
 
-use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop, handle_socket_ultra};
+use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop};
 
 fn get_web_client_path() -> PathBuf {
     // Try multiple possible locations for the web-client directory

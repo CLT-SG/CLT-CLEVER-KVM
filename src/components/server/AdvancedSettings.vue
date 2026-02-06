@@ -9,57 +9,31 @@
     <div class="setting-group">
       <h4>Video Codec</h4>
       <div class="codec-info">
-        <span class="codec-badge">H.264</span>
-        <span class="codec-description">Hardware-accelerated encoding (NVENC/QuickSync/AMF/VideoToolbox)</span>
+        <span class="codec-badge">VP9</span>
+        <span class="codec-description">Software encoding via libvpx (VP8/VP9)</span>
       </div>
     </div>
     
     <div class="setting-group">
-      <h4>Performance</h4>
-      <label>
-        <input type="checkbox" v-model="settings.hardwareAcceleration" :disabled="disabled" />
-        Hardware Acceleration (uses GPU encoding if available)
-      </label>
-      <label>
-        <input type="checkbox" v-model="settings.deltaEncoding" :disabled="disabled" />
-        Delta Encoding (only send changed screen parts)
-      </label>
-      <label>
-        <input type="checkbox" v-model="settings.adaptiveQuality" :disabled="disabled" />
-        Adaptive Quality (adjust based on network conditions)
-      </label>
-    </div>
-    
-    <div class="setting-group">
-      <h4>Bitrates & Quality</h4>
+      <h4>Bitrate &amp; Quality</h4>
       <div class="slider-group">
-        <label for="video-bitrate">Video Bitrate: {{ settings.videoBitrate }} kbps</label>
-        <input type="range" id="video-bitrate" v-model="settings.videoBitrate"
+        <label for="video-bitrate">Video Bitrate: {{ settings.bitrate }} kbps</label>
+        <input type="range" id="video-bitrate" v-model.number="settings.bitrate"
                min="1000" max="12000" step="500" :disabled="disabled" />
       </div>
       
       <div class="slider-group">
-        <label for="audio-bitrate">Audio Bitrate: {{ settings.audioBitrate }} kbps</label>
-        <input type="range" id="audio-bitrate" v-model="settings.audioBitrate"
-               min="32" max="256" step="16" :disabled="disabled" />
-      </div>
-      
-      <div class="slider-group">
-        <label for="framerate">Framerate: {{ settings.framerate }} FPS</label>
-        <input type="range" id="framerate" v-model="settings.framerate"
+        <label for="framerate">Framerate: {{ settings.fps }} FPS</label>
+        <input type="range" id="framerate" v-model.number="settings.fps"
                min="15" max="60" step="5" :disabled="disabled" />
       </div>
     </div>
-    
+
     <div class="setting-group">
       <h4>Features</h4>
       <label>
-        <input type="checkbox" v-model="settings.encryptionEnabled" :disabled="disabled" />
-        Enable Encryption (secure connection)
-      </label>
-      <label>
-        <input type="checkbox" v-model="settings.useWebRTC" :disabled="disabled" />
-        Enable WebRTC Audio
+        <input type="checkbox" v-model="settings.allowRemoteInput" :disabled="disabled" />
+        Allow Remote Input (keyboard &amp; mouse)
       </label>
     </div>
   </div>

@@ -1,205 +1,87 @@
-# Fix Windows Screen Capture Compatibility Issues
+# Replace H.264/Relay Architecture with RDEngine VP9 Streaming and HTTPS
 
 ## Problem
 
-The application failed to compile and run on Windows due to breaking API changes between the `scap`/`zed-scap` screen capture library and `windows-capture 1.5.0`. The original dependencies had incompatible version requirements causing build failures and runtime crashes when attempting screen capture.
+The previous streaming architecture had several issues:
+
+1. H.264 hardware encoding required GPU-specific drivers (NVENC, QuickSync, AMF, VideoToolbox) making it unreliable across different machines
+2. The relay server added unnecessary complexity for LAN-only KVM usage (separate Actix Web project with device registry, mDNS discovery, WebSocket relay)
+3. The old streaming module was ~6,500 lines across 13 files with deep dependency chains (webrtc, zed-scap, av-data, image, rayon)
+4. WebCodecs API was blocked when accessing the web client from LAN devices via HTTP because browsers require a secure context (HTTPS or localhost) for WebCodecs
 
 ## Solution
 
-Replaced the problematic `scap`/`zed-scap` dependency with native platform-specific screen capture implementations. This provides:
+Replaced the entire H.264/relay streaming stack with a RustDesk-inspired VP9 streaming engine (rdengine) and added self-signed HTTPS for WebCodecs support:
 
-- Stable screen capture using direct platform API calls
-- Cross-platform support for Windows, Linux (X11), and macOS
-- Windows: GDI (GetDC, BitBlt, GetDIBits) for maximum compatibility
-- Linux: X11 library (XGetImage) with RandR extension for multi-monitor support
-- macOS: Core Graphics (CGDisplayCreateImage) for Quartz display capture
-- No external dependency conflicts
-- Reliable RGBA frame output for streaming
+1. New rdengine module (~2,200 lines, 6 files) using VP8/VP9 software encoding via libvpx -- works on any machine without GPU dependencies
+2. Removed relay server entirely (24 files deleted) -- direct WebSocket streaming only
+3. Removed old streaming module (13 files deleted) and audio module (2 files deleted)
+4. Added self-signed TLS certificate generation at runtime using rcgen, served via axum-server with rustls for HTTPS
+5. Updated web client with VP9 WebCodecs decoder and rdengine binary protocol support
 
 ## Changes Made
 
-### Core Changes
-- **src-tauri/Cargo.toml**: Replaced `scap` with `zed-scap 0.0.8-zed` and pinned `windows-capture` to version `1.4.4` to avoid breaking changes
-- **src-tauri/Cargo.toml**: Added platform-specific dependencies for Linux (x11rb with randr) and macOS (core-graphics, core-foundation)
-- **src-tauri/src/core/native_capture.rs**: New cross-platform native screen capture module supporting Windows GDI, Linux X11, and macOS Core Graphics
-- **src-tauri/src/core/capture.rs**: Refactored to use the new native capture backend with cross-platform documentation
-- **src-tauri/src/core/mod.rs**: Added native_capture module export
+### New Files - RDEngine Streaming Module
+- **src-tauri/src/rdengine/mod.rs**: Module root with public re-exports
+- **src-tauri/src/rdengine/codec.rs**: VPX encoder wrapper (VP8/VP9 via libvpx-sys FFI) with BGRA/RGBA to I420 color conversion
+- **src-tauri/src/rdengine/video_service.rs**: Dedicated OS thread for capture, dedup, encode, broadcast loop
+- **src-tauri/src/rdengine/audio_service.rs**: Audio capture (cpal) with Opus encoding on dedicated thread
+- **src-tauri/src/rdengine/connection.rs**: WebSocket connection handler with separated video/control paths
+- **src-tauri/src/rdengine/protocol.rs**: Binary frame protocol definitions (video, audio, ping/pong)
+- **src-tauri/src/rdengine/qos.rs**: Adaptive quality control (FPS/bitrate from RTT measurement)
 
-### Streaming Updates
-- **src-tauri/src/streaming/codecs/realtime_codec.rs**: Updated to use native ScreenCapture
-- **src-tauri/src/streaming/codecs/yuv420_encoder.rs**: Updated to use native ScreenCapture
-- **src-tauri/src/streaming/enhanced/ultra_low_latency.rs**: Updated to use native ScreenCapture
-- **src-tauri/src/streaming/handlers/integrated_handler.rs**: Updated monitor enumeration to use native capture
-- **src-tauri/src/streaming/handlers/ultra_stream.rs**: Simplified fallback capture to RGBA format
+### New Files - Web Client
+- **src-tauri/web-client/vpx-decoder.js**: VP8/VP9 WebCodecs decoder with hardware acceleration support
 
-### Configuration
-- **src-tauri/tauri.conf.json**: Simplified Debian package dependencies
+### New Files - Documentation
+- **docs/RDENGINE_STREAMING_IMPLEMENTATION.md**: Technical documentation for the rdengine architecture
 
-### Web Client Fixes
-- **src-tauri/web-client/kvm-client.js**: Fixed black screen issue by setting default screen dimensions to 1920x1080 instead of 0x0
-- **src-tauri/web-client/kvm-client.js**: Fixed mouse coordinate calculation to use dynamically created canvas as target element
-- **src-tauri/web-client/kvm-client.js**: Added bounds checking and dimension validation for coordinate scaling
-- **src-tauri/web-client/kvm-client.js**: Fixed RGBA frame data copying to prevent ArrayBuffer reuse issues
-- **src-tauri/web-client/kvm-client.js**: Added connection health monitoring with automatic reconnection on stale connections
-- **src-tauri/web-client/kvm-client.css**: Fixed cursor visibility from 'none' to 'crosshair' for remote control
+### Modified Files - HTTPS/TLS Support
+- **src-tauri/src/network/server/server.rs**: Replaced TcpListener with axum-server bind_rustls, added self-signed certificate generation using rcgen with local IP SANs
+- **src-tauri/src/app/commands.rs**: Changed server URL from http to https, removed relay commands, simplified to rdengine settings
+- **src-tauri/Cargo.toml**: Added axum-server (tls-rustls), rcgen, rustls, rustls-pemfile, libvpx-sys, cpal, opus, crossbeam-channel, crossbeam-queue, gethostname; removed tokio-tungstenite, tracing, reqwest, hostname, webrtc, zed-scap, image, av-data, rayon, webm, matroska
 
-### Input Handling Fixes
-- **src-tauri/src/streaming/handlers/ultra_stream.rs**: Added input event parsing and handling for mouse/keyboard events
-- **src-tauri/src/streaming/handlers/ultra_stream.rs**: Changed InputHandler to use Arc<parking_lot::Mutex> for thread-safe access
-- **src-tauri/src/streaming/handlers/realtime_stream.rs**: Added input event parsing and handling for mouse/keyboard events
-- **src-tauri/src/streaming/handlers/realtime_stream.rs**: Changed InputHandler to use Arc<parking_lot::Mutex> for thread-safe access
+### Modified Files - Web Client
+- **src-tauri/web-client/kvm-client.js**: Added VP8/VP9 decoder integration, rdengine binary protocol parsing, updated server_info handling for codec and protocol_version
+- **src-tauri/web-client/kvm-template.html**: Added vpx-decoder.js script reference
 
-### H.264 Hardware-Accelerated Streaming
-- **src-tauri/src/streaming/codecs/h264_encoder.rs**: New H.264 hardware encoder with auto-detection for NVENC, QuickSync, AMF, VAAPI, and VideoToolbox
-- **src-tauri/src/streaming/codecs/mod.rs**: Added h264_encoder module export
-- **src-tauri/src/streaming/handlers/low_latency_pipeline.rs**: New low-latency streaming pipeline with target latency under 20ms on LAN
-- **src-tauri/src/streaming/handlers/mod.rs**: Added low_latency_pipeline module export
-- **src-tauri/src/network/server/websocket.rs**: Updated to use new H.264 low-latency pipeline
-- **src-tauri/web-client/h264-decoder.js**: New WebCodecs-based H.264 decoder for browser-side hardware acceleration
-- **src-tauri/web-client/kvm-client.js**: Added H.264 frame handling and decoder integration
-- **src-tauri/web-client/kvm-template.html**: Added h264-decoder.js script reference
-- **docs/H264_STREAMING_IMPLEMENTATION.md**: Comprehensive technical documentation for H.264 streaming implementation
-- **README.md**: Updated with H.264 streaming features and removed legacy VP8/WebM references
+### Modified Files - Backend Cleanup
+- **src-tauri/src/main.rs**: Removed relay commands, added rdengine module
+- **src-tauri/src/network/mod.rs**: Removed relay_client module
+- **src-tauri/src/network/server/websocket.rs**: Updated to use rdengine ConnectionHandler
+- **src-tauri/src/network/server/handlers.rs**: Simplified handler configuration
+- **src-tauri/src/app/state.rs**: Removed RelayClient/RelayStatus, simplified settings to bitrate/fps/codec
 
-### H.264-Only Codec Standardization
-- **src-tauri/src/streaming/codecs/realtime_codec.rs**: Changed CodecType enum from VP8 to H264, updated codec string matching
-- **src-tauri/src/streaming/codecs/yuv420_encoder.rs**: Renamed error variants and config fields from WebM to H.264 naming
-- **src-tauri/src/streaming/handlers/realtime_stream.rs**: Updated server_info codec to h264
-- **src-tauri/src/streaming/handlers/integrated_handler.rs**: Changed all config presets to use H.264, renamed methods from webm_* to h264_*
-- **src-tauri/src/streaming/enhanced/mod.rs**: Removed VP8 module references, updated documentation
-- **src-tauri/src/streaming/enhanced/enhanced_audio.rs**: Renamed for_webm() to for_high_quality_streaming()
-- **src-tauri/src/streaming/enhanced/ultra_low_latency.rs**: Updated comments to remove VP8 reference
-- **src-tauri/src/network/server/websocket.rs**: Renamed WebMConfig to H264Config, updated handler function names
-- **src-tauri/src/network/server/handlers.rs**: Changed default codec from vp8 to h264
-- **src-tauri/src/app/state.rs**: Renamed vp8 option to hardware_accel
-- **src-tauri/src/app/commands.rs**: Updated debug logging to use hardware_accel
-- **src-tauri/src/README.md**: Updated directory structure documentation
-- **src-tauri/Cargo.toml**: Updated keywords from vp8 to h264, commented out webm/matroska dependencies
-- **src-tauri/tauri.conf.json**: Updated longDescription to reference H.264
-- **src/composables/useServer.js**: Removed useVP8 setting, changed selectedCodec to h264
-- **src/constants/presets.js**: Removed useVP8 flag from all presets
-- **src/components/server/AdvancedSettings.vue**: Replaced VP8 codec selection with H.264 info badge
-- **src-tauri/web-client/kvm-client.js**: Removed VP8/WebM decoder code, updated to H.264-only
-- **src-tauri/web-client/kvm-template.html**: Updated codec dropdown to H.264 only
-- **src-tauri/web-client/kvm-template-parts.js**: Updated codec initialization to h264
-- **scripts/build.sh**: Updated build messages to reference H.264
-- **scripts/build.bat**: Updated build messages to reference H.264
+### Modified Files - Frontend Cleanup
+- **src/App.vue**: Removed RelayStatus component and relay-related state
+- **src/components/server/AdvancedSettings.vue**: Replaced H.264/hardware settings with VP9 codec info and simplified bitrate/fps controls
+- **src/components/server/PresetSelector.vue**: Updated presets to gaming/desktop/lowBandwidth
+- **src/components/server/ServerConfiguration.vue**: Renamed monitor to display
+- **src/components/server/index.js**: Removed RelayStatus export
+- **src/constants/presets.js**: Simplified presets to bitrate and fps only
 
-### Deleted Files
-- **src-tauri/src/streaming/enhanced/enhanced_video_vp8.rs**: Removed obsolete VP8 encoder
-- **src-tauri/src/streaming/enhanced/enhanced_video.rs**: Removed obsolete WebM-based encoder
+### Deleted Files - Old Streaming Module (13 files)
+- src-tauri/src/streaming/ (mod.rs, codecs/, enhanced/, handlers/)
 
-### YUV Color Conversion Fix
-- **src-tauri/web-client/kvm-client.js**: Fixed green screen issue by correcting YUV to RGB conversion from BT.601 limited range to full range
-- **src-tauri/web-client/h264-decoder.js**: Fixed YUV to RGB conversion in both parseHighQualityYUV() and parseSliceDataLegacy() methods
+### Deleted Files - Audio Module (2 files)
+- src-tauri/src/audio/ (mod.rs, engine.rs)
 
-### UDP Relay Server (New Component)
-- **relay-server/Cargo.toml**: New Rust project configuration with tokio, socket2, serde, lz4_flex dependencies
-- **relay-server/src/main.rs**: CLI entry point with argument parsing for port, bind address, compression, and timeout settings
-- **relay-server/src/relay.rs**: Core UDP relay server implementation with packet routing and session management
-- **relay-server/src/protocol.rs**: Binary protocol definitions with packet header, video/audio frame headers, and message types
-- **relay-server/src/peer.rs**: Peer and room management with automatic timeout cleanup
-- **relay-server/README.md**: Documentation for relay server usage and protocol specification
+### Deleted Files - Relay Server (24 files)
+- relay-server/ (entire directory including src/, templates/, static/)
 
-### Relay Server v2.0 (Actix Web + Tera Templates)
-- **relay-server/src/device.rs**: Device registry for managing connected KVM devices with capabilities, stream state, and viewer tracking
-- **relay-server/src/discovery.rs**: mDNS service discovery for automatic relay server detection on local network
-- **relay-server/src/http_server.rs**: Actix Web HTTP server with Tera template rendering, REST API, and WebSocket routes
-- **relay-server/src/ws_relay.rs**: WebSocket relay handler for video frame broadcasting and input event forwarding
-- **relay-server/templates/base.html**: Base HTML template with SVG favicon
-- **relay-server/templates/dashboard.html**: Device dashboard with real-time statistics and device cards
-- **relay-server/templates/kvm_client.html**: KVM viewer page with H.264 decoder integration
-- **relay-server/templates/error.html**: Error page template
-- **relay-server/static/dashboard.css**: Dashboard styles with dark theme
-- **relay-server/static/dashboard.js**: Auto-refresh dashboard JavaScript
-- **relay-server/static/kvm-client.css**: KVM client styles
-- **relay-server/static/kvm-client.js**: WebSocket KVM client with input handling
-- **relay-server/static/h264-decoder.js**: H.264 decoder for relay client viewer
-- **relay-server/Cargo.toml**: Added Actix Web 4, actix-ws, actix-files, tera, lazy_static, dashmap, chrono, uuid, mdns-sd, gethostname dependencies
+### Deleted Files - Relay Client and Frontend
+- src-tauri/src/network/relay_client.rs
+- src/components/server/RelayStatus.vue
 
-### Tauri Relay Client Integration
-- **src-tauri/src/network/relay_client.rs**: Relay client module for device registration, mDNS discovery, WebSocket streaming, and heartbeat
-- **src-tauri/src/network/mod.rs**: Added relay_client module export
-- **src-tauri/Cargo.toml**: Added tokio-tungstenite 0.24, tracing 0.1, reqwest 0.12, hostname 0.4 dependencies
-- **src-tauri/src/README.md**: Updated with related components table
-
-### Tauri Relay Client Auto-Registration and UI
-- **src-tauri/src/app/state.rs**: Added RelayClient and RelayStatus to ServerState for relay connection tracking
-- **src-tauri/src/app/commands.rs**: Added Tauri commands for relay management (discover_relay_servers, connect_to_relay, disconnect_from_relay, get_relay_status, auto_connect_relay)
-- **src-tauri/src/main.rs**: Registered relay commands and added auto-connect to relay server on startup
-- **src/components/server/RelayStatus.vue**: New Vue component for displaying relay connection status with discover, connect, disconnect actions
-- **src/components/server/ServerStatus.vue**: Updated with Direct Access URL label, Local Network badge, and text-based buttons
-- **src/components/server/index.js**: Added RelayStatus component export
-- **src/composables/useServer.js**: Added relay state management and functions (discoverRelays, connectToRelay, disconnectFromRelay, autoConnectRelay)
-- **src/App.vue**: Integrated RelayStatus component into Server Status tab
-
-### Relay Client Auto-Reconnection
-- **src-tauri/src/network/relay_client.rs**: Added ReconnectConfig struct, RelayState::Reconnecting state, exponential backoff reconnection logic (2s-60s), heartbeat-based connection loss detection
-- **src-tauri/src/app/state.rs**: Extended RelayStatus with auto_reconnect and reconnect_attempts fields
-- **src-tauri/src/app/commands.rs**: Added set_relay_auto_reconnect command, updated get_relay_status to return real-time client state
-- **src-tauri/src/main.rs**: Registered set_relay_auto_reconnect command in invoke_handler
-- **src/composables/useServer.js**: Added setRelayAutoReconnect function, extended relayStatus with autoReconnect and reconnectAttempts
-- **src/components/server/RelayStatus.vue**: Added reconnecting UI state with attempt counter, auto-reconnect toggle checkbox, cancel reconnection button
-- **src/App.vue**: Added setRelayAutoReconnect prop to RelayStatus component
-
-### Relay Server Template Fix
-- **relay-server/templates/kvm_client.html**: Fixed Tera template syntax for boolean rendering (changed "{{ audio_enabled | lower }}" to conditional block)
-- **relay-server/templates/kvm_client.html**: Fixed server_port to render as number instead of string
-- **relay-server/templates/kvm_client.html**: Fixed wsUrl to use correct server hostname format
-
-### Relay Server WebSocket Connection Fix
-- **src-tauri/src/network/relay_client.rs**: Added StreamStartMessage struct for sending stream configuration to relay server
-- **src-tauri/src/network/relay_client.rs**: Added connect_ws_with_config() method that sends stream_start message immediately upon WebSocket connection
-- **relay-server/src/device.rs**: Added ensure_device() method for auto-registering devices connecting via WebSocket without prior HTTP registration
-- **relay-server/src/ws_relay.rs**: Updated device WebSocket handler to call ensure_device() to ensure device exists in registry
-- **relay-server/static/kvm-client.js**: Improved WebSocket connection error handling with better status messages
-- **relay-server/static/kvm-client.js**: Added receivedFirstFrame tracking to properly manage status overlay visibility
-- **relay-server/static/h264-decoder.js**: Changed WebCodecs unavailability warning to informational message
-- **src-tauri/web-client/h264-decoder.js**: Changed WebCodecs unavailability warning to informational message
-- **src-tauri/web-client/kvm-client.js**: Improved H.264 decoder error handling
-
-### Deleted Files
-- **src-tauri/web-client/**: Removed unused web-client folder (h264-decoder.js, index.html, kvm-client.css, kvm-client.js, kvm-template-parts.js, kvm-template.html)
-
-### Relay Server HTTPS/TLS Support
-- **relay-server/Cargo.toml**: Added TLS dependencies (rustls 0.23 with ring feature, rustls-pemfile, rcgen, dirs, get_if_addrs)
-- **relay-server/src/tls.rs**: New TLS configuration module with self-signed certificate generation using Ed25519 keys
-- **relay-server/src/main.rs**: Added tls module, HTTPS CLI arguments (--https, --https-port, --tls-cert, --tls-key), dual server startup
-- **relay-server/src/http_server.rs**: Added run_server_dual() function for binding both HTTP and HTTPS ports
-- **relay-server/templates/kvm_client.html**: Fixed WebSocket URL to dynamically use ws:// or wss:// based on page protocol
-- **relay-server/static/h264-decoder.js**: Added isSecureContext() check for WebCodecs API with helpful console messages
-- **relay-server/static/kvm-client.js**: Added showDecodingModeNotification() to suggest HTTPS when using software decoding
-- **relay-server/README.md**: Added comprehensive HTTPS/TLS documentation with usage instructions
-- **src-tauri/web-client/h264-decoder.js**: Added secure context detection for WebCodecs API
+### Deleted Files - Old Documentation
+- docs/H264_STREAMING_IMPLEMENTATION.md
+- docs/WEBM_YUV420_ENHANCEMENT.md
+- CHANGELOG.md (root level, moved to docs/)
 
 ## Testing
 
-- Verified screen capture works correctly on Windows
-- Confirmed RGBA frame output is correctly formatted
-- Tested streaming functionality with the web client
-- Verified mouse cursor alignment between client and server
-- Confirmed keyboard and mouse input events are processed correctly
-- Tested connection recovery after stream freeze
-- Verified H.264 hardware encoder detection on Windows (NVENC, QuickSync, AMF)
-- Tested H.264 streaming with WebCodecs decoder in browser
-- Confirmed low-latency pipeline achieves target latency on LAN
-- Verified cross-platform H.264 support on Linux and macOS
-- Fixed green screen video output by correcting YUV to RGB color space conversion
-- Built and tested UDP relay server on Windows
-- Verified relay server packet routing and session management
-- Relay server v2.0 with Actix Web compiles and runs successfully
-- Templates embedded at compile time work from any working directory
-- Tauri app compiles with relay client dependencies
-- Tauri app auto-registers with relay server on startup via mDNS discovery
-- Vue RelayStatus component displays connection status correctly
-- Relay server dashboard shows connected devices after Tauri app launch
-- Template rendering works correctly with boolean values using Tera conditional syntax
-- Verified Tauri relay client sends stream_start message upon WebSocket connection
-- Confirmed devices auto-register when connecting via WebSocket without prior HTTP registration
-- Tested KVM viewer displays proper status messages during connection states
-- Relay server HTTPS works with self-signed certificates on port 8443
-- WebCodecs API available when accessing KVM viewer via HTTPS
-- WebSocket connects via wss:// on HTTPS pages without mixed content errors
-- Relay client auto-reconnects when relay server restarts or becomes available
-- Auto-reconnect toggle persists user preference
-- Reconnection attempts display correctly in UI with exponential backoff timing
+- Verified cargo check passes with 0 errors
+- Confirmed rdengine module compiles with libvpx-sys bindings
+- Verified HTTPS server starts with self-signed certificate
+- Web client auto-detects https to wss for WebSocket connection
+- VP9 WebCodecs decoder initializes in secure context

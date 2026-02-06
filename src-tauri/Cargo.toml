@@ -1,13 +1,13 @@
 [package]
 name = "clever-kvm"
-version = "4.1.0"
+version = "5.0.0"
 description = "A KVM solution built with Tauri"
 authors = ["Clever Technologies"]
 license = "MIT"
 repository = "https://github.com/CLTSG/CLT-CLEVER-KVM"
 homepage = "https://github.com/CLTSG/CLT-CLEVER-KVM"
 documentation = "https://github.com/CLTSG/CLT-CLEVER-KVM#readme"
-keywords = ["kvm", "remote-desktop", "tauri", "h264", "streaming"]
+keywords = ["kvm", "remote-desktop", "tauri", "vp9", "streaming"]
 categories = ["multimedia", "network-programming"]
 edition = "2021"
 
@@ -31,31 +31,25 @@ tower-http = { version = "0.5.0", features = ["fs", "trace"] }
 lazy_static = "1.4.0"
 gethostname = "0.4.3"
 
-# Relay client dependencies
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
-tracing = "0.1"
-reqwest = { version = "0.12", features = ["json"] }
-hostname = "0.4"
-
-# Ultra-performance dependencies for streaming
-webrtc = "0.11.0"
-# Use zed-scap fork instead of scap for Windows compatibility
-# The original scap 0.1.0-beta.1 has breaking API changes with windows-capture 1.5.0
-# zed-scap uses windows-capture ^1.3.6 but we must pin to 1.4.4 to avoid 1.5.0 breaking changes
-zed-scap = "0.0.8-zed"
 anyhow = "1.0.75"
 thiserror = "1.0.50"
-
-# Video encoding and H.264 container support
-# webm = "1.1" # WebM container format (legacy, kept for audio container)
 opus = "0.3" # Opus audio codec
-# matroska = "0.14" # Matroska/WebM muxing (legacy)
-image = "0.24" # Image processing for YUV conversion
-av-data = "0.4" # Audio/Video data structures
+
+# TLS/HTTPS support (required for WebCodecs API on non-localhost)
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rcgen = "0.12" # Self-signed certificate generation at runtime
+rustls = "0.23"
+rustls-pemfile = "2"
+
+# RustDesk-inspired codec dependencies
+libvpx-sys = "1.4" # VP8/VP9 encoding via libvpx FFI (stable Rust compatible)
+libc = "0.2" # C types for libvpx FFI
+cpal = "0.15" # Cross-platform audio capture (WASAPI/ALSA/CoreAudio)
+crossbeam-queue = "0.3" # Lock-free bounded queue for video frames
+crossbeam-channel = "0.5" # Lock-free MPMC channels
 
 # Ultra-high performance dependencies for optimization
 parking_lot = "0.12" # High-performance locks (replaces std::sync::Mutex)
-rayon = "1.8" # Data parallelism for SIMD and multi-core processing
 mimalloc = { version = "0.1", optional = true } # Microsoft's high-performance allocator
 
 # Windows-specific dependencies

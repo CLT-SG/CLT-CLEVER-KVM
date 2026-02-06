@@ -30,4 +30,4 @@ Cargo.lock
 bin
 
 # relay server
-relay-server/target
+relay-server/targetrustdesk/

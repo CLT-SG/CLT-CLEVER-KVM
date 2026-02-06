@@ -1,6 +1,6 @@
 # Clever KVM
 
-A high-performance remote desktop system built with Tauri, featuring native H.264 video encoding with hardware acceleration and ultra-low latency streaming.
+A high-performance remote desktop system built with Tauri, featuring VP9 video encoding via libvpx and ultra-low latency streaming over WebSocket.
 
 ## Quick Start
 
@@ -32,12 +32,12 @@ npm run tauri dev
 
 ## Features
 
-🎥 **Advanced Video Streaming**
-- **H.264 Encoding** with hardware acceleration (NVENC, QuickSync, AMF, VAAPI, VideoToolbox)
-- YUV420 color space optimization (50% better compression than RGB)
-- Ultra-low latency mode (<20ms end-to-end on LAN)
+🎥 **VP9 Video Streaming (RDEngine)**
+- **VP8/VP9 encoding** via libvpx (cross-platform, no hardware-specific dependencies)
+- Frame deduplication — skips encoding when screen is unchanged
+- Adaptive QoS — FPS and bitrate adjust based on network RTT
 - WebCodecs-based browser decoding with hardware acceleration
-- Adaptive quality (1-10 Mbps) and frame rates (15-60 FPS)
+- Configurable quality presets: Gaming (60fps/12Mbps), Desktop (30fps/6Mbps), Low Bandwidth (15fps/2Mbps)
 
 🖥️ **Native Screen Capture**
 - **Cross-Platform Native APIs**: Direct platform API integration for maximum stability
@@ -47,17 +47,17 @@ npm run tauri dev
 - **Multi-Format Frame Support**: Handles BGRA, RGB, and YUV formats with automatic conversion
 - **Monitor Detection**: Automatic display enumeration with fallback for headless systems
 
-🎵 **Professional Audio**
-- Native Opus codec for high-quality audio streaming
-- Multiple quality modes: High (320kbps), Balanced (256kbps), Low Latency (96kbps)
-- Perfect audio/video synchronization
+🎵 **Audio Streaming**
+- Opus codec (48kHz stereo) via cpal + opus crate
+- 10ms frame size for minimal latency
+- Streamed alongside video over the same WebSocket connection
 
 🚀 **Performance**
-- Hardware acceleration (Intel Quick Sync, NVENC, AMD VCE/AMF, Apple VideoToolbox)
-- Cross-platform H.264 hardware encoder detection
-- Multi-threaded encoding with SIMD optimizations
-- Zero external dependencies (no FFmpeg required)
-- Sub-20ms latency on local network with H.264 pipeline
+- Dedicated OS threads for capture/encode (not async — avoids jitter)
+- Pre-allocated YUV buffer reuse across frames
+- `parking_lot` high-performance locks
+- `mimalloc` allocator for optimized memory allocation
+- Sub-40ms latency on local network
 
 🖥️ **Desktop Control**
 - Multi-monitor support
@@ -71,7 +71,6 @@ npm run tauri dev
 - **CPU**: Dual-core 2.0 GHz (Quad-core recommended)
 - **RAM**: 4 GB (8 GB recommended for high-quality streaming)  
 - **Network**: 10 Mbps upload bandwidth
-- **GPU**: Hardware encoding support recommended
 
 ### Development Prerequisites
 - [Node.js](https://nodejs.org/) v16+
@@ -119,121 +118,45 @@ sudo apt install -y build-essential curl wget file libssl-dev \
 ## Usage
 
 1. Launch the Clever KVM application
-2. Select your preferred quality preset from the dropdown
+2. Select your preferred quality preset (Gaming / Desktop / Low Bandwidth)
 3. Click "Start Server" to begin the KVM service  
 4. Use the displayed URL to access your computer from any browser
 
-### Quality Optimization Tips
-- **For Gaming**: Use `?latency=ultra&fps=60&hardware_accel=true`
-- **For Presentations**: Use `?quality=high&audio=true&audio_quality=high`  
-- **For Remote Work**: Use `?quality=balanced&fps=30&bitrate=3000`
-- **For Slow Networks**: Use `?quality=low&fps=15&bitrate=1000`
+### Quality Presets
+
+| Preset | Bitrate | FPS | Use Case |
+|--------|---------|-----|----------|
+| Gaming | 12 Mbps | 60 | Low-latency gaming/video |
+| Desktop | 6 Mbps | 30 | General remote work |
+| Low Bandwidth | 2 Mbps | 15 | Slow networks/mobile |
 
 ## Technology Stack
 
-### Video & Audio
-- **H.264 Video**: Hardware-accelerated encoding with NVENC, QuickSync, AMF, VAAPI, VideoToolbox
-- **Opus Audio**: CD-quality audio streaming
-- **Hardware Acceleration**: Intel Quick Sync, NVENC, AMD VCE/AMF, Apple VideoToolbox
-- **Ultra-Low Latency**: Sub-20ms total latency on LAN
-- **WebCodecs Decoding**: Browser-side hardware-accelerated H.264 decoding
+### Video & Audio (RDEngine)
+- **VP9 Video**: Software encoding via libvpx (cross-platform, no HW-specific deps)
+- **Opus Audio**: Low-latency stereo audio via cpal + opus crate
+- **Binary Protocol**: Minimal-overhead length-prefixed frames over WebSocket
+- **Adaptive QoS**: RTT-based FPS/bitrate adjustment
+- **WebCodecs Decoding**: Browser-side hardware-accelerated VP9 decoding
 
 ### Backend (Rust/Tauri)
-- H.264 hardware-accelerated encoder with cross-platform support
-- Multi-threaded encoding with SIMD optimizations
-- Real-time bitrate adaptation (1-10 Mbps)
-- WebSocket streaming with binary H.264/fMP4 frames
+- Dedicated OS threads for capture/encode (not async — avoids jitter)
+- Frame deduplication (byte-compare before encoding)
+- Pre-allocated YUV buffer reuse
+- `parking_lot` high-performance locks
+- `mimalloc` allocator for optimized memory
 
 ### Frontend (JavaScript/Vue.js)
-- WebCodecs API for hardware-accelerated H.264 decoding
-- Automatic codec detection and fallback
-- Automatic quality adaptation
-- Real-time performance monitoring
-
-## Connection Options
-
-### URL Parameters
-- `quality=high|balanced|low` - Video quality preset
-- `fps=30` - Target frame rate (15-60)
-- `audio=true` - Enable audio streaming
-- `latency=ultra|low|balanced` - Latency optimization mode
-- `hardware_accel=true` - Force hardware acceleration
-
-### Example URLs
-```
-# High-quality streaming with audio (H.264 default)
-http://hostname:9921/kvm?quality=high&audio=true
-
-# Ultra-low latency gaming (60fps)
-http://hostname:9921/kvm?latency=ultra&fps=60
-
-# Bandwidth-optimized
-http://hostname:9921/kvm?quality=balanced&bitrate=1500
-```
-
-## Architecture & Technology Stack
-
-### Backend (Rust/Tauri)
-- **Screen Capture**:
-  - Native platform APIs for cross-platform screen recording (no external dependencies)
-  - Windows: GDI (GetDC, BitBlt, GetDIBits) for maximum compatibility
-  - Linux: X11 library with RandR extension for multi-monitor support
-  - macOS: Core Graphics (CGDisplayCreateImage) for Quartz display capture
-  - Multi-format frame support: BGRA, RGB, YUV with automatic conversion
-  - Automatic format conversion and cursor overlay capabilities
-- **Video Encoding**: 
-  - **H.264 Encoder** with cross-platform hardware acceleration
-    - Windows: NVENC (NVIDIA), QuickSync (Intel), AMF (AMD)
-    - Linux: NVENC, VAAPI (Intel/AMD)
-    - macOS: VideoToolbox (automatic)
-  - Hardware acceleration and SIMD optimizations via `rayon`
-  - Real-time bitrate adaptation (1-10 Mbps) based on network conditions
-- **Audio Encoding**:
-  - Native Opus codec using `opus` crate for high-quality streaming
-  - CD-quality audio (320 kbps) with Forward Error Correction (FEC)
-  - Multiple quality profiles: High (320k), Balanced (256k), Low Latency (96k)
-  - WebRTC peer connection for browser compatibility
-- **Streaming Handlers**:
-  - **Low-Latency H.264 Pipeline**: Sub-20ms streaming with fMP4 container format
-  - **Realtime Handler**: Standard WebSocket streaming with graceful degradation
-- **Performance Optimizations**: 
-  - `parking_lot` high-performance locks (replaces std::sync::Mutex)
-  - `rayon` parallel processing for multi-core SIMD operations
-  - Optional `mimalloc` Microsoft allocator for 15-30% memory performance gains
-
-### Frontend (JavaScript/Vue.js)
-- **Video Decoding**: 
-  - **WebCodecs H.264 Decoder** with hardware acceleration (Chrome 94+, Edge 94+, Safari 16.4+)
-  - Canvas-based rendering for decoded frames
-- **Quality Adaptation**:
-  - Real-time performance monitoring
-  - Automatic quality degradation during network issues
-  - Frame queue management to prevent buffer overruns
+- WebCodecs API for hardware-accelerated VP9 decoding
+- Binary frame parser with minimal header overhead
+- JSON-based control/input protocol
+- Vue 3.5 + Vite 6 management UI
 
 ### Communication Protocol
-- **Primary**: WebSockets with binary H.264/fMP4 streaming
-- **Control**: JSON command protocol for input events and configuration
+- **Video/Audio**: Binary WebSocket frames (length-prefixed)
+- **Control/Input**: JSON text WebSocket messages
 
-### Relay Server (Rust/Actix Web)
-The optional relay server enables multi-device management and remote access:
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **HTTP Server** | Actix Web 4 | High-performance async web framework |
-| **WebSocket** | actix-ws | Real-time bidirectional video/input relay |
-| **Templating** | Tera | Jinja2-style HTML templates with inheritance |
-| **Static Files** | actix-files | CSS, JS, and asset serving |
-| **mDNS** | mdns-sd | Zero-config service discovery on LAN |
-
-**Features:**
-- Web dashboard at `http://{hostname}.local:8881/` showing all connected devices
-- Professional Tera templates (base.html, dashboard.html, kvm_client.html)
-- Device registry with heartbeat monitoring
-- WebSocket relay for video streams and input events
-- REST API for device management
-- mDNS advertisement for automatic discovery
-
-See [relay-server/README.md](relay-server/README.md) for detailed documentation.
+See [RDENGINE_STREAMING_IMPLEMENTATION.md](docs/RDENGINE_STREAMING_IMPLEMENTATION.md) for detailed architecture documentation.
 
 ## Building and Distribution
 
@@ -274,36 +197,25 @@ This will automatically:
 ### Performance Benchmarks
 
 On modern hardware, Clever KVM achieves:
-- **Latency**: <20ms end-to-end on local network (H.264 pipeline)
+- **Latency**: 20–40ms end-to-end on local network (VP9 pipeline)
 - **Quality**: Near-lossless at 4-6 Mbps for desktop content
-- **CPU Usage**: <10% with hardware-accelerated H.264 encoding
-- **Frame Rates**: Stable 60 FPS at 1920x1080 on mid-range systems
-- **Audio Latency**: <20ms with Opus low-delay mode
-- **Memory Usage**: 50% less than FFmpeg-based solutions
+- **CPU Usage**: 5–15% with VP9 software encoding
+- **Frame Rates**: Stable 60 FPS at 1920x1080
+- **Audio Latency**: <20ms with Opus low-delay mode (10ms frames)
+- **Frame Dedup**: 60–95% frames skipped on static desktops
 - **Browser Decoding**: Hardware-accelerated via WebCodecs API
 
-For detailed build instructions, troubleshooting, platform-specific optimizations, and codec configuration, see [BUILD.md](docs/BUILD.md).
+For detailed build instructions, troubleshooting, and platform-specific setup, see [BUILD.md](docs/BUILD.md).
 
 ## Recent Enhancements
 
-### Relay Server v2.0 (February 2026)
-- **Actix Web 4**: High-performance async HTTP server (replaces previous implementation)
-- **Tera Templates**: Professional Jinja2-style HTML templating with inheritance
-- **Web Dashboard**: Modern device management interface at `http://{hostname}.local:8881/`
-- **WebSocket Relay**: Efficient video stream relay using actix-ws
-- **mDNS Discovery**: Zero-config service discovery for automatic device detection
-- **Static File Serving**: Optimized CSS/JS delivery via actix-files
-- See [relay-server/README.md](relay-server/README.md) for detailed documentation
-
-### H.264 Low-Latency Streaming Pipeline (v4.1.0)
-- **H.264 Hardware Encoding**: Cross-platform hardware-accelerated H.264 encoding
-  - Windows: NVENC (NVIDIA), QuickSync (Intel), AMF (AMD)
-  - Linux: NVENC, VAAPI
-  - macOS: VideoToolbox (automatic)
-- **WebCodecs Browser Decoding**: Hardware-accelerated H.264 decoding in browsers
-- **Sub-20ms Latency**: Optimized fMP4 container format for minimal buffering
-- **Cross-Platform Support**: Full support for Windows, Linux (X11), and macOS
-- See [H264_STREAMING_IMPLEMENTATION.md](docs/H264_STREAMING_IMPLEMENTATION.md) for detailed documentation
+### RDEngine VP9 Streaming (v4.1.0)
+- **VP8/VP9 Encoding**: Cross-platform software encoding via libvpx
+- **RustDesk-Inspired Architecture**: Dedicated threads, frame dedup, adaptive QoS
+- **Binary Protocol**: Minimal-overhead framing replacing fMP4 container
+- **Opus Audio**: Low-latency stereo streaming via cpal + opus
+- **WebCodecs Decoding**: Hardware-accelerated VP9 decoding in browsers
+- See [RDENGINE_STREAMING_IMPLEMENTATION.md](docs/RDENGINE_STREAMING_IMPLEMENTATION.md) for detailed documentation
 
 ### Native Cross-Platform Screen Capture (v4.1.0)
 - **Platform-Native APIs**: Direct platform API implementations for maximum stability
@@ -314,6 +226,12 @@ For detailed build instructions, troubleshooting, platform-specific optimization
 
 ### Key Rust Dependencies
 ```toml
+# VP9 Encoding (RDEngine)
+libvpx-sys = "1.4"
+cpal = "0.15"
+opus = "0.3"
+crossbeam-channel = "0.5"
+
 # Screen Capture (Platform-Specific)
 [target.'cfg(windows)'.dependencies]
 windows-capture = "=1.4.4"
@@ -327,7 +245,6 @@ core-foundation = "0.10"
 
 # Performance
 parking_lot = "0.12"   # High-performance locks  
-rayon = "1.8"          # Parallel SIMD processing
 mimalloc = "0.1"       # Microsoft's optimized allocator
 ```
 

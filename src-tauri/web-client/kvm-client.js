@@ -23,12 +23,17 @@ class KVMClient {
         this.h264Decoder = null;
         this.h264SPS = null;
         this.h264PPS = null;
+
+        // VP8/VP9 decoder (RustDesk-inspired, primary codec)
+        this.vpxDecoder = null;
+        this.serverCodec = 'vp9'; // Will be updated from server_info
+        this.protocolVersion = 1; // v2 = rdengine binary protocol
         
-        // Canvas for H.264 frame rendering
+        // Canvas for frame rendering
         this.decoderCanvas = null;
         this.decoderCtx = null;
         
-        // H.264 video properties
+        // Video properties
         this.needsKeyframe = true;
         this.supportsHardwareDecoding = false;
         
@@ -56,14 +61,57 @@ class KVMClient {
 
         this.initializeElements();
         this.initializeH264Decoder();
+        this.initializeVpxDecoder();
         this.initializeFrameTracking();
         this.setupEventListeners();
         this.connect();
     }
     
+    // Initialize VP8/VP9 decoder (RustDesk-inspired primary codec)
+    initializeVpxDecoder() {
+        console.log('Initializing VP8/VP9 decoder...');
+        
+        if (typeof VpxDecoder !== 'undefined') {
+            this.vpxDecoder = new VpxDecoder({
+                width: this.screenWidth,
+                height: this.screenHeight,
+                codec: this.serverCodec || 'vp9',
+                onFrame: (frame) => this.handleVpxFrame(frame),
+                onError: (error) => {
+                    if (error && error.message === 'delta_decode_failed') {
+                        // Request keyframe from server
+                        this.requestKeyframe();
+                    } else if (error && error.message) {
+                        console.warn('VPX decode warning:', error.message);
+                    }
+                },
+                onReady: () => {
+                    console.log('VP8/VP9 decoder ready (WebCodecs:', this.vpxDecoder?.useWebCodecs, ')');
+                    this.supportsHardwareDecoding = this.vpxDecoder?.useWebCodecs || this.supportsHardwareDecoding;
+                }
+            });
+        } else {
+            console.warn('VpxDecoder not loaded — VP8/VP9 decoding unavailable');
+        }
+    }
+
+    // Handle decoded VP8/VP9 frame
+    handleVpxFrame(frame) {
+        if (!this.realCanvas || !this.realCtx) {
+            this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
+        }
+        
+        if (frame instanceof VideoFrame) {
+            this.realCtx.drawImage(frame, 0, 0);
+            frame.close();
+        }
+        
+        this.updateFrameStats();
+    }
+
     // Initialize H.264 decoder
     initializeH264Decoder() {
-        console.log('🎬 Initializing H.264 decoder...');
+        console.log('Initializing H.264 decoder...');
         
         // Check if H264Decoder class is available
         if (typeof H264Decoder !== 'undefined') {
@@ -1025,28 +1073,40 @@ class KVMClient {
             this.screenWidth = data.width;
             this.screenHeight = data.height;
         } else {
-            // Keep default dimensions if server doesn't provide them
             console.warn('Server info missing dimensions, using defaults:', this.screenWidth, this.screenHeight);
         }
+        
+        // Detect rdengine protocol version
+        if (data.protocol_version) {
+            this.protocolVersion = data.protocol_version;
+            console.log('Protocol version:', this.protocolVersion);
+        }
+        
+        // Detect server codec
+        const serverCodec = (data.codec || 'h264').toLowerCase();
+        this.serverCodec = serverCodec;
+        this.currentCodec = serverCodec;
+        console.log('Server codec:', serverCodec);
         
         // Update canvas size if fallback is active
         if (this.fallbackCanvas) {
             this.fallbackCanvas.width = this.screenWidth;
             this.fallbackCanvas.height = this.screenHeight;
-            console.log(`Updated canvas size to: ${this.screenWidth}x${this.screenHeight}`);
         }
         
         // Update UI
         if (this.osdTitle) {
             const hostname = data.hostname || 'KVM Server';
             const monitor = data.monitor || 0;
-            this.osdTitle.textContent = `${hostname} - Monitor ${monitor} (${this.screenWidth}x${this.screenHeight})`;
+            const codecLabel = serverCodec.toUpperCase();
+            const fps = data.framerate || 30;
+            const bitrate = data.bitrate_kbps ? `${data.bitrate_kbps}kbps` : '';
+            this.osdTitle.textContent = `${hostname} - Monitor ${monitor} (${this.screenWidth}x${this.screenHeight} ${codecLabel} ${fps}fps ${bitrate})`.trim();
         }
         
-        // H.264 is the only supported codec
-        console.log('Using codec:', this.currentCodec);
+        // Update codec dropdown if present
         if (this.codecDropdown) {
-            this.codecDropdown.value = 'h264';
+            this.codecDropdown.value = serverCodec;
         }
         
         // Initialize canvas size
@@ -1056,14 +1116,29 @@ class KVMClient {
         }
         
         // Pre-initialize the optimized canvas with server dimensions
-        // This ensures the canvas is ready before frames arrive
         this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
         
-        // Initialize video for codec streaming
-        this.initializeVideoStreaming();
+        // Initialize correct decoder based on codec
+        if (serverCodec === 'vp8' || serverCodec === 'vp9') {
+            // rdengine VP8/VP9 path
+            if (this.vpxDecoder) {
+                this.vpxDecoder.setCodec(serverCodec);
+                this.vpxDecoder.setDimensions(this.screenWidth, this.screenHeight);
+                console.log(`VPX decoder configured for ${serverCodec} ${this.screenWidth}x${this.screenHeight}`);
+            } else {
+                console.warn('VPX decoder not available, initializing...');
+                this.initializeVpxDecoder();
+            }
+        } else {
+            // Legacy H.264 path
+            this.initializeVideoStreaming();
+        }
         
-        // Initialize WebRTC for audio if enabled
-        if (this.config.audio && data.audio) {
+        // Audio: rdengine sends Opus directly over WebSocket, no WebRTC needed
+        if (data.audio_enabled) {
+            console.log('Server audio enabled (Opus over WebSocket)');
+        } else if (this.config.audio && data.audio) {
+            // Legacy WebRTC audio path
             this.setupWebRTC(data.encryption);
         }
         
@@ -1074,7 +1149,8 @@ class KVMClient {
             }
         }, 1000);
         
-        this.showNotification(`Connected to ${data.hostname} - ${data.width}x${data.height} using ${data.codec}`);
+        const codecDisplay = serverCodec.toUpperCase();
+        this.showNotification(`Connected to ${data.hostname} - ${data.width}x${data.height} using ${codecDisplay}`);
     }
 
     handleStreamInfo(data) {
@@ -1185,18 +1261,11 @@ class KVMClient {
         
         if (!binaryData || binaryData.byteLength === 0) return;
         
-        // Log more frequently initially, then reduce
+        // Log occasionally
         const shouldLog = this.frameLogCounter < 10 || this.frameLogCounter % 300 === 0;
         if (shouldLog) {
-            console.log('📺 Frame stream active:', (binaryData.byteLength / 1024).toFixed(1) + 'KB', 
+            console.log('Frame stream active:', (binaryData.byteLength / 1024).toFixed(1) + 'KB', 
                         'Frame #' + this.frameLogCounter);
-            
-            // Log first few bytes for debugging
-            if (this.frameLogCounter < 5) {
-                const view = new DataView(binaryData);
-                const header = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-                console.log('📺 Frame header:', header, 'bytes:', binaryData.byteLength);
-            }
         }
         this.frameLogCounter++;
         
@@ -1204,28 +1273,125 @@ class KVMClient {
         this.lastFrameTime = Date.now();
 
         try {
-            // Check frame type by header
             const view = new DataView(binaryData);
+            const firstByte = view.getUint8(0);
+            
+            // Check for rdengine binary protocol (MSG_VIDEO_FRAME = 0x01)
+            if (firstByte === 0x01) {
+                this.handleRdEngineVideoFrame(binaryData);
+                this.updateFrameStats();
+                return;
+            }
+            
+            // Check for rdengine audio frame (MSG_AUDIO_FRAME = 0x02)  
+            if (firstByte === 0x02) {
+                // Audio frames handled by WebCodecs AudioDecoder (future)
+                return;
+            }
+            
+            // Check for rdengine ping (MSG_PING = 0x05)
+            if (firstByte === 0x05) {
+                // Server should not send us pings as binary, but handle it
+                return;
+            }
+            
+            // Check for rdengine pong (MSG_PONG = 0x06)
+            if (firstByte === 0x06) {
+                this.handlePingResponse();
+                return;
+            }
+            
+            // Legacy format detection by 4-byte header
             const header = String.fromCharCode(
                 view.getUint8(0), view.getUint8(1), 
                 view.getUint8(2), view.getUint8(3)
             );
             
             if (header === 'H264') {
-                // H.264 frame from low-latency pipeline (primary codec)
+                // Legacy H.264 frame from old pipeline
                 this.handleH264VideoFrame(binaryData);
             } else {
-                // Fall back to custom frame parsing (RGBA frames)
+                // Fall back to RGBA/RLE frame parsing
                 this.parseAndRenderFrame(binaryData);
             }
             
             this.updateFrameStats();
             
         } catch (e) {
-            // Minimal error handling to avoid console spam
             if (this.frameLogCounter % 100 === 0) {
                 console.error('Frame processing error:', e.message);
             }
+        }
+    }
+    
+    /**
+     * Handle rdengine binary protocol video frame
+     * Format: [1B type=0x01] [4B payload_len] [1B codec] [1B flags] [4B width] [4B height] [8B timestamp] [data...]
+     */
+    handleRdEngineVideoFrame(binaryData) {
+        const view = new DataView(binaryData);
+        
+        // Parse outer envelope
+        // type (1B) + payload_len (4B) = 5 bytes header
+        if (binaryData.byteLength < 5) return;
+        
+        const payloadLen = view.getUint32(1, true);
+        if (binaryData.byteLength < 5 + payloadLen) return;
+        
+        // Parse inner header (18 bytes)
+        let offset = 5;
+        const codec = view.getUint8(offset); offset += 1;
+        const flags = view.getUint8(offset); offset += 1;
+        const width = view.getUint32(offset, true); offset += 4;
+        const height = view.getUint32(offset, true); offset += 4;
+        const timestampMs = Number(view.getBigUint64(offset, true)); offset += 8;
+        
+        const isKeyframe = (flags & 0x01) !== 0;
+        const encodedData = new Uint8Array(binaryData, offset, payloadLen - 18);
+        
+        // Codec IDs: 0x01=VP8, 0x02=VP9, 0x03=H264
+        const codecName = codec === 0x01 ? 'vp8' : codec === 0x02 ? 'vp9' : 'h264';
+        
+        // Update dimensions if changed
+        if (this.screenWidth !== width || this.screenHeight !== height) {
+            console.log(`Dimensions: ${width}x${height} (${codecName})`);
+            this.screenWidth = width;
+            this.screenHeight = height;
+            
+            if (this.vpxDecoder) {
+                this.vpxDecoder.setDimensions(width, height);
+                this.vpxDecoder.setCodec(codecName);
+            }
+            
+            this.initializeOptimizedCanvas(width, height);
+        }
+        
+        // Log keyframes and periodic stats
+        if (isKeyframe && this.frameLogCounter < 20) {
+            console.log(`Keyframe: ${codecName} ${width}x${height}, size=${encodedData.byteLength}`);
+        }
+        
+        // Decode with VP8/VP9 decoder (preferred)
+        if ((codecName === 'vp8' || codecName === 'vp9') && this.vpxDecoder && this.vpxDecoder.isReady) {
+            this.vpxDecoder.decode(encodedData, {
+                isKeyframe,
+                timestamp: timestampMs * 1000, // Convert ms to us for WebCodecs
+            });
+            return;
+        }
+        
+        // Fallback to H.264 decoder for H.264 codec
+        if (codecName === 'h264' && this.h264Decoder && this.h264Decoder.isReady) {
+            this.h264Decoder.decode(encodedData, {
+                isKeyframe,
+                timestamp: timestampMs * 1000,
+            });
+            return;
+        }
+        
+        // No suitable decoder available
+        if (this.frameLogCounter < 5) {
+            console.warn(`No decoder for codec: ${codecName}`);
         }
     }
     

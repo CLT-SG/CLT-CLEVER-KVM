@@ -10,8 +10,7 @@ import {
   ConnectionOptions,
   LogViewer,
   UpdaterDialog,
-  UpdateChecker,
-  RelayStatus
+  UpdateChecker
 } from "./components";
 
 const {
@@ -21,29 +20,14 @@ const {
   loading,
   errorMessage,
   settings,
-  monitors,
-  loadingMonitors,
+  displays,
+  loadingDisplays,
   checkServerStatus,
   startServer,
   stopServer,
   openUrl,
-  copyUrl,
-  // Relay
-  relayStatus,
-  discoveredRelays,
-  relayLoading,
-  discoverRelays,
-  connectToRelay,
-  disconnectFromRelay,
-  autoConnectRelay,
-  setRelayAutoReconnect
+  copyUrl
 } = useServer();
-
-// The status checking is now automatic, but we can still call it manually if needed
-onMounted(async () => {
-  // Initial check is now handled by the composable
-  // await checkServerStatus();
-});
 
 function applyPreset(presetName) {
   const preset = presets[presetName];
@@ -60,21 +44,17 @@ function updateServerPort(value) {
   serverPort.value = value;
 }
 
-function updateSelectedMonitor(value) {
-  settings.selectedMonitor = value;
+function updateSelectedDisplay(value) {
+  settings.selectedWebrtcDisplay = value;
 }
 
-// Define tabs based on server status
-const tabs = computed(() => {
-  const baseTabs = [
-    { id: 'status', label: 'Server Status' },
-    { id: 'config', label: 'Configuration' },
-    { id: 'options', label: 'Connection Options' },
-    { id: 'logs', label: 'Logs' }
-  ];
-
-  return baseTabs;
-});
+// Define tabs
+const tabs = computed(() => [
+  { id: 'status', label: 'Server Status' },
+  { id: 'config', label: 'Configuration' },
+  { id: 'options', label: 'Connection Options' },
+  { id: 'logs', label: 'Logs' }
+]);
 </script>
 
 <template>
@@ -96,18 +76,6 @@ const tabs = computed(() => {
           :copy-url="copyUrl"
         />
         
-        <!-- Relay Status Section -->
-        <RelayStatus
-          :relay-status="relayStatus"
-          :discovered-relays="discoveredRelays"
-          :relay-loading="relayLoading"
-          :discover-relays="discoverRelays"
-          :connect-to-relay="connectToRelay"
-          :disconnect-from-relay="disconnectFromRelay"
-          :auto-connect-relay="autoConnectRelay"
-          :set-relay-auto-reconnect="setRelayAutoReconnect"
-        />
-        
         <!-- Update checker section -->
         <div class="update-section">
           <h3>Application Updates</h3>
@@ -124,11 +92,11 @@ const tabs = computed(() => {
           <ServerConfiguration 
             :server-port="serverPort"
             :settings="settings"
-            :monitors="monitors"
+            :displays="displays"
             :disabled="serverStatus"
             @apply-preset="applyPreset"
             @update:server-port="updateServerPort"
-            @update:selected-monitor="updateSelectedMonitor"
+            @update:selected-display="updateSelectedDisplay"
           />
         </div>
       </template>
