@@ -19,6 +19,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::core::ScreenCapture;
+use crate::core::scrap_capture::ScrapCapturer;
 use crate::rdengine::codec::{VpxEncoder, VpxConfig, VpxCodec, EncoderApi, EncodeInput, rgba_to_i420};
 use crate::rdengine::protocol::{self, CODEC_VP8, CODEC_VP9};
 use crate::rdengine::qos::{QualityControl, QosConfig};
@@ -82,8 +83,6 @@ pub struct VideoService {
     running: Arc<AtomicBool>,
     /// Channel to receive encoded frames
     frame_rx: Receiver<VideoFrame>,
-    /// Clone of the sender (for stats access)
-    frame_tx: Sender<VideoFrame>,
     /// Force keyframe signal
     force_keyframe: Arc<AtomicBool>,
     /// Shared QoS control
@@ -146,7 +145,6 @@ impl VideoService {
             thread: Some(thread),
             running,
             frame_rx,
-            frame_tx,
             force_keyframe,
             qos,
             stats,
@@ -199,6 +197,7 @@ impl Drop for VideoService {
 /// The main video service loop — runs on a dedicated OS thread
 ///
 /// This is the RustDesk-inspired capture → dedup → convert → encode → send loop.
+/// Uses scrap-style SHM capture (like RustDesk's scrap) with fallback to native capture.
 fn video_service_loop(
     config: VideoServiceConfig,
     running: Arc<AtomicBool>,
@@ -207,16 +206,48 @@ fn video_service_loop(
     qos: Arc<parking_lot::Mutex<QualityControl>>,
     frame_tx: Sender<VideoFrame>,
 ) -> Result<()> {
-    // Initialize screen capture
-    let mut capture = ScreenCapture::new(Some(config.monitor_id))
-        .map_err(|e| anyhow::anyhow!("Failed to initialize screen capture: {}", e))?;
+    // Try scrap-style SHM capture first (like RustDesk), fallback to native
+    let use_scrap;
+    let mut scrap_capturer: Option<ScrapCapturer> = None;
+    let mut native_capturer: Option<ScreenCapture> = None;
 
-    // Get actual dimensions
-    let (width, height) = capture.dimensions();
-    let width = if config.width > 0 { config.width } else { width as u32 };
-    let height = if config.height > 0 { config.height } else { height as u32 };
+    match ScrapCapturer::new(config.monitor_id) {
+        Ok(cap) => {
+            let (w, h) = cap.dimensions();
+            info!(
+                "Video service: using scrap SHM capture (zero-copy, like RustDesk) — {}x{}, shm={}",
+                w, h, cap.is_shm()
+            );
+            scrap_capturer = Some(cap);
+            use_scrap = true;
+        }
+        Err(e) => {
+            warn!("Scrap capture unavailable ({}), falling back to native capture", e);
+            use_scrap = false;
+        }
+    }
 
-    info!("Video service capture initialized: {}x{}", width, height);
+    if !use_scrap {
+        let cap = ScreenCapture::new(Some(config.monitor_id))
+            .map_err(|e| anyhow::anyhow!("Failed to initialize screen capture: {}", e))?;
+        native_capturer = Some(cap);
+    }
+
+    // Get actual dimensions from whichever capturer we're using
+    let (width, height) = if let Some(ref cap) = scrap_capturer {
+        let (w, h) = cap.dimensions();
+        (w, h)
+    } else if let Some(ref cap) = native_capturer {
+        let (w, h) = cap.dimensions();
+        (w as u32, h as u32)
+    } else {
+        unreachable!("One capturer must be initialized");
+    };
+
+    let width = if config.width > 0 { config.width } else { width };
+    let height = if config.height > 0 { config.height } else { height };
+
+    info!("Video service capture initialized: {}x{} (scrap={})", width, height, use_scrap);
 
     // Initialize VPX encoder
     let vpx_config = VpxConfig {
@@ -230,6 +261,8 @@ fn video_service_loop(
     let mut encoder = VpxEncoder::new(vpx_config)
         .context("Failed to initialize VPX encoder")?;
 
+    info!("Video service: VPX encoder initialized ({}x{}, {:?})", width, height, config.codec);
+
     // Pre-allocate YUV buffers (REUSED across frames — key optimization!)
     let y_size = (width * height) as usize;
     let uv_size = y_size / 4;
@@ -240,6 +273,81 @@ fn video_service_loop(
     // Previous frame buffer for deduplication
     let frame_size = (width * height * 4) as usize;
     let mut prev_frame: Vec<u8> = Vec::with_capacity(frame_size);
+
+    // Codec identifier for protocol
+    let codec_id = match config.codec {
+        VpxCodec::VP8 => CODEC_VP8,
+        VpxCodec::VP9 => CODEC_VP9,
+    };
+
+    // === STARTUP VERIFICATION ===
+    // Capture + encode one test frame to verify the pipeline works before entering the main loop.
+    info!("Video service: performing startup capture test...");
+    let test_rgba = if let Some(ref mut cap) = scrap_capturer {
+        cap.capture_rgba()
+            .map_err(|e| anyhow::anyhow!("Startup capture test (scrap) failed: {}", e))?
+    } else if let Some(ref mut cap) = native_capturer {
+        cap.capture_raw()
+            .map_err(|e| anyhow::anyhow!("Startup capture test (native) failed: {}", e))?
+    } else {
+        unreachable!();
+    };
+    let expected_size = (width * height * 4) as usize;
+    if test_rgba.len() != expected_size {
+        warn!(
+            "Video service: capture returned {} bytes, expected {} ({}x{}x4). Adjusting.",
+            test_rgba.len(), expected_size, width, height
+        );
+    }
+    info!(
+        "Video service: startup capture OK — {} bytes ({}x{})",
+        test_rgba.len(), width, height
+    );
+
+    // Test encode
+    rgba_to_i420(&test_rgba, width, height, &mut y_buf, &mut u_buf, &mut v_buf);
+    let test_packets = encoder.encode(
+        EncodeInput::I420 {
+            y: &y_buf,
+            u: &u_buf,
+            v: &v_buf,
+            stride_y: width as usize,
+            stride_u: (width / 2) as usize,
+            stride_v: (width / 2) as usize,
+        },
+        0,
+    ).context("Startup encode test failed")?;
+    info!(
+        "Video service: startup encode OK — {} packets, keyframe={}",
+        test_packets.len(),
+        test_packets.first().map(|p| p.is_keyframe).unwrap_or(false)
+    );
+
+    // Send the test frame so the client gets something immediately
+    for pkt in &test_packets {
+        let message = protocol::encode_video_message(
+            codec_id,
+            pkt.is_keyframe,
+            width,
+            height,
+            0,
+            &pkt.data,
+        );
+        let video_frame = VideoFrame {
+            message,
+            is_keyframe: pkt.is_keyframe,
+            frame_number: 0,
+            timestamp_ms: 0,
+        };
+        match frame_tx.try_send(video_frame) {
+            Ok(_) => info!("Video service: startup frame sent to channel"),
+            Err(e) => warn!("Video service: startup frame send failed: {}", e),
+        }
+    }
+
+    // Store the test frame as the previous frame for dedup
+    prev_frame.resize(test_rgba.len(), 0);
+    prev_frame.copy_from_slice(&test_rgba);
 
     // Codec identifier for protocol
     let codec_id = match config.codec {
@@ -260,18 +368,32 @@ fn video_service_loop(
         // Get target frame interval from QoS
         let spf = qos.lock().spf();
 
-        // 1. CAPTURE
+        // 1. CAPTURE — use scrap SHM (like RustDesk) or fallback to native
         let capture_start = Instant::now();
-        let rgba_data: Vec<u8> = match capture.capture_raw() {
-            Ok(data) => data,
-            Err(e) => {
-                // Don't spam logs on capture failures
-                if frame_count % 100 == 0 {
-                    warn!("Screen capture failed (frame {}): {}", frame_count, e);
+        let rgba_data: Vec<u8> = if let Some(ref mut cap) = scrap_capturer {
+            match cap.capture_rgba() {
+                Ok(data) => data,
+                Err(e) => {
+                    if frame_count % 100 == 0 {
+                        warn!("Scrap capture failed (frame {}): {}", frame_count, e);
+                    }
+                    thread::sleep(Duration::from_millis(16));
+                    continue;
                 }
-                thread::sleep(Duration::from_millis(16));
-                continue;
             }
+        } else if let Some(ref mut cap) = native_capturer {
+            match cap.capture_raw() {
+                Ok(data) => data,
+                Err(e) => {
+                    if frame_count % 100 == 0 {
+                        warn!("Screen capture failed (frame {}): {}", frame_count, e);
+                    }
+                    thread::sleep(Duration::from_millis(16));
+                    continue;
+                }
+            }
+        } else {
+            unreachable!("One capturer must be initialized");
         };
         let capture_time = capture_start.elapsed();
 

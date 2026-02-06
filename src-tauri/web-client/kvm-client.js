@@ -81,8 +81,11 @@ class KVMClient {
                     if (error && error.message === 'delta_decode_failed') {
                         // Request keyframe from server
                         this.requestKeyframe();
-                    } else if (error && error.message) {
-                        console.warn('VPX decode warning:', error.message);
+                    } else {
+                        // Any decoder error (including hardware decode failure)
+                        // — request keyframe to recover
+                        console.warn('VPX decode error, requesting keyframe:', error?.message || error);
+                        this.requestKeyframe();
                     }
                 },
                 onReady: () => {
@@ -168,7 +171,7 @@ class KVMClient {
         this.frameQueue = [];
         this.maxQueueSize = 3; // Aggressive frame dropping for low latency
         this.isDecompressing = false;
-        this.lastFrameTime = 0;
+        this.lastFrameTime = Date.now();
         this.targetFrameTime = 16.67; // 60 FPS = 16.67ms per frame
         
         // Performance monitoring
@@ -934,10 +937,12 @@ class KVMClient {
         console.log('WebSocket host resolved to:', wsHost);
         
         this.ws = new WebSocket(wsUrl);
+        this.ws.binaryType = 'arraybuffer'; // Receive binary data as ArrayBuffer (avoid Blob async conversion)
         
         this.ws.onopen = () => {
             this.connected = true;
             this.reconnectAttempts = 0;
+            this.lastFrameTime = Date.now(); // Reset frame timer on each new connection
             this.updateStatus('Connected', 'Connection established successfully');
             console.log('WebSocket connection established');
             
@@ -1059,6 +1064,12 @@ class KVMClient {
                 break;
             case 'webrtc_frame':
                 this.handleWebRTCFrame(data);
+                break;
+            case 'ping':
+                // Server sends JSON ping — respond with pong
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: 'pong', timestamp: data.timestamp }));
+                }
                 break;
             default:
                 console.log('Unknown message type:', data.type);
@@ -2275,7 +2286,7 @@ class KVMClient {
         }
         
         this.lastKeyframeRequest = now;
-        console.log('Requesting H.264 keyframe from server');
+        console.log('Requesting keyframe from server');
         
         this.sendMessage({
             type: 'request_keyframe'

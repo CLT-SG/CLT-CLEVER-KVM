@@ -58,15 +58,10 @@ const props = defineProps({
 });
 
 // Computed property to display the KVM URL
+// The backend already returns the full URL with https:// and /kvm path
 const displayUrl = computed(() => {
   if (!props.serverUrl) return '';
-  
-  let url = props.serverUrl;
-  // Ensure the displayed URL includes /kvm
-  if (!url.endsWith('/kvm')) {
-    url = url.replace(/\/$/, '') + '/kvm';
-  }
-  return url;
+  return props.serverUrl;
 });
 </script>
 

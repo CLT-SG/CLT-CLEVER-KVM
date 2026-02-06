@@ -1,4 +1,4 @@
-//! VPX Codec — VP8/VP9 encoding via libvpx-sys (direct FFI)
+//! VPX Codec — VP8/VP9 encoding via libvpx (bindgen FFI)
 //!
 //! Follows RustDesk's approach:
 //! - CBR rate control for predictable bandwidth
@@ -7,8 +7,11 @@
 //! - Realtime speed presets
 //! - Buffer reuse across frames
 //!
-//! Uses libvpx-sys raw bindings with a safe Rust wrapper, avoiding
-//! the broken `vpx` crate that requires nightly.
+//! Uses bindgen-generated bindings from system libvpx headers (generated in
+//! build.rs), ensuring struct layouts match the installed libvpx version exactly.
+//! This replaces the broken libvpx-sys 1.4.2 crate whose vpx_codec_enc_cfg_t
+//! (376 bytes) was too small for libvpx 1.14.0 (504 bytes), causing stack
+//! corruption in vpx_codec_enc_config_default().
 
 use anyhow::{Result, Context, bail};
 use log::{debug, info, warn};
@@ -16,10 +19,52 @@ use std::ptr;
 use std::slice;
 use std::time::Instant;
 
-// Raw libvpx FFI bindings
-use vpx_sys::*;
+// Bindgen-generated FFI bindings from system libvpx headers (build.rs)
+#[allow(non_upper_case_globals)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+#[allow(dead_code)]
+#[allow(clippy::all)]
+pub mod vpx_ffi {
+    include!(concat!(env!("OUT_DIR"), "/vpx_ffi.rs"));
+}
 
-// Constants not exported by libvpx-sys (C #defines)
+// Re-export types we use
+use vpx_ffi::{
+    vpx_codec_ctx_t,
+    vpx_codec_enc_cfg_t,
+    vpx_image_t,
+    vpx_codec_iter_t,
+    vpx_codec_pts_t,
+    vpx_enc_frame_flags_t,
+    // Functions
+    vpx_codec_vp8_cx,
+    vpx_codec_vp9_cx,
+    vpx_codec_enc_config_default,
+    vpx_codec_enc_init_ver,
+    vpx_codec_control_,
+    vpx_codec_encode,
+    vpx_codec_get_cx_data,
+    vpx_codec_enc_config_set,
+    vpx_codec_destroy,
+};
+
+// Bindgen prefixes enum constants with their type name — re-alias them here
+const VPX_CODEC_OK: vpx_ffi::vpx_codec_err_t = vpx_ffi::vpx_codec_err_t_VPX_CODEC_OK;
+const VPX_CBR: vpx_ffi::vpx_rc_mode = vpx_ffi::vpx_rc_mode_VPX_CBR;
+const VPX_RC_ONE_PASS: vpx_ffi::vpx_enc_pass = vpx_ffi::vpx_enc_pass_VPX_RC_ONE_PASS;
+const VPX_KF_DISABLED: vpx_ffi::vpx_kf_mode = vpx_ffi::vpx_kf_mode_VPX_KF_DISABLED;
+const VPX_KF_AUTO: vpx_ffi::vpx_kf_mode = vpx_ffi::vpx_kf_mode_VPX_KF_AUTO;
+const VPX_IMG_FMT_I420: vpx_ffi::vpx_img_fmt = vpx_ffi::vpx_img_fmt_VPX_IMG_FMT_I420;
+const VPX_CS_BT_709: vpx_ffi::vpx_color_space = vpx_ffi::vpx_color_space_VPX_CS_BT_709;
+const VPX_CODEC_CX_FRAME_PKT: vpx_ffi::vpx_codec_cx_pkt_kind = vpx_ffi::vpx_codec_cx_pkt_kind_VPX_CODEC_CX_FRAME_PKT;
+const VP8E_SET_CPUUSED: vpx_ffi::vp8e_enc_control_id = vpx_ffi::vp8e_enc_control_id_VP8E_SET_CPUUSED;
+const VP8E_SET_STATIC_THRESHOLD: vpx_ffi::vp8e_enc_control_id = vpx_ffi::vp8e_enc_control_id_VP8E_SET_STATIC_THRESHOLD;
+const VP9E_SET_TILE_COLUMNS: vpx_ffi::vp8e_enc_control_id = vpx_ffi::vp8e_enc_control_id_VP9E_SET_TILE_COLUMNS;
+const VP9E_SET_FRAME_PARALLEL_DECODING: vpx_ffi::vp8e_enc_control_id = vpx_ffi::vp8e_enc_control_id_VP9E_SET_FRAME_PARALLEL_DECODING;
+const VP9E_SET_AQ_MODE: vpx_ffi::vp8e_enc_control_id = vpx_ffi::vp8e_enc_control_id_VP9E_SET_AQ_MODE;
+
+// Constants not always exported by bindgen (C #defines / macros)
 const VPX_DL_REALTIME: libc::c_ulong = 1;
 const VPX_EFLAG_FORCE_KF: libc::c_long = 1;
 const VPX_FRAME_IS_KEY: u32 = 0x1;
@@ -236,15 +281,16 @@ impl VpxEncoder {
 
             // Initialize encoder
             let mut ctx: vpx_codec_ctx_t = std::mem::zeroed();
+            let abi_version = vpx_ffi::VPX_ENCODER_ABI_VERSION as libc::c_int;
             let ret = vpx_codec_enc_init_ver(
                 &mut ctx,
                 iface,
                 &enc_cfg,
                 0, // flags
-                14, // VPX_ENCODER_ABI_VERSION
+                abi_version, // From bindgen — matches system libvpx exactly
             );
             if ret != VPX_CODEC_OK {
-                bail!("Failed to initialize VPX encoder: error {}", ret);
+                bail!("Failed to initialize VPX encoder: error {} (ABI version {})", ret, abi_version);
             }
 
             // Set CPU speed (realtime preset)
@@ -354,7 +400,8 @@ impl EncoderApi for VpxEncoder {
                     continue;
                 }
 
-                let frame = &*pkt.data.frame_ref();
+                // Access the frame union field (bindgen-generated)
+                let frame = &pkt.data.frame;
                 let data_ptr = frame.buf as *const u8;
                 let data_len = frame.sz as usize;
                 let data = slice::from_raw_parts(data_ptr, data_len).to_vec();

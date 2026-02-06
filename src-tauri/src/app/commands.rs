@@ -203,7 +203,7 @@ pub fn get_server_url(app_handle: tauri::AppHandle) -> Result<String, String> {
         "127.0.0.1".to_string()
     });
 
-    let url = format!("http://{}:{}/kvm", ip, state.port);
+    let url = format!("https://{}:{}/kvm", ip, state.port);
     debug!("Returning server URL: {}", url);
     info!("KVM server accessible at: {}", url);
     Ok(url)

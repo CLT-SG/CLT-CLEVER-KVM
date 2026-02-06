@@ -36,6 +36,15 @@ class VpxDecoder {
         this.isReady = false;
         this.useWebCodecs = false;
 
+        // After configure() or error recovery, the decoder needs a keyframe
+        // before it can decode delta frames. Track this to avoid sending
+        // delta frames that will be rejected.
+        this.needsKeyframe = true;
+
+        // Count consecutive decode errors to decide when to fall back
+        this._decodeErrorCount = 0;
+        this._maxDecodeErrors = 1; // After first error, fall back to software immediately
+
         // Performance tracking
         this.stats = {
             framesDecoded: 0,
@@ -63,25 +72,58 @@ class VpxDecoder {
     }
 
     /**
-     * Get the WebCodecs codec string for the selected codec
+     * Get the WebCodecs codec string for the selected codec.
+     * 
+     * VP9 codec string format: vp09.PP.LL.DD
+     *   PP = Profile (00 = Profile 0, 01 = Profile 1, 02 = Profile 2)
+     *   LL = Level   (10 = 1.0, 21 = 2.1, 31 = 3.1, 41 = 4.1, 51 = 5.1)
+     *   DD = Bit depth (08 = 8-bit, 10 = 10-bit)
+     * 
+     * Level must match the resolution:
+     *   Level 1.0 (10) — up to 256×144
+     *   Level 2.1 (21) — up to 480×256
+     *   Level 3.0 (30) — up to 1080×512
+     *   Level 3.1 (31) — up to 1920×1080 @ 30fps
+     *   Level 4.0 (40) — up to 2048×1080 @ 60fps
+     *   Level 4.1 (41) — up to 2048×1088 @ 60fps or 3840×2160 @ 30fps
+     *   Level 5.1 (51) — up to 3840×2160 @ 120fps
      */
     getCodecString() {
-        switch (this.codec) {
-            case 'vp8':
-                return 'vp8';
-            case 'vp9':
-                return 'vp09.00.10.08'; // VP9 Profile 0, Level 1.0, 8-bit
-            default:
-                return 'vp09.00.10.08';
+        if (this.codec === 'vp8') {
+            return 'vp8';
         }
+        // VP9 — select level based on actual resolution
+        const level = this.getVp9Level(this.width, this.height);
+        return `vp09.00.${level}.08`; // Profile 0, dynamic level, 8-bit
     }
 
     /**
-     * Initialize the decoder
+     * Determine the appropriate VP9 level for the given resolution.
+     * Returns the 2-digit level code string.
+     */
+    getVp9Level(width, height) {
+        const pixels = width * height;
+        if (pixels <= 36864)   return '10'; // 256×144      — Level 1.0
+        if (pixels <= 122880)  return '21'; // 480×256      — Level 2.1
+        if (pixels <= 552960)  return '30'; // 960×576      — Level 3.0
+        if (pixels <= 2073600) return '31'; // 1920×1080    — Level 3.1
+        if (pixels <= 2228224) return '40'; // 2048×1088    — Level 4.0
+        if (pixels <= 8912896) return '41'; // 3840×2160    — Level 4.1
+        return '51';                        // > 4K         — Level 5.1
+    }
+
+    /**
+     * Initialize the decoder with proper codec level detection and fallback.
+     *
+     * Strategy:
+     *   1. Try hardware-accelerated WebCodecs with resolution-appropriate level
+     *   2. Fall back to software WebCodecs if hardware is unavailable
+     *   3. If WebCodecs is entirely unavailable, set useWebCodecs=false
+     *      (caller should consider a WASM-based VP9 fallback like ogv.js)
      */
     async initialize() {
         if (!this.isSecureContext()) {
-            console.warn('VPX decoder: Not in secure context, WebCodecs unavailable');
+            console.warn('VPX decoder: Not in secure context — WebCodecs requires HTTPS or localhost');
             this.useWebCodecs = false;
             this.isReady = true;
             this.onReady();
@@ -89,7 +131,7 @@ class VpxDecoder {
         }
 
         if (typeof VideoDecoder === 'undefined') {
-            console.warn('VPX decoder: WebCodecs API not available');
+            console.warn('VPX decoder: WebCodecs API not available in this browser');
             this.useWebCodecs = false;
             this.isReady = true;
             this.onReady();
@@ -98,23 +140,57 @@ class VpxDecoder {
 
         try {
             const codecString = this.getCodecString();
-            const support = await VideoDecoder.isConfigSupported({
+            console.log(`VPX decoder: probing codec "${codecString}" for ${this.width}x${this.height}`);
+
+            // 1. Try hardware-accelerated decoding first
+            let support = await VideoDecoder.isConfigSupported({
                 codec: codecString,
                 codedWidth: this.width,
                 codedHeight: this.height,
                 hardwareAcceleration: 'prefer-hardware',
             });
 
-            if (!support.supported) {
-                console.warn(`VPX decoder: ${this.codec} not supported by WebCodecs`);
-                this.useWebCodecs = false;
-                this.isReady = true;
-                this.onReady();
+            if (support.supported) {
+                this.hwAccel = 'prefer-hardware';
+                this.createDecoder();
+                console.log(`VPX decoder: ${this.codec} HW-accelerated decoder ready (${codecString}, ${this.width}x${this.height})`);
                 return;
             }
 
-            this.createDecoder();
-            console.log(`VPX decoder: ${this.codec} WebCodecs decoder initialized (${this.width}x${this.height})`);
+            // 2. Fall back to software decoding
+            console.warn(`VPX decoder: HW decode not supported for "${codecString}", trying software...`);
+            support = await VideoDecoder.isConfigSupported({
+                codec: codecString,
+                codedWidth: this.width,
+                codedHeight: this.height,
+                hardwareAcceleration: 'prefer-software',
+            });
+
+            if (support.supported) {
+                this.hwAccel = 'prefer-software';
+                this.createDecoder();
+                console.log(`VPX decoder: ${this.codec} SW decoder ready (${codecString}, ${this.width}x${this.height})`);
+                return;
+            }
+
+            // 3. Try with no acceleration preference
+            support = await VideoDecoder.isConfigSupported({
+                codec: codecString,
+                codedWidth: this.width,
+                codedHeight: this.height,
+            });
+
+            if (support.supported) {
+                this.hwAccel = 'no-preference';
+                this.createDecoder();
+                console.log(`VPX decoder: ${this.codec} decoder ready (no hw pref) (${codecString}, ${this.width}x${this.height})`);
+                return;
+            }
+
+            console.error(`VPX decoder: codec "${codecString}" not supported by any WebCodecs path`);
+            this.useWebCodecs = false;
+            this.isReady = true;
+            this.onReady();
         } catch (e) {
             console.error('VPX decoder init error:', e);
             this.useWebCodecs = false;
@@ -124,7 +200,7 @@ class VpxDecoder {
     }
 
     /**
-     * Create the WebCodecs VideoDecoder
+     * Create the WebCodecs VideoDecoder with the best available acceleration.
      */
     createDecoder() {
         if (this.decoder) {
@@ -134,24 +210,54 @@ class VpxDecoder {
         this.decoder = new VideoDecoder({
             output: (frame) => {
                 this.stats.framesDecoded++;
+                // First successful decode clears the needsKeyframe flag
+                // and resets the error counter
+                if (this.needsKeyframe) {
+                    console.log('VPX decoder: first frame decoded successfully after init');
+                    this.needsKeyframe = false;
+                }
+                this._decodeErrorCount = 0;
                 this.onFrame(frame);
                 // IMPORTANT: Caller must call frame.close() after rendering!
             },
             error: (e) => {
                 console.error('VPX VideoDecoder error:', e);
+                this._decodeErrorCount++;
+
+                // If hardware decoding fails, fall back to software
+                if (this._decodeErrorCount >= this._maxDecodeErrors && this.hwAccel === 'prefer-hardware') {
+                    console.warn('VPX decoder: hardware decode failed, falling back to software');
+                    this.hwAccel = 'prefer-software';
+                } else if (this._decodeErrorCount >= this._maxDecodeErrors && this.hwAccel === 'prefer-software') {
+                    console.warn('VPX decoder: software decode also failed, trying no-preference');
+                    this.hwAccel = 'no-preference';
+                }
+
+                // Decoder transitions to 'closed' on error — we need to reinit
+                // and request a keyframe
+                this.needsKeyframe = true;
                 this.onError(e);
             }
         });
 
         const codecString = this.getCodecString();
-        this.decoder.configure({
+        const config = {
             codec: codecString,
             codedWidth: this.width,
             codedHeight: this.height,
             optimizeForLatency: true,
-            hardwareAcceleration: 'prefer-hardware',
-        });
+        };
 
+        // Use the acceleration mode (may have been downgraded to software)
+        if (this.hwAccel && this.hwAccel !== 'no-preference') {
+            config.hardwareAcceleration = this.hwAccel;
+        }
+
+        console.log(`VPX decoder: configuring "${codecString}" ${this.width}x${this.height} (accel: ${this.hwAccel || 'default'})`);
+        this.decoder.configure(config);
+
+        // After configure(), the decoder needs a keyframe before delta frames
+        this.needsKeyframe = true;
         this.useWebCodecs = true;
         this.isReady = true;
         this.onReady();
@@ -202,6 +308,21 @@ class VpxDecoder {
         if (this.decoder.state === 'closed') {
             console.warn('VPX decoder is closed, reinitializing...');
             this.createDecoder();
+            if (!options.isKeyframe) {
+                // Delta frame after reinit is useless — request keyframe
+                this.onError(new Error('delta_decode_failed'));
+                return false;
+            }
+            // Current frame IS a keyframe — fall through and try to decode
+            // it with the freshly initialized decoder instead of wasting it
+            console.log('VPX decoder: reinit done, retrying current keyframe');
+        }
+
+        // After configure() or error recovery, skip delta frames until
+        // we receive a keyframe. Sending delta frames to a freshly
+        // configured decoder causes "A key frame is required" errors.
+        if (this.needsKeyframe && !options.isKeyframe) {
+            this.stats.framesDropped++;
             return false;
         }
 
@@ -210,6 +331,12 @@ class VpxDecoder {
             if (this.decoder.decodeQueueSize > 3) {
                 this.stats.framesDropped++;
                 return false;
+            }
+
+            // Log first few bytes of first frames for diagnostics
+            if (this.stats.framesDecoded < 3 && data.length >= 4) {
+                const hex = Array.from(data.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                console.log(`VPX decode: frame ${this.stats.framesDecoded}, ${options.isKeyframe ? 'key' : 'delta'}, ${data.length}B, first_bytes=[${hex}]`);
             }
 
             const chunk = new EncodedVideoChunk({
@@ -230,10 +357,9 @@ class VpxDecoder {
             console.error('VPX decode error:', e);
             this.stats.framesDropped++;
 
-            // If decode fails on a delta frame, request keyframe
-            if (!options.isKeyframe) {
-                this.onError(new Error('delta_decode_failed'));
-            }
+            // Any decode failure — request keyframe from server
+            this.needsKeyframe = true;
+            this.onError(new Error('delta_decode_failed'));
 
             return false;
         }

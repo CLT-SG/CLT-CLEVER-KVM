@@ -163,12 +163,60 @@ impl ConnectionHandler {
         // Internal channel for outbound control messages
         let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<String>(32);
 
-        // Clone frame receiver for the video send task
+        // Clone frame receiver for the video bridge task
         let frame_rx = video_service.frame_rx().clone();
         let audio_rx = audio_service.as_ref().map(|s| s.audio_rx().clone());
 
         // QoS reference
         let qos = video_service.qos().clone();
+
+        // Bridge crossbeam → tokio: a single persistent blocking task reads from
+        // the crossbeam channel and forwards to a tokio mpsc channel.
+        // This avoids the spawn_blocking-per-iteration race where orphaned tasks
+        // steal frames from the channel.
+        let (video_bridge_tx, mut video_bridge_rx) = mpsc::channel::<VideoFrame>(4);
+        let bridge_frame_rx = frame_rx.clone();
+        tokio::task::spawn_blocking(move || {
+            loop {
+                match bridge_frame_rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(frame) => {
+                        if video_bridge_tx.blocking_send(frame).is_err() {
+                            // Receiver dropped (connection closed)
+                            break;
+                        }
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        // No frame available, check if we should stop
+                        continue;
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        log::error!("Video service channel disconnected — capture thread crashed or stopped");
+                        break;
+                    }
+                }
+            }
+            log::debug!("Video bridge task exited");
+        });
+
+        // Audio bridge (same pattern)
+        let mut audio_bridge_rx: Option<mpsc::Receiver<AudioFrame>> = None;
+        if let Some(arx) = audio_rx {
+            let (atx, arx_bridge) = mpsc::channel::<AudioFrame>(8);
+            tokio::task::spawn_blocking(move || {
+                loop {
+                    match arx.recv_timeout(Duration::from_millis(50)) {
+                        Ok(frame) => {
+                            if atx.blocking_send(frame).is_err() {
+                                break;
+                            }
+                        }
+                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+            });
+            audio_bridge_rx = Some(arx_bridge);
+        }
 
         // Ping interval
         let mut ping_interval = tokio::time::interval(Duration::from_secs(1));
@@ -180,7 +228,7 @@ impl ConnectionHandler {
         // Optional stop signal
         let mut stop_rx = stop_rx;
 
-        info!("Starting main connection loop");
+        info!("Starting main connection loop (with bridge tasks)");
 
         loop {
             tokio::select! {
@@ -196,48 +244,38 @@ impl ConnectionHandler {
                     break;
                 }
 
-                // Priority 2: Video frames from dedicated thread → WebSocket
-                frame = tokio::task::spawn_blocking({
-                    let rx = frame_rx.clone();
-                    move || rx.recv_timeout(Duration::from_millis(50))
-                }) => {
+                // Priority 2: Video frames via bridge (crossbeam → tokio mpsc)
+                frame = video_bridge_rx.recv() => {
                     match frame {
-                        Ok(Ok(video_frame)) => {
-                            // Send binary video message directly
+                        Some(video_frame) => {
                             if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
                                 warn!("Failed to send video frame: {}", e);
                                 break;
                             }
                         }
-                        Ok(Err(_)) => {
-                            // Timeout — no frame available, continue
-                        }
-                        Err(e) => {
-                            error!("spawn_blocking error: {}", e);
+                        None => {
+                            error!("Video bridge channel closed — video service stopped");
                             break;
                         }
                     }
                 }
 
-                // Priority 3: Audio frames → WebSocket
+                // Priority 3: Audio frames via bridge
                 audio = async {
-                    if let Some(ref rx) = audio_rx {
-                        let rx = rx.clone();
-                        tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_millis(10)))
-                            .await
+                    if let Some(ref mut rx) = audio_bridge_rx {
+                        rx.recv().await
                     } else {
                         std::future::pending().await
                     }
                 } => {
                     match audio {
-                        Ok(Ok(audio_frame)) => {
+                        Some(audio_frame) => {
                             if let Err(e) = ws_tx.send(Message::Binary(audio_frame.message)).await {
                                 warn!("Failed to send audio frame: {}", e);
                             }
                         }
-                        Ok(Err(_)) => {} // Timeout
-                        Err(e) => {
-                            warn!("Audio spawn_blocking error: {}", e);
+                        None => {
+                            warn!("Audio bridge channel closed");
                         }
                     }
                 }

@@ -85,3 +85,53 @@ Replaced the entire H.264/relay streaming stack with a RustDesk-inspired VP9 str
 - Verified HTTPS server starts with self-signed certificate
 - Web client auto-detects https to wss for WebSocket connection
 - VP9 WebCodecs decoder initializes in secure context
+
+## [5.0.1] Fix VPX Encoder Init, SHM Capture, and VP9 Decoder Recovery
+
+### Problem
+
+1. `libvpx-sys 1.4.2` defines `vpx_codec_enc_cfg_t` as 376 bytes, but system libvpx 1.14.0 requires 504 bytes. When `vpx_codec_enc_config_default()` writes 504 bytes into a 376-byte struct, it causes stack corruption and encoder initialization failure.
+2. Screen capture used `get_image()` over the X11 socket (~8-15ms per 1080p frame), which is too slow for real-time streaming.
+3. The WebCodecs VP9 hardware decoder rejects valid VP9 frames with "EncodingError: Decoding error" but the client had no software fallback, resulting in a permanent black screen.
+4. `spawn_blocking` was called per-frame to receive from crossbeam channels, causing race conditions where orphaned tasks steal frames.
+5. WebSocket `binaryType` defaulted to `Blob`, requiring async ArrayBuffer conversion on every frame.
+6. Connection health monitor initialized `lastFrameTime` to 0, causing false stale-connection detection and unnecessary reconnections.
+7. VP9 codec string hardcoded Level 1.0 (`vp09.00.10.08`) for all resolutions, causing decoder configuration rejection at 1080p.
+
+### Solution
+
+1. Replaced `libvpx-sys` crate with `bindgen 0.70` that generates FFI bindings from the system-installed libvpx headers at build time, guaranteeing struct layouts match exactly (504 bytes confirmed).
+2. Added `scrap_capture.rs` with X11 SHM zero-copy screen capture ported from RustDesk's `scrap` library (~1-2ms per frame vs ~8-15ms), with automatic fallback to native capture on non-Linux platforms.
+3. Added VP9 decoder hardware-to-software fallback chain: tracks consecutive decode errors, switches `hardwareAcceleration` from `prefer-hardware` to `prefer-software` after first failure, retries keyframes after decoder reinit instead of wasting them, and adds `needsKeyframe` tracking to skip delta frames after configure/error.
+4. Replaced per-frame `spawn_blocking` with persistent bridge tasks that use a single `tokio::task::spawn_blocking` loop per channel (video and audio), forwarding frames through a tokio mpsc channel.
+5. Set `ws.binaryType = 'arraybuffer'` immediately on WebSocket open.
+6. Initialized `lastFrameTime` to `Date.now()` in both constructor and connection open handler.
+7. VP9 level is now dynamically selected based on actual resolution (Level 3.1 for 1080p, Level 4.1 for 4K, etc.).
+
+### Changes Made
+
+#### New Files
+- **src-tauri/vpx_ffi.h**: Bindgen header including all VPX system headers (vpx_codec.h, vpx_encoder.h, vpx_decoder.h, vpx_image.h, vp8cx.h, vp8dx.h)
+- **src-tauri/src/core/scrap_capture.rs**: X11 SHM zero-copy screen capture ported from RustDesk's scrap library, with POSIX shared memory, XCB SHM extension, frame deduplication, BGRA-to-RGBA conversion, and non-Linux platform stubs
+
+#### Modified Files - Backend
+- **src-tauri/build.rs**: Added `generate_vpx_bindings()` function using `bindgen::Builder` to generate `vpx_ffi.rs` from system headers, added `cargo:rustc-link-lib=vpx`
+- **src-tauri/Cargo.toml**: Removed `libvpx-sys = "1.4"`, added `bindgen = "0.70"` to build-dependencies, added `x11rb` SHM feature for zero-copy capture
+- **src-tauri/src/core/mod.rs**: Added `scrap_capture` module export
+- **src-tauri/src/rdengine/codec.rs**: Replaced `use vpx_sys::*` with bindgen-generated `mod vpx_ffi`, added explicit constant aliases for bindgen-prefixed enum values, updated union field access from `*pkt.data.frame_ref()` to `pkt.data.frame`, used `VPX_ENCODER_ABI_VERSION` from bindgen
+- **src-tauri/src/rdengine/video_service.rs**: Added scrap SHM capture with native fallback, added startup capture+encode verification, improved logging
+- **src-tauri/src/rdengine/connection.rs**: Replaced per-frame `spawn_blocking` with persistent crossbeam-to-tokio bridge tasks for both video and audio channels
+- **src-tauri/src/app/commands.rs**: Fixed `get_server_url` to return `https://` instead of `http://`
+
+#### Modified Files - Frontend
+- **src-tauri/web-client/vpx-decoder.js**: Added `needsKeyframe` tracking, hardware-to-software decoder fallback on decode error, dynamic VP9 level selection based on resolution, keyframe retry after decoder reinit, diagnostic first-frame logging
+- **src-tauri/web-client/kvm-client.js**: Request keyframe on all decoder errors (not just delta failures), set `ws.binaryType = 'arraybuffer'`, initialize `lastFrameTime` to `Date.now()`, added JSON ping/pong handler, fixed "H.264 keyframe" log to "keyframe"
+- **src/components/server/ServerStatus.vue**: Simplified URL display (backend already returns full https URL with /kvm path)
+
+### Testing
+
+- Verified cargo build passes with 0 errors (85 warnings, all unused code)
+- Confirmed bindgen generates correct struct sizes: `vpx_codec_enc_cfg_t` = 504 bytes, `vpx_codec_ctx_t` = 56 bytes, `vpx_image_t` = 136 bytes
+- VP9 encode-decode roundtrip validated via C test program (37021 bytes, keyframe, Profile 0)
+- Server starts successfully with "Server started successfully" log
+- VPX encoder initializes without stack corruption

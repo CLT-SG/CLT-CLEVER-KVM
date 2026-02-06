@@ -2,6 +2,38 @@
 
 ## Version History
 
+## [5.0.1] - 2026-02-06
+
+### VP9 Encoder Fix, SHM Capture, and Decoder Error Recovery
+
+### Bug Fixes
+- **VPX Encoder Init Crash**: Replaced `libvpx-sys 1.4.2` (376-byte `vpx_codec_enc_cfg_t`) with `bindgen 0.70` to generate FFI bindings from system libvpx headers at build time, matching the required 504-byte struct layout for libvpx 1.14.0
+- **VP9 Decode Black Screen**: Added hardware-to-software decoder fallback when WebCodecs hardware VP9 decoder rejects valid frames, plus `needsKeyframe` tracking to prevent sending delta frames to a freshly configured decoder
+- **Keyframe Wasted After Reinit**: When the decoder is closed and a keyframe arrives, the decoder now reinitializes and retries the current keyframe instead of discarding it
+- **spawn_blocking Race Condition**: Replaced per-frame `spawn_blocking` calls with persistent crossbeam-to-tokio bridge tasks to prevent orphaned tasks from stealing frames
+- **WebSocket Binary Format**: Set `ws.binaryType = 'arraybuffer'` on connection open to avoid async Blob-to-ArrayBuffer conversion overhead
+- **Health Monitor False Reconnect**: Initialized `lastFrameTime` to `Date.now()` instead of 0 to prevent false stale-connection detection
+- **VP9 Codec String Level**: Changed from hardcoded Level 1.0 to dynamic level selection based on resolution (Level 3.1 for 1080p, Level 4.1 for 4K)
+- **Server URL Protocol**: Fixed `get_server_url` to return `https://` instead of `http://`
+- **JSON Ping Handler**: Added server ping/pong JSON message handler for connection health monitoring
+- **Keyframe Request Log**: Fixed log message from "Requesting H.264 keyframe" to "Requesting keyframe"
+
+### New Features
+- **X11 SHM Zero-Copy Capture**: Added `scrap_capture.rs` ported from RustDesk's `scrap` library, using POSIX shared memory and XCB SHM extension for ~1-2ms capture latency (vs ~8-15ms with `get_image`)
+- **Startup Pipeline Verification**: Video service now captures and encodes a test frame during startup to verify the entire pipeline works before entering the main loop
+- **Bindgen VPX Bindings**: Build-time FFI generation from system libvpx headers ensures struct layout compatibility regardless of installed libvpx version
+
+### Technical Changes
+- **src-tauri/vpx_ffi.h** (new): Bindgen header including vpx_codec.h, vpx_encoder.h, vpx_decoder.h, vpx_image.h, vp8cx.h, vp8dx.h
+- **src-tauri/src/core/scrap_capture.rs** (new): X11 SHM capturer with BGRA-to-RGBA conversion, frame deduplication, and non-Linux platform stubs
+- **src-tauri/build.rs**: Added `generate_vpx_bindings()` using `bindgen::Builder`
+- **src-tauri/Cargo.toml**: Removed `libvpx-sys = "1.4"`, added `bindgen = "0.70"`, added `x11rb` SHM feature
+- **src-tauri/src/rdengine/codec.rs**: Replaced `use vpx_sys::*` with bindgen-generated module and constant aliases
+- **src-tauri/src/rdengine/video_service.rs**: Added scrap SHM capture with native fallback and startup verification
+- **src-tauri/src/rdengine/connection.rs**: Persistent bridge tasks for crossbeam-to-tokio channel forwarding
+- **src-tauri/web-client/vpx-decoder.js**: HW-to-SW fallback, needsKeyframe tracking, dynamic VP9 level, keyframe retry on reinit
+- **src-tauri/web-client/kvm-client.js**: ArrayBuffer binaryType, ping handler, keyframe on all errors, lastFrameTime fix
+
 ## [5.0.0] - 2026-02-06
 
 ### RDEngine VP9 Streaming with HTTPS Support
