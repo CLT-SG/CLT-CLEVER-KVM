@@ -215,3 +215,32 @@ Replaced the entire H.264/relay streaming stack with a RustDesk-inspired VP9 str
 - Host cursor position is tracked via X11 QueryPointer and sent as binary MSG_CURSOR messages
 - Client renders host cursor overlay at correct position relative to the remote screen content area
 - Client mouse input is suppressed during host cursor movement, resumes after 500ms of host inactivity
+
+## [5.0.4] Client Activity Awareness for Host Cursor Overlay
+
+### Problem
+
+1. The host cursor overlay was always displayed when the remote host sent cursor position updates, even when the web client user was actively moving their own mouse on the page. This caused two cursors (the client's native cursor and the host overlay) to appear simultaneously, which was visually confusing and unnecessary.
+2. When the host was in control mode, the client's mouse input was completely suppressed with no way for the client to override it by simply moving their mouse.
+
+### Solution
+
+1. Added client activity tracking (`clientActive` state) that detects when the web client user is moving their mouse. While the client is active, the host cursor overlay is hidden with a smooth CSS opacity fade-out. After 300ms of client inactivity, the overlay can reappear if the host is still sending cursor updates.
+2. Updated the host control priority logic so that client mouse activity always takes precedence -- if the client is actively moving their mouse, their input is never blocked, even during host-control mode. The client's native cursor is restored immediately when they start moving.
+3. Added a smooth CSS `opacity` transition (0.15s fade-in, 0.1s fade-out) to the host cursor overlay using a `.host-cursor-hidden` class, providing a polished visual experience instead of abrupt show/hide.
+
+### Changes Made
+
+#### Modified Files - Frontend
+- **src-tauri/web-client/kvm-client.js**: Added `clientActive`, `clientActiveTimer`, `clientActiveTimeoutMs` (300ms) state in constructor, added `setClientActive()` method for client activity lifecycle management, added `hideHostCursor()` method with CSS class-based fade-out, updated `handleMouseEvent()` to call `setClientActive(true)` on mousemove and allow client input through even during host-control mode, updated `handleCursorMessage()` to conditionally render or hide host cursor based on client activity state, updated `renderHostCursor()` to remove hidden class when showing
+- **src-tauri/web-client/kvm-client.css**: Added `opacity` to `#host-cursor-overlay` transition property and `will-change`, added `.host-cursor-hidden` class with `opacity: 0` and 0.1s fade-out transition
+
+#### Modified Files - Documentation
+- **docs/HOST_CURSOR_SYNCHRONIZATION.md**: Added client activity awareness to overview, added `clientActive` state to state management section, updated host control priority to note client override behavior, added Client Activity Awareness subsection, added `clientActiveTimeoutMs` to tunable parameters table
+
+### Testing
+
+- When client moves their mouse on the web page, the host cursor overlay fades out
+- When client stops moving (300ms), the host cursor overlay reappears if host is still active
+- Client mouse input is never blocked when the client is actively moving
+- Host cursor overlay only shows when the remote host is moving the cursor and client is idle

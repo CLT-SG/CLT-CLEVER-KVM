@@ -59,8 +59,14 @@ body, html {
     z-index: 50;
     pointer-events: none;
     transform: translate(-2px, -2px); /* Align arrow tip with position */
-    transition: left 0.03s linear, top 0.03s linear;
-    will-change: left, top;
+    transition: left 0.03s linear, top 0.03s linear, opacity 0.15s ease-out;
+    will-change: left, top, opacity;
+}
+
+/* Hidden state — used when the client is actively moving their cursor */
+#host-cursor-overlay.host-cursor-hidden {
+    opacity: 0;
+    transition: opacity 0.1s ease-out;
 }
 
 #host-cursor-overlay .host-cursor-svg {

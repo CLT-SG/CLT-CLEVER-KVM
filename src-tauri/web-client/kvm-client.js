@@ -76,6 +76,14 @@ class KVMClient {
         // Timer ID for host-control expiry
         this.hostControlTimer = null;
 
+        // ── Client activity tracking ─────────────────────────────────────
+        // When the client user is actively moving their mouse on the web
+        // client, the host cursor overlay is hidden. The overlay only
+        // appears when the remote host is the one moving the cursor.
+        this.clientActive = false;
+        this.clientActiveTimer = null;
+        this.clientActiveTimeoutMs = 300; // ms of client inactivity before host cursor can reappear
+
         this.initializeElements();
         this.initializeH264Decoder();
         this.initializeVpxDecoder();
@@ -510,10 +518,19 @@ class KVMClient {
     handleMouseEvent(e) {
         if (!this.connected) return;
 
+        // ── Client activity tracking ───────────────────────────────────
+        // When the client moves their mouse, mark the client as active.
+        // This hides the host cursor overlay so only one cursor is visible.
+        if (e.type === 'mousemove') {
+            this.setClientActive(true);
+        }
+
         // ── Host control priority ──────────────────────────────────────
         // When the host is actively controlling the cursor, suppress
         // client mouse input to avoid conflicting cursor movements.
-        if (this.hostCursor.isHostControlling) {
+        // However, client mouse activity always takes precedence over
+        // host control — if the client is moving, let them through.
+        if (this.hostCursor.isHostControlling && !this.clientActive) {
             // Allow scroll events through (they don't move the cursor)
             if (e.type !== 'wheel') {
                 return;
@@ -1477,8 +1494,15 @@ class KVMClient {
             this.setHostControlling(true);
         }
 
-        // Render the host cursor overlay
-        this.renderHostCursor();
+        // Only render the host cursor overlay if the client is NOT
+        // actively using their mouse. When the client is moving their
+        // cursor on the web page, the host overlay is suppressed to
+        // avoid two cursors competing for the user's attention.
+        if (!this.clientActive) {
+            this.renderHostCursor();
+        } else {
+            this.hideHostCursor();
+        }
     }
 
     /**
@@ -1508,6 +1532,51 @@ class KVMClient {
             }, this.hostControlTimeoutMs);
         } else {
             this.setClientCursorStyle('default');
+        }
+    }
+
+    /**
+     * Mark the client as actively using their mouse.
+     * While the client is active, the host cursor overlay is hidden.
+     * After `clientActiveTimeoutMs` of inactivity, the client is marked
+     * inactive and the host cursor overlay can reappear if the host is
+     * still sending cursor updates.
+     */
+    setClientActive(active) {
+        this.clientActive = active;
+
+        // Clear any previous client-activity expiry timer
+        if (this.clientActiveTimer) {
+            clearTimeout(this.clientActiveTimer);
+            this.clientActiveTimer = null;
+        }
+
+        if (active) {
+            // Hide the host cursor overlay while the client is moving
+            this.hideHostCursor();
+
+            // Restore the client's native cursor (override host-control hiding)
+            this.setClientCursorStyle('default');
+
+            // After the client stops moving, allow the host cursor to reappear
+            this.clientActiveTimer = setTimeout(() => {
+                this.clientActive = false;
+
+                // If the host is still in control, re-render the host cursor
+                if (this.hostCursor.isHostControlling) {
+                    this.renderHostCursor();
+                    this.setClientCursorStyle('none');
+                }
+            }, this.clientActiveTimeoutMs);
+        }
+    }
+
+    /**
+     * Hide the host cursor overlay element with a smooth fade-out.
+     */
+    hideHostCursor() {
+        if (this.hostCursorOverlay) {
+            this.hostCursorOverlay.classList.add('host-cursor-hidden');
         }
     }
 
@@ -1554,6 +1623,7 @@ class KVMClient {
         }
 
         this.hostCursorOverlay.style.display = '';
+        this.hostCursorOverlay.classList.remove('host-cursor-hidden');
 
         // Convert host screen coordinates → CSS pixel position on the rendered content area
         const targetElement = this.realCanvas || this.videoScreen;

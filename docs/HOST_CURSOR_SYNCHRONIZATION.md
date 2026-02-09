@@ -11,8 +11,9 @@ The KVM web client previously displayed a generic crosshair cursor over the remo
 1. **Real-time cursor position tracking** — polls the host OS cursor at ~30–60 Hz
 2. **Visual cursor overlay** — renders an SVG arrow with a "Host" label on the web client
 3. **Host control priority** — suppresses client input while the host is actively moving the cursor
-4. **Cursor shape mapping** — 23 shape types (pointer, text, resize, wait, etc.) mapped to CSS equivalents
-5. **Delta compression** — only transmits updates when position or shape changes
+4. **Client activity awareness** — hides host cursor overlay when the web client user is moving their own mouse; overlay only appears when the remote host moves the cursor
+5. **Cursor shape mapping** — 23 shape types (pointer, text, resize, wait, etc.) mapped to CSS equivalents
+6. **Delta compression** — only transmits updates when position or shape changes
 
 ---
 
@@ -189,6 +190,11 @@ this.hostCursor = {
     isHostControlling: false,
 };
 this.hostControlTimeoutMs = 500; // ms of host inactivity before client regains control
+
+// Client activity tracking
+this.clientActive = false;
+this.clientActiveTimer = null;
+this.clientActiveTimeoutMs = 300; // ms of client inactivity before host cursor can reappear
 ```
 
 ### Binary Message Parsing
@@ -219,10 +225,21 @@ In `handleBinaryVideoFrame()`, incoming binary messages are dispatched by their 
 When the host cursor moves, `setHostControlling(true)` is called:
 
 1. **Hides the client cursor** — `cursor: none` on `#screen`, `#real-canvas`, `#video-screen`
-2. **Suppresses client mouse input** — `handleMouseEvent()` returns early for non-scroll events while `isHostControlling` is true
+2. **Suppresses client mouse input** — `handleMouseEvent()` returns early for non-scroll events while `isHostControlling` is true (unless the client is actively moving)
 3. **Auto-expires after 500ms** — a timeout restores `cursor: default` and re-enables client input
 
 This prevents the two cursors from "fighting" when both users move their mouse simultaneously, giving the host priority.
+
+### Client Activity Awareness
+
+When the web client user moves their mouse, `setClientActive(true)` is called:
+
+1. **Hides the host cursor overlay** — the overlay fades out via CSS `opacity` transition
+2. **Restores the client's native cursor** — overrides any host-control cursor hiding
+3. **Client input is never blocked** — when `clientActive` is true, mouse events are always processed regardless of host-control state
+4. **Auto-expires after 300ms** — when the client stops moving, `clientActive` resets to false, and if the host is still sending cursor updates, the overlay reappears
+
+This ensures the host cursor overlay only appears when the **remote host** is moving the cursor, not when the client user is interacting with the web page.
 
 ### Cursor Overlay Rendering
 
@@ -284,6 +301,7 @@ This correctly handles letterboxing/pillarboxing when the remote screen aspect r
 |-----------|----------|---------|-------------|
 | `poll_interval_ms` | `CursorServiceConfig` (Rust) | 16 ms | Cursor polling frequency (~60 Hz) |
 | `hostControlTimeoutMs` | `KVMClient` constructor (JS) | 500 ms | Host inactivity timeout before client regains control |
+| `clientActiveTimeoutMs` | `KVMClient` constructor (JS) | 300 ms | Client inactivity timeout before host cursor can reappear |
 | Channel buffer size | `CursorService::start()` | 8 | Bounded crossbeam channel capacity |
 
 ### Adjusting Poll Rate
