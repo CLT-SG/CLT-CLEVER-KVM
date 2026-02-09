@@ -67,6 +67,18 @@ class KVMClient {
         this.peerConnection = null;
         this.audioStream = null;
 
+        // ── WebRTC DataChannel Transport ─────────────────────────────────
+        // When the server supports WebRTC (protocol_version >= 3), video,
+        // audio, and cursor data are delivered via WebRTC DataChannels
+        // instead of WebSocket binary messages. This provides:
+        //   - UDP transport (no TCP head-of-line blocking)
+        //   - Unreliable delivery for video (dropped frames don't stall)
+        //   - Lower latency than WebSocket binary
+        // WebSocket remains for signaling (SDP/ICE) and input (keyboard/mouse).
+        this.webrtcTransport = null;
+        this.webrtcEnabled = false; // Will be set from server_info
+        this.webrtcConnected = false;
+
         // ── Host cursor synchronization ──────────────────────────────────
         // Tracks the remote host cursor position and shape so the client
         // can render it. When the host is actively moving the cursor,
@@ -948,6 +960,14 @@ class KVMClient {
             this._vpxRafId = null;
         }
 
+        // Close WebRTC DataChannel transport
+        if (this.webrtcTransport) {
+            this.webrtcTransport.close();
+            this.webrtcTransport = null;
+        }
+        this.webrtcConnected = false;
+        this.webrtcEnabled = false;
+
         // Clear host cursor state
         if (this.hostControlTimer) {
             clearTimeout(this.hostControlTimer);
@@ -1035,33 +1055,95 @@ class KVMClient {
         }
     }
 
-    // WebRTC setup for audio
+    // WebRTC setup for audio (legacy stub — replaced by WebRTC DataChannel transport)
     setupWebRTC(encryption) {
         if (!this.config.audio) return;
-        
-        console.log('Setting up WebRTC for audio streaming');
-        
-        // This would be implemented for actual WebRTC audio support
-        // For now, just log that it's being set up
-        if (encryption) {
-            console.log('WebRTC will use encryption');
-        }
+        console.log('Legacy WebRTC audio setup requested — using DataChannel transport instead');
     }
 
-    handleWebRTCOffer(data) {
-        console.log('Received WebRTC offer:', data);
-        
-        // In a real implementation, this would:
-        // 1. Create RTCPeerConnection
-        // 2. Set remote description with the offer
-        // 3. Create and send answer back to server
-        
-        // For now, just acknowledge
-        if (this.connected && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
-                type: 'webrtc_answer',
-                sdp: 'mock_answer_sdp'
-            }));
+    /**
+     * Handle a WebRTC SDP offer from the server.
+     * Creates the WebRTC DataChannel transport for video/audio/cursor streaming.
+     * The server creates DataChannels; we handle the offer/answer exchange.
+     */
+    async handleWebRTCOffer(data) {
+        console.log('WebRTC offer received from server (DataChannel transport)');
+
+        if (!data.sdp) {
+            console.error('WebRTC offer missing SDP');
+            return;
+        }
+
+        // Guard: don't create duplicate transports
+        if (this.webrtcTransport) {
+            console.warn('WebRTC transport already exists, closing old one');
+            this.webrtcTransport.close();
+            this.webrtcTransport = null;
+        }
+
+        // Check if WebRtcTransport class is available
+        if (typeof WebRtcTransport === 'undefined') {
+            console.warn('WebRtcTransport not loaded — falling back to WebSocket binary');
+            return;
+        }
+
+        try {
+            // Create the WebRTC transport with callbacks that route frames
+            // to the existing binary frame handler (same parsing logic)
+            this.webrtcTransport = new WebRtcTransport({
+                onVideoFrame: (arrayBuffer) => {
+                    // Route through the existing binary video frame handler
+                    this.lastFrameTime = Date.now();
+                    this.handleBinaryVideoFrame(arrayBuffer);
+                },
+                onAudioFrame: (arrayBuffer) => {
+                    // Route through the existing binary audio handler
+                    this.handleBinaryVideoFrame(arrayBuffer);
+                },
+                onCursorUpdate: (arrayBuffer) => {
+                    // Route through the existing cursor handler
+                    this.handleCursorMessage(arrayBuffer);
+                },
+                onStateChange: (state) => {
+                    console.log(`WebRTC transport state: ${state}`);
+                    this.webrtcConnected = (state === 'connected');
+
+                    if (state === 'connected') {
+                        this.showNotification('WebRTC connected — low-latency mode active', 3000);
+                    } else if (state === 'failed' || state === 'disconnected') {
+                        this.webrtcConnected = false;
+                        this.showNotification('WebRTC disconnected — using WebSocket fallback', 3000);
+                    }
+                },
+                onIceCandidate: (candidateJson) => {
+                    // Send ICE candidate to server via WebSocket signaling
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({
+                            type: 'webrtc_ice_candidate',
+                            candidate: JSON.parse(candidateJson),
+                        }));
+                    }
+                },
+            });
+
+            // Handle the SDP offer and get the answer
+            const sdpAnswer = await this.webrtcTransport.handleOffer(data.sdp);
+
+            // Send the SDP answer back to the server via WebSocket
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({
+                    type: 'webrtc_answer',
+                    sdp: sdpAnswer,
+                }));
+                console.log('WebRTC SDP answer sent to server');
+            }
+
+            this.webrtcEnabled = true;
+        } catch (e) {
+            console.error('Failed to set up WebRTC transport:', e);
+            this.webrtcTransport = null;
+            this.webrtcEnabled = false;
+            // Fallback: continue using WebSocket binary transport
         }
     }
 
@@ -1313,6 +1395,12 @@ class KVMClient {
                 break;
             case 'webrtc_offer':
                 this.handleWebRTCOffer(data);
+                break;
+            case 'webrtc_ice_candidate':
+                // Server sent an ICE candidate — add to our WebRTC transport
+                if (this.webrtcTransport && data.candidate) {
+                    this.webrtcTransport.addIceCandidate(data.candidate);
+                }
                 break;
             case 'streaming_stats':
                 this.handleStreamingStats(data);

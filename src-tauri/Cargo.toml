@@ -48,6 +48,10 @@ cpal = "0.15" # Cross-platform audio capture (WASAPI/ALSA/CoreAudio)
 crossbeam-queue = "0.3" # Lock-free bounded queue for video frames
 crossbeam-channel = "0.5" # Lock-free MPMC channels
 
+# WebRTC for low-latency peer-to-peer video/audio streaming
+webrtc = "0.17" # Pure Rust WebRTC (DataChannel + Media tracks over UDP)
+bytes = "1"     # Binary data buffers (used by WebRTC DataChannel send API)
+
 # Ultra-high performance dependencies for optimization
 parking_lot = "0.12" # High-performance locks (replaces std::sync::Mutex)
 mimalloc = { version = "0.1", optional = true } # Microsoft's high-performance allocator

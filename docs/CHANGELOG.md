@@ -2,6 +2,38 @@
 
 ## Version History
 
+## [5.0.7] - 2026-02-09
+
+### WebRTC DataChannel Transport for Low-Latency Streaming
+
+### Bug Fixes
+- **TCP Head-of-Line Blocking**: Video/audio/cursor data sent over WebSocket TCP caused head-of-line blocking -- a single lost packet stalled all subsequent frames until retransmitted
+- **rustls CryptoProvider Panic**: Both `ring` (via webrtc/dtls) and `aws-lc-rs` (via axum-server) features were enabled on rustls, causing a runtime panic "no process-level CryptoProvider" because rustls could not auto-detect which provider to use
+- **STUN Server Delay**: External STUN servers (`stun.l.google.com:19302`) added 5-30 second ICE gathering delays on LAN connections where NAT traversal is not needed
+- **30-Second Video Startup Delay**: Video frames were silently dropped when the WebRTC DataChannel was not yet ready during negotiation, causing no video to appear until the channel opened
+
+### Improvements
+- **WebRTC DataChannel Transport**: Added three DataChannels for media delivery -- video (unreliable/unordered UDP, fire-and-forget), audio (reliable), cursor (reliable) -- eliminating TCP head-of-line blocking for real-time streaming
+- **Hybrid Transport Architecture**: WebSocket retained for SDP/ICE signaling, keyboard/mouse input, and control messages; WebRTC used for all media data
+- **WebSocket Fallback During Negotiation**: Video/audio/cursor frames fall back to WebSocket binary when the DataChannel is not ready or encounters errors, ensuring immediate video display during WebRTC setup
+- **LAN-Optimized ICE**: No external STUN servers configured -- host candidates are sufficient for same-network peers, enabling sub-second ICE connection
+- **Explicit CryptoProvider**: `rustls::crypto::ring::default_provider().install_default()` called at startup to resolve the ring/aws-lc-rs conflict
+- **Protocol Version 3**: Binary protocol bumped from v2 to v3 with `webrtc_enabled` field in `ServerInfo` so clients can detect WebRTC support
+- **Backpressure Control**: Video DataChannel checks `buffered_amount()` before sending; frames are dropped if buffer exceeds configured threshold to prevent unbounded memory growth
+
+### Technical Changes
+- **src-tauri/Cargo.toml**: Added `webrtc = "0.17"` (pure Rust WebRTC) and `bytes = "1"` dependencies
+- **src-tauri/src/main.rs**: Added `rustls::crypto::ring::default_provider().install_default()` after `env_logger::init()`
+- **src-tauri/src/rdengine/webrtc_transport.rs** (new): `WebRtcTransport` struct, `WebRtcConfig` (default/lan), `WebRtcEvent` enum, three DataChannels, SDP offer/answer, ICE candidate handling, backpressure control, `close()` cleanup
+- **src-tauri/src/rdengine/connection.rs**: Added `enable_webrtc`/`webrtc_config` to `ConnectionConfig`, WebRTC transport setup with SDP offer, ICE event forwarding, video/audio/cursor routing through DataChannel with WebSocket fallback, signaling message handling (`webrtc_answer`, `webrtc_ice_candidate`)
+- **src-tauri/src/rdengine/protocol.rs**: Added `webrtc_enabled: bool` to `ServerInfo`, protocol_version 3
+- **src-tauri/src/rdengine/mod.rs**: Added `pub mod webrtc_transport` and re-exports
+- **src-tauri/src/network/server/websocket.rs**: Both handlers use `enable_webrtc: true` with `WebRtcConfig::lan()`
+- **src-tauri/web-client/webrtc-transport.js** (new): Client-side `WebRtcTransport` class, RTCPeerConnection management, DataChannel handlers, ICE candidate forwarding, connection state monitoring
+- **src-tauri/web-client/kvm-client.js**: Added `webrtcTransport`/`webrtcEnabled`/`webrtcConnected` state, `handleWebRTCOffer()` creates transport and routes frames to existing handlers, signaling message handling, cleanup on disconnect
+- **src-tauri/web-client/kvm-template.html**: Added `<script src="/static/webrtc-transport.js"></script>`
+- **docs/RDENGINE_STREAMING_IMPLEMENTATION.md**: Updated architecture overview, transport table, signaling flow, module structure, performance comparison, three-column comparison table
+
 ## [5.0.6] - 2026-02-09
 
 ### Persistent TLS Certificates and Infinite WebSocket Reconnection

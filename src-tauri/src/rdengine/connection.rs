@@ -1,10 +1,17 @@
-//! WebSocket Connection Handler
+//! WebSocket + WebRTC Connection Handler
 //!
-//! Manages a single client WebSocket connection with:
-//! - Separated video and control message paths (prevents HOL blocking)
-//! - Input event dispatching
-//! - Ping/pong latency measurement
-//! - Adaptive QoS feedback loop
+//! Manages a single client connection with two transport modes:
+//!
+//! **WebSocket-only mode (fallback):**
+//! - Video/audio/cursor sent as binary WebSocket messages
+//! - Input/control sent as JSON text WebSocket messages
+//!
+//! **WebRTC mode (preferred for real-time streaming):**
+//! - Video frames sent via unreliable/unordered DataChannel (UDP, no HOL blocking)
+//! - Audio frames sent via reliable DataChannel
+//! - Cursor updates sent via reliable DataChannel
+//! - Input/control still via WebSocket (reliable, low-frequency)
+//! - SDP/ICE signaling via WebSocket JSON messages
 //!
 //! Follows RustDesk's connection.rs pattern:
 //! - tokio::select! for multiplexing
@@ -28,6 +35,8 @@ use crate::rdengine::protocol::{self, ControlMsg, InputMsg, ServerInfo, CODEC_VP
 use crate::rdengine::qos::QualityControl;
 use crate::rdengine::video_service::{VideoFrame, VideoService, VideoServiceConfig};
 use crate::rdengine::codec::VpxCodec;
+use crate::rdengine::webrtc_transport::{WebRtcTransport, WebRtcConfig, WebRtcEvent};
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 
 /// Connection handler configuration
 #[derive(Debug, Clone)]
@@ -37,6 +46,12 @@ pub struct ConnectionConfig {
     pub framerate: u32,
     pub bitrate_kbps: u32,
     pub enable_audio: bool,
+    /// Enable WebRTC DataChannel transport for video/audio/cursor.
+    /// When true, WebSocket is used only for signaling and input.
+    /// When false, falls back to WebSocket binary transport.
+    pub enable_webrtc: bool,
+    /// WebRTC-specific configuration (ICE servers, buffer sizes, etc.)
+    pub webrtc_config: Option<WebRtcConfig>,
 }
 
 impl Default for ConnectionConfig {
@@ -47,6 +62,8 @@ impl Default for ConnectionConfig {
             framerate: 24,
             bitrate_kbps: 1500,
             enable_audio: false,
+            enable_webrtc: true, // WebRTC preferred by default
+            webrtc_config: None, // Use WebRtcConfig::default()
         }
     }
 }
@@ -62,8 +79,9 @@ impl ConnectionHandler {
         stop_rx: Option<tokio::sync::broadcast::Receiver<()>>,
     ) {
         info!(
-            "New rdengine connection: monitor={}, codec={:?}, fps={}, bitrate={}kbps, audio={}",
-            config.monitor_id, config.codec, config.framerate, config.bitrate_kbps, config.enable_audio
+            "New rdengine connection: monitor={}, codec={:?}, fps={}, bitrate={}kbps, audio={}, webrtc={}",
+            config.monitor_id, config.codec, config.framerate, config.bitrate_kbps,
+            config.enable_audio, config.enable_webrtc
         );
 
         if let Err(e) = Self::handle_inner(socket, config, stop_rx).await {
@@ -134,7 +152,8 @@ impl ConnectionHandler {
             framerate: config.framerate,
             bitrate_kbps: config.bitrate_kbps,
             audio_enabled: audio_service.is_some(),
-            protocol_version: 2, // v2 = RustDesk-inspired binary protocol
+            protocol_version: 3, // v3 = WebRTC DataChannel transport
+            webrtc_enabled: config.enable_webrtc,
         };
 
         let info_json = serde_json::to_string(&server_info)?;
@@ -162,7 +181,88 @@ impl ConnectionHandler {
         video_service.request_keyframe();
 
         // Internal channel for outbound control messages
+        // Created early so WebRTC event forwarder can use it
         let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<String>(32);
+
+        // ── WebRTC Transport Setup ──────────────────────────────────────
+        // If WebRTC is enabled, create the transport and send the SDP offer
+        // to the client via WebSocket signaling. The client will respond with
+        // an SDP answer and ICE candidates, also via WebSocket.
+        let webrtc_transport: Option<Arc<WebRtcTransport>> = if config.enable_webrtc {
+            let rtc_config = config.webrtc_config.clone()
+                .unwrap_or_else(WebRtcConfig::default);
+
+            match WebRtcTransport::new(rtc_config).await {
+                Ok((transport, mut rtc_event_rx)) => {
+                    let transport = Arc::new(transport);
+
+                    // Create SDP offer and send to client
+                    match transport.create_offer().await {
+                        Ok(sdp_offer) => {
+                            let offer_msg = json!({
+                                "type": "webrtc_offer",
+                                "sdp": sdp_offer,
+                            });
+                            ws_tx.send(Message::Text(serde_json::to_string(&offer_msg)?)).await?;
+                            info!("WebRTC SDP offer sent to client");
+
+                            // Spawn a task to forward WebRTC events to the WS control channel
+                            let ctrl_tx_rtc = ctrl_tx.clone();
+                            tokio::spawn(async move {
+                                while let Some(event) = rtc_event_rx.recv().await {
+                                    match event {
+                                        WebRtcEvent::IceCandidate(candidate_json) => {
+                                            let msg = json!({
+                                                "type": "webrtc_ice_candidate",
+                                                "candidate": candidate_json,
+                                            });
+                                            let _ = ctrl_tx_rtc.send(
+                                                serde_json::to_string(&msg).unwrap()
+                                            ).await;
+                                        }
+                                        WebRtcEvent::VideoChannelReady => {
+                                            info!("WebRTC video DataChannel is ready");
+                                        }
+                                        WebRtcEvent::AudioChannelReady => {
+                                            info!("WebRTC audio DataChannel is ready");
+                                        }
+                                        WebRtcEvent::CursorChannelReady => {
+                                            info!("WebRTC cursor DataChannel is ready");
+                                        }
+                                        WebRtcEvent::ConnectionStateChanged(state) => {
+                                            info!("WebRTC connection state: {:?}", state);
+                                            if state == RTCPeerConnectionState::Failed
+                                                || state == RTCPeerConnectionState::Disconnected
+                                            {
+                                                warn!("WebRTC peer connection lost — client should fall back to WebSocket");
+                                            }
+                                        }
+                                        WebRtcEvent::Error(err) => {
+                                            error!("WebRTC transport error: {}", err);
+                                        }
+                                    }
+                                }
+                            });
+
+                            Some(transport)
+                        }
+                        Err(e) => {
+                            warn!("Failed to create WebRTC offer: {} — falling back to WebSocket", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to initialize WebRTC transport: {} — falling back to WebSocket", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Clone transport reference for the main loop
+        let webrtc = webrtc_transport.clone();
 
         // Clone frame receiver for the video bridge task
         let frame_rx = video_service.frame_rx().clone();
@@ -286,12 +386,29 @@ impl ConnectionHandler {
                 }
 
                 // Priority 2: Video frames via bridge (crossbeam → tokio mpsc)
+                // Route through WebRTC DataChannel if available, fallback to WebSocket
                 frame = video_bridge_rx.recv() => {
                     match frame {
                         Some(video_frame) => {
-                            if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
-                                warn!("Failed to send video frame: {}", e);
-                                break;
+                            if let Some(ref rtc) = webrtc {
+                                // WebRTC path: send via unreliable DataChannel (UDP, no HOL blocking)
+                                match rtc.send_video_frame(&video_frame.message).await {
+                                    Ok(true) => {} // Sent via WebRTC DataChannel
+                                    Ok(false) | Err(_) => {
+                                        // DataChannel not ready, buffer full, or send error
+                                        // — fall back to WebSocket binary so client still gets frames
+                                        if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
+                                            warn!("Failed to send video frame via WebSocket fallback: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            } else {
+                                // WebSocket-only path (legacy/fallback)
+                                if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
+                                    warn!("Failed to send video frame: {}", e);
+                                    break;
+                                }
                             }
                         }
                         None => {
@@ -302,6 +419,7 @@ impl ConnectionHandler {
                 }
 
                 // Priority 3: Audio frames via bridge
+                // Route through WebRTC DataChannel if available, fallback to WebSocket
                 audio = async {
                     if let Some(ref mut rx) = audio_bridge_rx {
                         rx.recv().await
@@ -311,8 +429,18 @@ impl ConnectionHandler {
                 } => {
                     match audio {
                         Some(audio_frame) => {
-                            if let Err(e) = ws_tx.send(Message::Binary(audio_frame.message)).await {
-                                warn!("Failed to send audio frame: {}", e);
+                            if let Some(ref rtc) = webrtc {
+                                match rtc.send_audio_frame(&audio_frame.message).await {
+                                    Ok(true) => {} // Sent via WebRTC
+                                    Ok(false) | Err(_) => {
+                                        // Fallback to WebSocket
+                                        let _ = ws_tx.send(Message::Binary(audio_frame.message)).await;
+                                    }
+                                }
+                            } else {
+                                if let Err(e) = ws_tx.send(Message::Binary(audio_frame.message)).await {
+                                    warn!("Failed to send audio frame: {}", e);
+                                }
                             }
                         }
                         None => {
@@ -322,6 +450,7 @@ impl ConnectionHandler {
                 }
 
                 // Priority 3.5: Cursor updates via bridge
+                // Route through WebRTC DataChannel if available, fallback to WebSocket
                 cursor = async {
                     if let Some(ref mut rx) = cursor_bridge_rx {
                         rx.recv().await
@@ -330,8 +459,17 @@ impl ConnectionHandler {
                     }
                 } => {
                     if let Some(cursor_update) = cursor {
-                        if let Err(e) = ws_tx.send(Message::Binary(cursor_update.message)).await {
-                            warn!("Failed to send cursor update: {}", e);
+                        if let Some(ref rtc) = webrtc {
+                            match rtc.send_cursor_update(&cursor_update.message).await {
+                                Ok(true) => {} // Sent via WebRTC
+                                Ok(false) | Err(_) => {
+                                    let _ = ws_tx.send(Message::Binary(cursor_update.message)).await;
+                                }
+                            }
+                        } else {
+                            if let Err(e) = ws_tx.send(Message::Binary(cursor_update.message)).await {
+                                warn!("Failed to send cursor update: {}", e);
+                            }
                         }
                     }
                 }
@@ -356,6 +494,7 @@ impl ConnectionHandler {
                                 &video_service,
                                 &qos,
                                 &ctrl_tx,
+                                &webrtc,
                             ).await;
                         }
                         Some(Ok(Message::Binary(data))) => {
@@ -430,18 +569,61 @@ impl ConnectionHandler {
         if let Some(mut cursor) = cursor_service {
             cursor.stop();
         }
+        // Close WebRTC transport if active
+        if let Some(rtc) = webrtc_transport {
+            if let Err(e) = rtc.close().await {
+                warn!("Error closing WebRTC transport: {}", e);
+            }
+        }
 
         Ok(())
     }
 
-    /// Handle a text message from the client (control or input)
+    /// Handle a text message from the client (control, input, or WebRTC signaling)
     async fn handle_text_message(
         text: &str,
         input_handler: &mut InputHandler,
         video_service: &VideoService,
         qos: &Arc<parking_lot::Mutex<QualityControl>>,
         ctrl_tx: &mpsc::Sender<String>,
+        webrtc: &Option<Arc<WebRtcTransport>>,
     ) {
+        // ── WebRTC signaling messages ────────────────────────────────────
+        // These are handled before control/input parsing because they have
+        // a distinct JSON structure (type + sdp/candidate fields).
+        if let Ok(signaling) = serde_json::from_str::<serde_json::Value>(text) {
+            if let Some(msg_type) = signaling.get("type").and_then(|v| v.as_str()) {
+                match msg_type {
+                    "webrtc_answer" => {
+                        if let Some(ref rtc) = webrtc {
+                            if let Some(sdp) = signaling.get("sdp").and_then(|v| v.as_str()) {
+                                match rtc.handle_answer(sdp).await {
+                                    Ok(_) => info!("WebRTC SDP answer applied successfully"),
+                                    Err(e) => error!("Failed to apply WebRTC SDP answer: {}", e),
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    "webrtc_ice_candidate" => {
+                        if let Some(ref rtc) = webrtc {
+                            if let Some(candidate) = signaling.get("candidate") {
+                                let candidate_str = candidate.to_string();
+                                match rtc.add_ice_candidate(&candidate_str).await {
+                                    Ok(_) => debug!("WebRTC ICE candidate added"),
+                                    Err(e) => warn!("Failed to add WebRTC ICE candidate: {}", e),
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    _ => {
+                        // Not a WebRTC message — fall through to control/input parsing
+                    }
+                }
+            }
+        }
+
         // Try parsing as control message first
         if let Ok(ctrl) = serde_json::from_str::<ControlMsg>(text) {
             match ctrl {

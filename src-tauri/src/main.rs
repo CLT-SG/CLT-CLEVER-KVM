@@ -30,8 +30,15 @@ use tauri::Manager;
 fn main() {
     // Initialize logging first
     env_logger::init();
+
+    // Install rustls CryptoProvider before any TLS usage.
+    // Required because both 'ring' (via webrtc/dtls) and 'aws-lc-rs' (via axum-server)
+    // features are enabled, so rustls cannot auto-detect the provider.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls CryptoProvider");
     
-    info!("Starting {} - Ultra-Low Latency Remote Desktop", APP_NAME);
+    info!("Starting {} - Video Wall & Console", APP_NAME);
     
     // Run Tauri application
     tauri::Builder::default()
