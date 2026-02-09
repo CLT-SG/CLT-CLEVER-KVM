@@ -249,26 +249,83 @@ pub enum ControlMsg {
 }
 
 /// JSON input messages sent from client → server
+///
+/// These must match the format the web client actually sends.
+/// The client sends:
+///   mouse: { type, x, y, button: "left"/"right"/"middle", monitor_id }
+///   key:   { type, key, keyCode, code?, ctrlKey, altKey, shiftKey, metaKey }
+///   wheel: { type, x, y, delta_x, delta_y }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum InputMsg {
     #[serde(rename = "mousemove")]
-    MouseMove { x: f64, y: f64, monitor_id: Option<usize> },
+    MouseMove { x: f64, y: f64, monitor_id: Option<serde_json::Value> },
 
     #[serde(rename = "mousedown")]
-    MouseDown { x: f64, y: f64, button: u8 },
+    MouseDown { x: f64, y: f64, button: serde_json::Value, monitor_id: Option<serde_json::Value> },
 
     #[serde(rename = "mouseup")]
-    MouseUp { x: f64, y: f64, button: u8 },
+    MouseUp { x: f64, y: f64, button: serde_json::Value, monitor_id: Option<serde_json::Value> },
 
     #[serde(rename = "wheel")]
-    Wheel { delta_x: f64, delta_y: f64 },
+    Wheel {
+        #[serde(default)]
+        delta_x: f64,
+        #[serde(default)]
+        delta_y: f64,
+        #[serde(default)]
+        x: Option<f64>,
+        #[serde(default)]
+        y: Option<f64>,
+    },
 
     #[serde(rename = "keydown")]
-    KeyDown { key: String, code: String, modifiers: Option<KeyModifiers> },
+    KeyDown {
+        key: String,
+        code: Option<String>,
+        #[serde(alias = "keyCode")]
+        key_code: Option<u32>,
+        #[serde(alias = "ctrlKey", default)]
+        ctrl_key: Option<bool>,
+        #[serde(alias = "altKey", default)]
+        alt_key: Option<bool>,
+        #[serde(alias = "shiftKey", default)]
+        shift_key: Option<bool>,
+        #[serde(alias = "metaKey", default)]
+        meta_key: Option<bool>,
+        modifiers: Option<KeyModifiers>,
+    },
 
     #[serde(rename = "keyup")]
-    KeyUp { key: String, code: String, modifiers: Option<KeyModifiers> },
+    KeyUp {
+        key: String,
+        code: Option<String>,
+        #[serde(alias = "keyCode")]
+        key_code: Option<u32>,
+        #[serde(alias = "ctrlKey", default)]
+        ctrl_key: Option<bool>,
+        #[serde(alias = "altKey", default)]
+        alt_key: Option<bool>,
+        #[serde(alias = "shiftKey", default)]
+        shift_key: Option<bool>,
+        #[serde(alias = "metaKey", default)]
+        meta_key: Option<bool>,
+        modifiers: Option<KeyModifiers>,
+    },
+}
+
+/// Helper to parse a button value that may be a string ("left") or number (0)
+pub fn parse_button_value(val: &serde_json::Value) -> u8 {
+    match val {
+        serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) as u8,
+        serde_json::Value::String(s) => match s.as_str() {
+            "left" => 0,
+            "middle" => 1,
+            "right" => 2,
+            _ => 0,
+        },
+        _ => 0,
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]

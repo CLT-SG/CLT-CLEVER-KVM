@@ -432,12 +432,10 @@ class KVMClient {
     setupInputHandlers() {
         const screenContainer = document.getElementById('screen');
         
-        // Mouse events - use both video element and canvas for fallback
+        // Mouse events - attach to screen container as a fallback.
+        // Note: initializeOptimizedCanvas() adds its own listeners to realCanvas.
+        // We use stopPropagation in the handler to prevent double-firing.
         ['mousedown', 'mouseup', 'mousemove', 'wheel'].forEach(event => {
-            if (this.videoScreen) {
-                this.videoScreen.addEventListener(event, (e) => this.handleMouseEvent(e));
-            }
-            // Also add to screen container to catch canvas events
             if (screenContainer) {
                 screenContainer.addEventListener(event, (e) => this.handleMouseEvent(e));
             }
@@ -463,6 +461,35 @@ class KVMClient {
         }
     }
 
+    /**
+     * Calculate the actual rendered content rectangle within an element
+     * that uses object-fit: contain. The element's bounding rect includes
+     * letterbox/pillarbox black bars, but we need only the content area.
+     */
+    getContentRect(element) {
+        const rect = element.getBoundingClientRect();
+        const elementAspect = rect.width / rect.height;
+        const contentAspect = this.screenWidth / this.screenHeight;
+
+        let contentWidth, contentHeight, contentLeft, contentTop;
+
+        if (elementAspect > contentAspect) {
+            // Element is wider than content — pillarboxing (black bars on sides)
+            contentHeight = rect.height;
+            contentWidth = rect.height * contentAspect;
+            contentLeft = rect.left + (rect.width - contentWidth) / 2;
+            contentTop = rect.top;
+        } else {
+            // Element is taller than content — letterboxing (black bars top/bottom)
+            contentWidth = rect.width;
+            contentHeight = rect.width / contentAspect;
+            contentLeft = rect.left;
+            contentTop = rect.top + (rect.height - contentHeight) / 2;
+        }
+
+        return { left: contentLeft, top: contentTop, width: contentWidth, height: contentHeight };
+    }
+
     handleMouseEvent(e) {
         if (!this.connected) return;
         
@@ -478,23 +505,31 @@ class KVMClient {
             
         if (!targetElement) return;
         
-        const rect = targetElement.getBoundingClientRect();
-        
         // Ensure valid dimensions to prevent NaN/Infinity
-        if (rect.width <= 0 || rect.height <= 0 || this.screenWidth <= 0 || this.screenHeight <= 0) {
-            console.warn('Invalid dimensions for coordinate calculation');
+        if (this.screenWidth <= 0 || this.screenHeight <= 0) {
+            console.warn('Invalid screen dimensions for coordinate calculation');
             return;
         }
         
-        const scaleX = this.screenWidth / rect.width;
-        const scaleY = this.screenHeight / rect.height;
+        // Get the actual content area (excluding object-fit: contain black bars)
+        const content = this.getContentRect(targetElement);
         
-        // Calculate position relative to element, clamped to valid range
-        const relX = Math.max(0, e.clientX - rect.left);
-        const relY = Math.max(0, e.clientY - rect.top);
+        if (content.width <= 0 || content.height <= 0) {
+            console.warn('Invalid content dimensions for coordinate calculation');
+            return;
+        }
         
-        const x = Math.floor(Math.min(relX * scaleX, this.screenWidth - 1));
-        const y = Math.floor(Math.min(relY * scaleY, this.screenHeight - 1));
+        // Calculate position relative to the content area (not the element)
+        const relX = e.clientX - content.left;
+        const relY = e.clientY - content.top;
+        
+        // Ignore clicks in the letterbox/pillarbox black bars
+        if (relX < 0 || relX >= content.width || relY < 0 || relY >= content.height) {
+            return;
+        }
+        
+        const x = Math.floor(Math.min(relX / content.width * this.screenWidth, this.screenWidth - 1));
+        const y = Math.floor(Math.min(relY / content.height * this.screenHeight, this.screenHeight - 1));
         
         let eventData = {
             x,
@@ -505,12 +540,12 @@ class KVMClient {
         switch(e.type) {
             case 'mousedown':
                 eventData.type = 'mousedown';
-                eventData.button = e.button === 0 ? 'left' : (e.button === 1 ? 'middle' : 'right');
+                eventData.button = e.button; // 0=left, 1=middle, 2=right (numeric)
                 this.sendInputEvent(eventData);
                 break;
             case 'mouseup':
                 eventData.type = 'mouseup';
-                eventData.button = e.button === 0 ? 'left' : (e.button === 1 ? 'middle' : 'right');
+                eventData.button = e.button; // 0=left, 1=middle, 2=right (numeric)
                 this.sendInputEvent(eventData);
                 break;
             case 'mousemove':
@@ -546,6 +581,7 @@ class KVMClient {
         this.sendInputEvent({
             type: type,
             key: e.key,
+            code: e.code,   // e.g. "KeyA", "Digit1", "ArrowUp" — required by server
             keyCode: e.keyCode,
             ctrlKey: e.ctrlKey,
             altKey: e.altKey,
@@ -575,21 +611,30 @@ class KVMClient {
         // Handle touch events for mobile devices
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
-            const rect = targetElement.getBoundingClientRect();
             
-            // Ensure valid dimensions
-            if (rect.width <= 0 || rect.height <= 0 || this.screenWidth <= 0 || this.screenHeight <= 0) {
+            // Ensure valid screen dimensions
+            if (this.screenWidth <= 0 || this.screenHeight <= 0) {
                 continue;
             }
             
-            const scaleX = this.screenWidth / rect.width;
-            const scaleY = this.screenHeight / rect.height;
+            // Get the actual content area (excluding object-fit: contain black bars)
+            const content = this.getContentRect(targetElement);
             
-            const relX = Math.max(0, touch.clientX - rect.left);
-            const relY = Math.max(0, touch.clientY - rect.top);
+            if (content.width <= 0 || content.height <= 0) {
+                continue;
+            }
             
-            const x = Math.floor(Math.min(relX * scaleX, this.screenWidth - 1));
-            const y = Math.floor(Math.min(relY * scaleY, this.screenHeight - 1));
+            // Calculate position relative to the content area
+            const relX = touch.clientX - content.left;
+            const relY = touch.clientY - content.top;
+            
+            // Ignore touches in the letterbox/pillarbox black bars
+            if (relX < 0 || relX >= content.width || relY < 0 || relY >= content.height) {
+                continue;
+            }
+            
+            const x = Math.floor(Math.min(relX / content.width * this.screenWidth, this.screenWidth - 1));
+            const y = Math.floor(Math.min(relY / content.height * this.screenHeight, this.screenHeight - 1));
             
             let eventData = {
                 type: e.type,
@@ -952,7 +997,7 @@ class KVMClient {
             // Start sending ping messages to measure latency
             this.pingInterval = setInterval(() => {
                 this.sendPing();
-            }, 5000);
+            }, 2000);
 
             // Start network monitoring and adaptive quality
             this.startNetworkMonitoring();
@@ -2049,9 +2094,12 @@ class KVMClient {
             }
         }
         
-        // Add mouse event listeners to the new canvas
+        // Add mouse event listeners to the new canvas (stop propagation to prevent double-firing with container)
         ['mousedown', 'mouseup', 'mousemove', 'wheel'].forEach(event => {
-            this.realCanvas.addEventListener(event, (e) => this.handleMouseEvent(e));
+            this.realCanvas.addEventListener(event, (e) => {
+                e.stopPropagation();
+                this.handleMouseEvent(e);
+            });
         });
         this.realCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
         

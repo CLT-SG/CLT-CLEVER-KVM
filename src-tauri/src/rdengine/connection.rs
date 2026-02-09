@@ -44,7 +44,7 @@ impl Default for ConnectionConfig {
             monitor_id: 0,
             codec: VpxCodec::VP9,
             framerate: 30,
-            bitrate_kbps: 2000,
+            bitrate_kbps: 4000,
             enable_audio: false,
         }
     }
@@ -418,11 +418,12 @@ impl ConnectionHandler {
                         }
                         "low" => {
                             qos.lock().set_fps(15);
-                            qos.lock().set_bitrate(800);
+                            qos.lock().set_bitrate(1500);
                         }
                         _ => {
+                            // "balanced" / default
                             qos.lock().set_fps(30);
-                            qos.lock().set_bitrate(2000);
+                            qos.lock().set_bitrate(4000);
                         }
                     }
                 }
@@ -446,69 +447,89 @@ impl ConnectionHandler {
         }
 
         // Try parsing as input event
-        if let Ok(input) = serde_json::from_str::<InputMsg>(text) {
-            let event = match input {
-                InputMsg::MouseMove { x, y, monitor_id } => {
-                    CoreInputEvent::MouseMove {
-                        x: x as i32,
-                        y: y as i32,
-                        monitor_id: monitor_id.map(|id| id.to_string()),
+        match serde_json::from_str::<InputMsg>(text) {
+            Ok(input) => {
+                let event = match input {
+                    InputMsg::MouseMove { x, y, monitor_id } => {
+                        let mid = monitor_id.and_then(|v| match v {
+                            serde_json::Value::String(s) => Some(s),
+                            serde_json::Value::Number(n) => Some(n.to_string()),
+                            _ => None,
+                        });
+                        CoreInputEvent::MouseMove {
+                            x: x as i32,
+                            y: y as i32,
+                            monitor_id: mid,
+                        }
                     }
-                }
-                InputMsg::MouseDown { x, y, button } => {
-                    let btn_str = match button {
-                        0 => "left",
-                        1 => "middle",
-                        2 => "right",
-                        _ => "left",
-                    }.to_string();
-                    CoreInputEvent::MouseDown {
-                        button: btn_str,
-                        x: x as i32,
-                        y: y as i32,
-                        monitor_id: None,
+                    InputMsg::MouseDown { x, y, button, monitor_id } => {
+                        let btn_num = protocol::parse_button_value(&button);
+                        let btn_str = match btn_num {
+                            0 => "left",
+                            1 => "middle",
+                            2 => "right",
+                            _ => "left",
+                        }.to_string();
+                        CoreInputEvent::MouseDown {
+                            button: btn_str,
+                            x: x as i32,
+                            y: y as i32,
+                            monitor_id: None,
+                        }
                     }
-                }
-                InputMsg::MouseUp { x, y, button } => {
-                    let btn_str = match button {
-                        0 => "left",
-                        1 => "middle",
-                        2 => "right",
-                        _ => "left",
-                    }.to_string();
-                    CoreInputEvent::MouseUp {
-                        button: btn_str,
-                        x: x as i32,
-                        y: y as i32,
-                        monitor_id: None,
+                    InputMsg::MouseUp { x, y, button, monitor_id } => {
+                        let btn_num = protocol::parse_button_value(&button);
+                        let btn_str = match btn_num {
+                            0 => "left",
+                            1 => "middle",
+                            2 => "right",
+                            _ => "left",
+                        }.to_string();
+                        CoreInputEvent::MouseUp {
+                            button: btn_str,
+                            x: x as i32,
+                            y: y as i32,
+                            monitor_id: None,
+                        }
                     }
-                }
-                InputMsg::Wheel { delta_x, delta_y } => {
-                    CoreInputEvent::MouseWheel {
-                        delta_y: delta_y as i32,
-                        delta_x: Some(delta_x as i32),
-                        monitor_id: None,
+                    InputMsg::Wheel { delta_x, delta_y, .. } => {
+                        CoreInputEvent::MouseWheel {
+                            delta_y: delta_y as i32,
+                            delta_x: Some(delta_x as i32),
+                            monitor_id: None,
+                        }
                     }
-                }
-                InputMsg::KeyDown { key, code, modifiers } => {
-                    CoreInputEvent::KeyDown {
-                        key,
-                        code: Some(code),
-                        modifiers: Vec::new(),
-                        repeat: None,
+                    InputMsg::KeyDown { key, code, key_code, ctrl_key, alt_key, shift_key, meta_key, modifiers } => {
+                        // Build code string: prefer explicit `code`, fall back to key_code mapping
+                        let code_str = code.or_else(|| {
+                            // The client may send keyCode (integer) without code (string)
+                            // We don't need code for InputHandler — it tries code first, then key
+                            None
+                        });
+                        CoreInputEvent::KeyDown {
+                            key,
+                            code: code_str,
+                            modifiers: Vec::new(),
+                            repeat: None,
+                        }
                     }
-                }
-                InputMsg::KeyUp { key, code, modifiers } => {
-                    CoreInputEvent::KeyUp {
-                        key,
-                        code: Some(code),
-                        modifiers: Vec::new(),
+                    InputMsg::KeyUp { key, code, key_code, ctrl_key, alt_key, shift_key, meta_key, modifiers } => {
+                        let code_str = code;
+                        CoreInputEvent::KeyUp {
+                            key,
+                            code: code_str,
+                            modifiers: Vec::new(),
+                        }
                     }
-                }
-            };
+                };
 
-            if let Err(e) = input_handler.handle_event(event) {
-                debug!("Input event error: {}", e);
+                if let Err(e) = input_handler.handle_event(event) {
+                    debug!("Input event error: {}", e);
+                }
+            }
+            Err(e) => {
+                // Log parsing failures so we can diagnose protocol mismatches
+                warn!("Failed to parse message as control or input: {} | raw: {}", e, &text[..text.len().min(200)]);
             }
         }
     }

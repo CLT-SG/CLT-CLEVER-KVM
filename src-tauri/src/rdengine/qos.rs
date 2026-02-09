@@ -35,7 +35,7 @@ impl Default for QosConfig {
         Self {
             min_fps: 5,
             max_fps: 60,
-            min_bitrate_kbps: 400,
+            min_bitrate_kbps: 800,
             max_bitrate_kbps: 12000,
             adjustment_interval_secs: 3.0,
             high_latency_threshold_ms: 100,

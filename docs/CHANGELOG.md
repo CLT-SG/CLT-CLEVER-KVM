@@ -2,6 +2,35 @@
 
 ## Version History
 
+## [5.0.2] - 2026-02-09
+
+### Video Quality, Latency, Input Handling, and Mouse Coordinate Fixes
+
+### Bug Fixes
+- **Encoder set_bitrate Corruption**: Fixed `set_bitrate()` which reset all encoder configuration (dimensions, threading, CBR mode, buffer sizes) to libvpx defaults on every QoS bitrate adjustment, silently corrupting the encoder — now re-applies all custom settings before updating bitrate
+- **QoS Bitrate Never Applied**: QoS controller calculated new bitrate values but never propagated them to the encoder — added `last_applied_bitrate` tracking in video service main loop to apply changes via `encoder.set_bitrate()`
+- **Input Type Mismatch**: Server `InputMsg` enum expected `button` as `u8` and `code` as required `String`, while client sent `button` as string and omitted `code` — all input events silently failed JSON deserialization, breaking keyboard and mouse entirely
+- **Mouse Coordinate Offset**: Mouse coordinate calculation used `getBoundingClientRect()` which includes `object-fit: contain` letterbox/pillarbox black bar areas — clicks and moves landed at wrong positions on the remote screen
+- **Duplicate Mouse Events**: Mouse event listeners were attached to both `videoScreen`, `screenContainer`, and `realCanvas`, causing every mouse action to fire the handler twice due to event bubbling
+- **Silent Input Errors**: Failed input message parsing was silently ignored — added warning-level logging with error details and raw message content for diagnostics
+
+### Improvements
+- **Video Quality**: Raised default bitrate from 2000 to 4000 kbps, lowered max quantizer from 56 to 40, raised min quantizer from 4 to 2 for sharper 1080p output
+- **Video Latency**: Reduced encoder buffer sizes from 600/400/500ms to 150/100/120ms for low-latency LAN streaming, added `rc_dropframe_thresh = 0` to never drop frames
+- **Encoder Speed**: Changed `cpu_speed` from 7 to 6 for better quality with minimal CPU cost increase
+- **QoS Floor**: Raised minimum bitrate floor from 400 to 800 kbps to keep quality usable under congestion
+- **Quality Presets**: Updated low preset from 800 to 1500 kbps, balanced from 2000 to 4000 kbps
+- **Ping Frequency**: Reduced ping interval from 5000ms to 2000ms for faster QoS feedback
+
+### Technical Changes
+- **src-tauri/src/rdengine/codec.rs**: Encoder defaults, buffer sizes, `set_bitrate()` bug fix preserving all encoder settings, preset config updates
+- **src-tauri/src/rdengine/video_service.rs**: Default bitrate 4000 kbps, QoS-to-encoder bitrate propagation
+- **src-tauri/src/rdengine/connection.rs**: Default bitrate 4000 kbps, input parsing rewrite for flexible types, error logging, quality preset updates
+- **src-tauri/src/rdengine/qos.rs**: Minimum bitrate floor raised to 800 kbps
+- **src-tauri/src/rdengine/protocol.rs**: `InputMsg` enum rewrite — `button` as `serde_json::Value`, `code` optional, `key_code` with alias, individual modifier booleans with serde aliases, `parse_button_value()` helper
+- **src-tauri/web-client/kvm-client.js**: Added `getContentRect()` for object-fit:contain coordinate mapping, fixed mouse/touch coordinate calculation, mouse button numeric format, keyboard `code` field, removed duplicate event listeners, `stopPropagation` on canvas, ping interval 2000ms
+- **docs/VIDEO_INPUT_FIXES.md** (new): Documentation of all video quality, latency, and input fixes
+
 ## [5.0.1] - 2026-02-06
 
 ### VP9 Encoder Fix, SHM Capture, and Decoder Error Recovery

@@ -116,11 +116,11 @@ impl Default for VpxConfig {
             codec: VpxCodec::VP9,
             width: 1920,
             height: 1080,
-            bitrate_kbps: 2000,
+            bitrate_kbps: 4000,
             framerate: 30,
             keyframe_interval: 0, // Disabled — like RustDesk's VPX_KF_DISABLED
             threads: 4,
-            cpu_speed: 7, // Realtime preset — like RustDesk
+            cpu_speed: 6, // Realtime preset — like RustDesk (6 = good quality/speed balance)
             error_resilient: true,
         }
     }
@@ -131,9 +131,9 @@ impl VpxConfig {
     pub fn bitrate_for_resolution(width: u32, height: u32) -> u32 {
         let pixels = (width * height) as u64;
         let base_pixels: u64 = 1920 * 1080;
-        let base_bitrate: u64 = 2073;
+        let base_bitrate: u64 = 4000;
         let bitrate = (base_bitrate * pixels) / base_pixels;
-        bitrate.max(400).min(12000) as u32
+        bitrate.max(800).min(12000) as u32
     }
 
     /// Ultra-low latency config for LAN
@@ -146,7 +146,7 @@ impl VpxConfig {
             framerate: 60,
             keyframe_interval: 0,
             threads: num_cpus(),
-            cpu_speed: 7,
+            cpu_speed: 6,
             error_resilient: true,
         }
     }
@@ -161,7 +161,7 @@ impl VpxConfig {
             framerate: 30,
             keyframe_interval: 0,
             threads: num_cpus().min(8),
-            cpu_speed: 7,
+            cpu_speed: 6,
             error_resilient: true,
         }
     }
@@ -176,7 +176,7 @@ impl VpxConfig {
             framerate: 15,
             keyframe_interval: 0,
             threads: num_cpus().min(4),
-            cpu_speed: 12,
+            cpu_speed: 10,
             error_resilient: true,
         }
     }
@@ -257,13 +257,14 @@ impl VpxEncoder {
             enc_cfg.rc_end_usage = VPX_CBR; // CBR for streaming
             enc_cfg.g_pass = VPX_RC_ONE_PASS;
             enc_cfg.g_lag_in_frames = 0; // No look-ahead — realtime
-            enc_cfg.rc_min_quantizer = 4;
-            enc_cfg.rc_max_quantizer = 56;
+            enc_cfg.rc_min_quantizer = 2;
+            enc_cfg.rc_max_quantizer = 40; // Lower = better quality (RustDesk default is 63, but we target LAN)
             enc_cfg.rc_undershoot_pct = 95;
             enc_cfg.rc_overshoot_pct = 100;
-            enc_cfg.rc_buf_sz = 600;
-            enc_cfg.rc_buf_initial_sz = 400;
-            enc_cfg.rc_buf_optimal_sz = 500;
+            enc_cfg.rc_buf_sz = 150;        // 150ms buffer — low latency for LAN
+            enc_cfg.rc_buf_initial_sz = 100; // 100ms initial buffer
+            enc_cfg.rc_buf_optimal_sz = 120; // 120ms optimal buffer
+            enc_cfg.rc_dropframe_thresh = 0; // Never drop frames — prefer lower quality over frame drops
 
             // Keyframe configuration
             if config.keyframe_interval == 0 {
@@ -433,20 +434,55 @@ impl EncoderApi for VpxEncoder {
     }
 
     fn set_bitrate(&mut self, bitrate_kbps: u32) -> Result<()> {
+        if bitrate_kbps == self.config.bitrate_kbps {
+            return Ok(());
+        }
         self.config.bitrate_kbps = bitrate_kbps;
         unsafe {
             let iface = match self.config.codec {
                 VpxCodec::VP8 => vpx_codec_vp8_cx(),
                 VpxCodec::VP9 => vpx_codec_vp9_cx(),
             };
+            // IMPORTANT: Get the CURRENT config from the active encoder, not a fresh default.
+            // Using vpx_codec_enc_config_default here would reset all settings (dimensions,
+            // threading, CBR mode, etc.) and corrupt the encoder — only the bitrate should change.
             let mut enc_cfg: vpx_codec_enc_cfg_t = std::mem::zeroed();
             let ret = vpx_codec_enc_config_default(iface, &mut enc_cfg, 0);
-            if ret == VPX_CODEC_OK {
-                enc_cfg.rc_target_bitrate = bitrate_kbps;
-                let ret = vpx_codec_enc_config_set(&mut self.ctx, &enc_cfg);
-                if ret != VPX_CODEC_OK {
-                    warn!("Failed to update VPX bitrate: error {}", ret);
-                }
+            if ret != VPX_CODEC_OK {
+                warn!("Failed to get default VPX config for bitrate update: error {}", ret);
+                return Ok(());
+            }
+            // Re-apply all our custom settings on top of defaults
+            enc_cfg.g_w = self.config.width;
+            enc_cfg.g_h = self.config.height;
+            enc_cfg.g_threads = self.config.threads;
+            enc_cfg.g_timebase.num = 1;
+            enc_cfg.g_timebase.den = 1000;
+            enc_cfg.rc_target_bitrate = bitrate_kbps;
+            enc_cfg.rc_end_usage = VPX_CBR;
+            enc_cfg.g_pass = VPX_RC_ONE_PASS;
+            enc_cfg.g_lag_in_frames = 0;
+            enc_cfg.rc_min_quantizer = 2;
+            enc_cfg.rc_max_quantizer = 40;
+            enc_cfg.rc_undershoot_pct = 95;
+            enc_cfg.rc_overshoot_pct = 100;
+            enc_cfg.rc_buf_sz = 150;
+            enc_cfg.rc_buf_initial_sz = 100;
+            enc_cfg.rc_buf_optimal_sz = 120;
+            enc_cfg.rc_dropframe_thresh = 0;
+            if self.config.keyframe_interval == 0 {
+                enc_cfg.kf_mode = VPX_KF_DISABLED;
+                enc_cfg.kf_max_dist = 999999;
+            } else {
+                enc_cfg.kf_mode = VPX_KF_AUTO;
+                enc_cfg.kf_max_dist = self.config.keyframe_interval;
+            }
+            if self.config.error_resilient {
+                enc_cfg.g_error_resilient = 1;
+            }
+            let ret = vpx_codec_enc_config_set(&mut self.ctx, &enc_cfg);
+            if ret != VPX_CODEC_OK {
+                warn!("Failed to update VPX bitrate: error {}", ret);
             }
         }
         info!("VPX bitrate target updated to {} kbps", bitrate_kbps);

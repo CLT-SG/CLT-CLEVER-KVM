@@ -135,3 +135,46 @@ Replaced the entire H.264/relay streaming stack with a RustDesk-inspired VP9 str
 - VP9 encode-decode roundtrip validated via C test program (37021 bytes, keyframe, Profile 0)
 - Server starts successfully with "Server started successfully" log
 - VPX encoder initializes without stack corruption
+
+## [5.0.2] Fix Video Quality, Latency, Input Handling, and Mouse Coordinate Mapping
+
+### Problem
+
+1. Video quality was too low — default bitrate 2000 kbps and max quantizer 56 resulted in blurry, artifact-heavy output at 1080p.
+2. Video latency was 1-2 seconds due to encoder buffer sizes set to 600/400/500ms.
+3. `set_bitrate()` had a critical bug that reset all encoder configuration (dimensions, threading, CBR mode, buffer sizes) to libvpx defaults on every QoS bitrate adjustment, silently corrupting the encoder.
+4. QoS bitrate adjustments calculated by the QoS controller were never applied to the encoder — the encoder continued using its initial bitrate value.
+5. Keyboard and mouse input was completely broken — the server `InputMsg` enum expected `button` as `u8`, `code` as required `String`, and `modifiers` as a nested struct, while the client sent `button` as a string (`"left"`), omitted `code`, and sent individual `ctrlKey`/`altKey`/`shiftKey`/`metaKey` booleans.
+6. Mouse coordinates were inaccurate because the coordinate calculation used `getBoundingClientRect()` which includes the `object-fit: contain` letterbox/pillarbox black bar areas, resulting in offset mouse positions.
+7. Mouse events fired twice per action because listeners were attached to both `videoScreen`, `screenContainer`, and `realCanvas`, with events bubbling from canvas to container.
+
+### Solution
+
+1. Raised default bitrate to 4000 kbps, lowered max quantizer from 56 to 40, and increased min quantizer from 4 to 2 for better quality when bandwidth is available.
+2. Reduced encoder buffer sizes from 600/400/500ms to 150/100/120ms for low-latency LAN streaming. Added `rc_dropframe_thresh = 0` to prefer lower quality over frame drops.
+3. Fixed `set_bitrate()` to re-apply all custom encoder settings (dimensions, threading, CBR mode, buffer sizes, keyframe config, error resilience) on top of defaults before calling `vpx_codec_enc_config_set()`, so only the bitrate changes while all other settings are preserved. Added early return when the bitrate has not changed.
+4. Added QoS-to-encoder bitrate propagation in the video service main loop by tracking `last_applied_bitrate` and calling `encoder.set_bitrate()` when the QoS value differs.
+5. Rewrote the `InputMsg` enum in `protocol.rs` to accept flexible types: `button` as `serde_json::Value` (parses both string and number via `parse_button_value()` helper), `code` as `Option<String>`, `key_code` with `#[serde(alias = "keyCode")]`, individual modifier booleans with `#[serde(alias = "ctrlKey")]` etc., and `monitor_id` as `Option<serde_json::Value>`. Added error logging for failed input parsing. Updated client to send `button: e.button` (numeric) and `code: e.code`.
+6. Added `getContentRect()` method to compute the actual rendered content rectangle within an element using `object-fit: contain`, excluding black bar areas. Updated `handleMouseEvent()` and `handleTouchEvent()` to use content-relative coordinates and ignore clicks in the black bars.
+7. Removed duplicate `videoScreen` mouse event listeners in `setupInputHandlers()`, and added `e.stopPropagation()` to `realCanvas` listeners in `initializeOptimizedCanvas()` to prevent event bubbling to the container handler.
+
+### Changes Made
+
+#### New Files
+- **docs/VIDEO_INPUT_FIXES.md**: Documentation detailing all video quality, latency, and input fixes with before/after comparisons
+
+#### Modified Files - Backend
+- **src-tauri/src/rdengine/codec.rs**: Raised default bitrate to 4000 kbps, lowered max quantizer to 40, reduced buffer sizes to 150/100/120ms, added `rc_dropframe_thresh = 0`, changed `cpu_speed` from 7 to 6, fixed `set_bitrate()` to preserve all encoder settings, updated preset configs
+- **src-tauri/src/rdengine/video_service.rs**: Raised default bitrate to 4000 kbps, added `last_applied_bitrate` tracking and QoS-to-encoder bitrate propagation in main loop
+- **src-tauri/src/rdengine/connection.rs**: Raised default bitrate to 4000 kbps, rewrote input parsing to handle flexible `InputMsg` types, added error logging for failed input parsing, updated quality presets (low: 1500 kbps, balanced: 4000 kbps)
+- **src-tauri/src/rdengine/qos.rs**: Raised `min_bitrate_kbps` from 400 to 800
+- **src-tauri/src/rdengine/protocol.rs**: Rewrote `InputMsg` enum with `serde_json::Value` for `button` and `monitor_id`, made `code` optional, added `key_code` with serde alias, added individual modifier boolean fields with aliases, added `parse_button_value()` helper, added `#[serde(default)]` on wheel fields
+
+#### Modified Files - Frontend
+- **src-tauri/web-client/kvm-client.js**: Added `getContentRect()` for object-fit:contain coordinate mapping, fixed `handleMouseEvent()` and `handleTouchEvent()` to use content-relative coordinates, changed mouse button from string to numeric, added `code: e.code` to keyboard events, removed duplicate `videoScreen` mouse listeners, added `e.stopPropagation()` on `realCanvas` listeners, reduced ping interval from 5000ms to 2000ms
+
+### Testing
+
+- Verified cargo check passes with 0 errors (97 warnings)
+- Mouse coordinates now map correctly to the remote screen regardless of browser window aspect ratio
+- Input events (keyboard, mouse click, mouse move, scroll) successfully reach the server and are processed

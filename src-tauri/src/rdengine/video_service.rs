@@ -69,7 +69,7 @@ impl Default for VideoServiceConfig {
             width: 0, // 0 = auto-detect from monitor
             height: 0,
             framerate: 30,
-            bitrate_kbps: 2000,
+            bitrate_kbps: 4000,
             max_subscribers: 16,
         }
     }
@@ -359,6 +359,7 @@ fn video_service_loop(
     let start_time = Instant::now();
     let mut last_fps_report = Instant::now();
     let mut fps_frame_count: u64 = 0;
+    let mut last_applied_bitrate: u32 = config.bitrate_kbps;
 
     info!("Video service main loop starting");
 
@@ -367,6 +368,19 @@ fn video_service_loop(
 
         // Get target frame interval from QoS
         let spf = qos.lock().spf();
+
+        // Apply QoS bitrate updates to the encoder if changed
+        {
+            let current_bitrate = qos.lock().bitrate_kbps();
+            if current_bitrate != last_applied_bitrate {
+                if let Err(e) = encoder.set_bitrate(current_bitrate) {
+                    warn!("Failed to apply QoS bitrate update to encoder: {}", e);
+                } else {
+                    debug!("Encoder bitrate updated: {} -> {} kbps", last_applied_bitrate, current_bitrate);
+                    last_applied_bitrate = current_bitrate;
+                }
+            }
+        }
 
         // 1. CAPTURE — use scrap SHM (like RustDesk) or fallback to native
         let capture_start = Instant::now();
