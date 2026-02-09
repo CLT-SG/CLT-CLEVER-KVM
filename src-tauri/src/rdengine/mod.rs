@@ -11,10 +11,12 @@
 //! - **Separated video/control channels** to prevent HOL blocking
 //! - **Real audio capture** via cpal + Opus encoding
 //! - **Binary protocol** — minimal-overhead length-prefixed frames
+//! - **Cursor synchronization** — host cursor position + shape streamed to client
 
 pub mod codec;
 pub mod video_service;
 pub mod audio_service;
+pub mod cursor_service;
 pub mod connection;
 pub mod qos;
 pub mod protocol;
@@ -22,6 +24,8 @@ pub mod protocol;
 pub use codec::{VpxEncoder, VpxConfig, EncoderApi, EncodeInput};
 pub use video_service::VideoService;
 pub use audio_service::AudioService;
+#[allow(unused_imports)]
+pub use cursor_service::CursorService;
 pub use connection::{ConnectionHandler, ConnectionConfig};
 pub use qos::QualityControl;
 pub use protocol::{FrameMessage, ControlMsg, InputMsg};

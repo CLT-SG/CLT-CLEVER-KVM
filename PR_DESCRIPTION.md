@@ -178,3 +178,40 @@ Replaced the entire H.264/relay streaming stack with a RustDesk-inspired VP9 str
 - Verified cargo check passes with 0 errors (97 warnings)
 - Mouse coordinates now map correctly to the remote screen regardless of browser window aspect ratio
 - Input events (keyboard, mouse click, mouse move, scroll) successfully reach the server and are processed
+
+## [5.0.3] Host Cursor Synchronization and Control Priority
+
+### Problem
+
+1. The web client used a static crosshair cursor icon instead of showing the actual host remote cursor, making it impossible to see what the host user is doing on the remote machine.
+2. When the host user was actively controlling the remote machine (moving the cursor, clicking), the client had no awareness of this -- both host and client cursors operated independently with no coordination.
+3. The client could send mouse input while the host was actively controlling, causing cursor fighting between host and client.
+
+### Solution
+
+1. Added a dedicated cursor tracking service (`cursor_service.rs`) that polls the host system cursor position via X11 `QueryPointer` at ~30 Hz on a dedicated OS thread, using delta compression to only send updates when the cursor position changes.
+2. Extended the rdengine binary protocol with `MSG_CURSOR` (0x03) messages containing cursor position (x, y), shape identifier, and visibility flag -- 15 bytes per update, sent alongside video frames through the existing WebSocket connection.
+3. The web client renders a host cursor overlay (SVG arrow with "Host" label) positioned over the remote screen content area, converting host screen coordinates to CSS pixel positions using the existing `getContentRect()` coordinate mapping.
+4. Implemented host control priority: when the host cursor moves, the client enters host-control mode which hides the client's native cursor and suppresses client mouse input (except scroll). After 500ms of host inactivity, control returns to the client automatically.
+5. Changed the default client cursor from crosshair to the standard default arrow cursor.
+
+### Changes Made
+
+#### New Files
+- **src-tauri/src/rdengine/cursor_service.rs**: Cursor tracking service with X11 QueryPointer polling at ~30 Hz, CursorShape enum mapped to CSS cursor names, delta compression (only sends when position/shape changes), crossbeam channel output, platform-abstracted with Linux X11 implementation and non-Linux fallback stub
+
+#### Modified Files - Backend
+- **src-tauri/src/rdengine/mod.rs**: Added `cursor_service` module declaration and `CursorService` re-export
+- **src-tauri/src/rdengine/connection.rs**: Added cursor service import, cursor service startup with CursorServiceConfig, crossbeam-to-tokio bridge task for cursor updates, MSG_CURSOR binary message sending in tokio::select! loop, cursor service cleanup on connection close
+
+#### Modified Files - Frontend
+- **src-tauri/web-client/kvm-client.js**: Added `hostCursor` state tracking in constructor, `CURSOR_SHAPE_MAP` static property mapping shape IDs to CSS names, `handleCursorMessage()` for MSG_CURSOR (0x03) binary parsing, `setHostControlling()` for host control priority with 500ms timeout, `renderHostCursor()` for SVG cursor overlay creation and positioning, `setClientCursorStyle()` for hiding/showing client cursor, host control check in `handleMouseEvent()` to suppress client input during host control, MSG_CURSOR dispatch in `handleBinaryVideoFrame()`, changed canvas cursor from crosshair to default
+- **src-tauri/web-client/kvm-client.css**: Changed all `cursor: crosshair` to `cursor: default` on #screen, #remote-screen, #video-screen, #real-canvas elements, added #host-cursor-overlay styles with absolute positioning, SVG arrow cursor with drop shadow, "Host" label badge, smooth position transitions, shape-specific visual variants for text/pointer/wait cursors
+
+### Testing
+
+- Verified cargo check passes with 0 errors
+- Verified JavaScript syntax check passes
+- Host cursor position is tracked via X11 QueryPointer and sent as binary MSG_CURSOR messages
+- Client renders host cursor overlay at correct position relative to the remote screen content area
+- Client mouse input is suppressed during host cursor movement, resumes after 500ms of host inactivity

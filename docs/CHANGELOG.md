@@ -2,6 +2,27 @@
 
 ## Version History
 
+## [5.0.3] - 2026-02-09
+
+### Host Cursor Synchronization and Control Priority
+
+### New Features
+- **Host Cursor Tracking**: Added dedicated cursor service that polls the host system cursor position via X11 QueryPointer at ~30 Hz on a dedicated OS thread, with delta compression to only transmit updates when position or shape changes
+- **Cursor Overlay Rendering**: Web client renders the host cursor as an SVG arrow overlay with "Host" label, positioned accurately over the remote screen content area using coordinate mapping
+- **Host Control Priority**: When the host is actively moving the cursor, the client's native cursor is hidden and client mouse input is suppressed to prevent cursor fighting -- control returns to the client after 500ms of host inactivity
+- **MSG_CURSOR Binary Protocol**: Extended rdengine protocol with MSG_CURSOR (0x03) messages -- 15 bytes per update containing position (x, y), cursor shape identifier, and visibility flag
+
+### Improvements
+- **Default Cursor Style**: Changed client cursor from crosshair to standard default arrow cursor across all screen elements (#screen, canvas, video)
+- **Cursor Shape Mapping**: 23 cursor shapes mapped from host to CSS cursor names (default, pointer, text, wait, crosshair, move, resize variants, grab, not-allowed, help, progress)
+
+### Technical Changes
+- **src-tauri/src/rdengine/cursor_service.rs** (new): CursorService with X11 LinuxCursorReader, CursorShape enum, CursorUpdate struct, encode_cursor_message(), CursorServiceConfig, dedicated thread with crossbeam channel, non-Linux FallbackCursorReader
+- **src-tauri/src/rdengine/mod.rs**: Added cursor_service module and CursorService re-export
+- **src-tauri/src/rdengine/connection.rs**: Cursor service startup, crossbeam-to-tokio bridge task, MSG_CURSOR sending in select! loop, cursor service cleanup
+- **src-tauri/web-client/kvm-client.js**: hostCursor state, CURSOR_SHAPE_MAP, handleCursorMessage(), setHostControlling(), renderHostCursor(), setClientCursorStyle(), host control check in handleMouseEvent(), MSG_CURSOR dispatch, crosshair to default cursor
+- **src-tauri/web-client/kvm-client.css**: Replaced crosshair with default cursor, added #host-cursor-overlay styles with SVG arrow, Host label badge, smooth transitions, shape-specific variants
+
 ## [5.0.2] - 2026-02-09
 
 ### Video Quality, Latency, Input Handling, and Mouse Coordinate Fixes

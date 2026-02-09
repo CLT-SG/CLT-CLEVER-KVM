@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 
 use crate::core::{InputHandler, InputEvent as CoreInputEvent};
 use crate::rdengine::audio_service::{AudioFrame, AudioService, AudioServiceConfig};
+use crate::rdengine::cursor_service::{CursorService, CursorServiceConfig, CursorUpdate};
 use crate::rdengine::protocol::{self, ControlMsg, InputMsg, ServerInfo, CODEC_VP8, CODEC_VP9};
 use crate::rdengine::qos::QualityControl;
 use crate::rdengine::video_service::{VideoFrame, VideoService, VideoServiceConfig};
@@ -218,6 +219,46 @@ impl ConnectionHandler {
             audio_bridge_rx = Some(arx_bridge);
         }
 
+        // Start cursor tracking service
+        let cursor_config = CursorServiceConfig {
+            poll_interval_ms: 33, // ~30 Hz cursor updates (enough for smooth tracking)
+            screen_width: width,
+            screen_height: height,
+            monitor_id: config.monitor_id,
+        };
+        let cursor_service = match CursorService::start(cursor_config) {
+            Ok(svc) => {
+                info!("Cursor service started for host cursor synchronization");
+                Some(svc)
+            }
+            Err(e) => {
+                warn!("Failed to start cursor service: {} — continuing without cursor sync", e);
+                None
+            }
+        };
+
+        // Cursor bridge (same pattern as video/audio)
+        let mut cursor_bridge_rx: Option<mpsc::Receiver<CursorUpdate>> = None;
+        if let Some(ref svc) = cursor_service {
+            let crx = svc.cursor_rx().clone();
+            let (ctx, crx_bridge) = mpsc::channel::<CursorUpdate>(8);
+            tokio::task::spawn_blocking(move || {
+                loop {
+                    match crx.recv_timeout(Duration::from_millis(50)) {
+                        Ok(update) => {
+                            if ctx.blocking_send(update).is_err() {
+                                break;
+                            }
+                        }
+                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+                log::debug!("Cursor bridge task exited");
+            });
+            cursor_bridge_rx = Some(crx_bridge);
+        }
+
         // Ping interval
         let mut ping_interval = tokio::time::interval(Duration::from_secs(1));
         let mut last_ping_time = Instant::now();
@@ -276,6 +317,21 @@ impl ConnectionHandler {
                         }
                         None => {
                             warn!("Audio bridge channel closed");
+                        }
+                    }
+                }
+
+                // Priority 3.5: Cursor updates via bridge
+                cursor = async {
+                    if let Some(ref mut rx) = cursor_bridge_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    if let Some(cursor_update) = cursor {
+                        if let Err(e) = ws_tx.send(Message::Binary(cursor_update.message)).await {
+                            warn!("Failed to send cursor update: {}", e);
                         }
                     }
                 }
@@ -370,6 +426,9 @@ impl ConnectionHandler {
         video_service.stop();
         if let Some(mut audio) = audio_service {
             audio.stop();
+        }
+        if let Some(mut cursor) = cursor_service {
+            cursor.stop();
         }
 
         Ok(())

@@ -59,6 +59,23 @@ class KVMClient {
         this.peerConnection = null;
         this.audioStream = null;
 
+        // ── Host cursor synchronization ──────────────────────────────────
+        // Tracks the remote host cursor position and shape so the client
+        // can render it. When the host is actively moving the cursor,
+        // the client's own cursor interactions are visually suppressed.
+        this.hostCursor = {
+            x: 0,
+            y: 0,
+            shape: 'default',      // CSS cursor name
+            visible: true,
+            lastUpdate: 0,         // Timestamp of last host cursor update
+            isHostControlling: false, // True when host is actively moving
+        };
+        // How long (ms) after the last host cursor move before client regains control
+        this.hostControlTimeoutMs = 500;
+        // Timer ID for host-control expiry
+        this.hostControlTimer = null;
+
         this.initializeElements();
         this.initializeH264Decoder();
         this.initializeVpxDecoder();
@@ -492,6 +509,16 @@ class KVMClient {
 
     handleMouseEvent(e) {
         if (!this.connected) return;
+
+        // ── Host control priority ──────────────────────────────────────
+        // When the host is actively controlling the cursor, suppress
+        // client mouse input to avoid conflicting cursor movements.
+        if (this.hostCursor.isHostControlling) {
+            // Allow scroll events through (they don't move the cursor)
+            if (e.type !== 'wheel') {
+                return;
+            }
+        }
         
         // Use the appropriate element - prefer realCanvas (dynamically created), then fallbackCanvas, then videoScreen
         let targetElement = null;
@@ -1345,6 +1372,12 @@ class KVMClient {
                 return;
             }
             
+            // Check for rdengine cursor update (MSG_CURSOR = 0x03)
+            if (firstByte === 0x03) {
+                this.handleCursorMessage(binaryData);
+                return;
+            }
+            
             // Check for rdengine ping (MSG_PING = 0x05)
             if (firstByte === 0x05) {
                 // Server should not send us pings as binary, but handle it
@@ -1380,6 +1413,165 @@ class KVMClient {
         }
     }
     
+    // ── Host Cursor Synchronization ─────────────────────────────────────
+
+    /**
+     * Map cursor shape byte to CSS cursor name.
+     * Must match CursorShape enum in cursor_service.rs.
+     */
+    static CURSOR_SHAPE_MAP = [
+        'default',      // 0
+        'pointer',      // 1
+        'text',         // 2
+        'wait',         // 3
+        'crosshair',    // 4
+        'move',         // 5
+        'not-allowed',  // 6
+        'help',         // 7
+        'n-resize',     // 8
+        's-resize',     // 9
+        'e-resize',     // 10
+        'w-resize',     // 11
+        'ne-resize',    // 12
+        'nw-resize',    // 13
+        'se-resize',    // 14
+        'sw-resize',    // 15
+        'ew-resize',    // 16
+        'ns-resize',    // 17
+        'nesw-resize',  // 18
+        'nwse-resize',  // 19
+        'grab',         // 20
+        'grabbing',     // 21
+        'progress',     // 22
+    ];
+
+    /**
+     * Handle a MSG_CURSOR (0x03) binary message from the server.
+     * Format: [1B type=0x03] [4B payload_len] [4B x_le] [4B y_le] [1B shape] [1B visible]
+     */
+    handleCursorMessage(binaryData) {
+        const view = new DataView(binaryData);
+        if (binaryData.byteLength < 15) return; // 1 + 4 + 4 + 4 + 1 + 1 = 15
+
+        // Skip type (1B) + payload_len (4B)
+        const x = view.getInt32(5, true);
+        const y = view.getInt32(9, true);
+        const shapeId = view.getUint8(13);
+        const visible = view.getUint8(14) !== 0;
+
+        const shapeName = (shapeId === 255)
+            ? 'none'
+            : (KVMClient.CURSOR_SHAPE_MAP[shapeId] || 'default');
+
+        // Check if the host cursor actually moved (not just first message)
+        const moved = (x !== this.hostCursor.x || y !== this.hostCursor.y);
+
+        this.hostCursor.x = x;
+        this.hostCursor.y = y;
+        this.hostCursor.shape = shapeName;
+        this.hostCursor.visible = visible;
+        this.hostCursor.lastUpdate = Date.now();
+
+        // If the host cursor moved, enter host-control mode
+        if (moved) {
+            this.setHostControlling(true);
+        }
+
+        // Render the host cursor overlay
+        this.renderHostCursor();
+    }
+
+    /**
+     * Enter or leave host-control mode.
+     * While the host is controlling, the client's native cursor is hidden
+     * over the canvas and input events are suppressed so the two cursors
+     * don't fight each other.
+     */
+    setHostControlling(active) {
+        this.hostCursor.isHostControlling = active;
+
+        // Clear any previous expiry timer
+        if (this.hostControlTimer) {
+            clearTimeout(this.hostControlTimer);
+            this.hostControlTimer = null;
+        }
+
+        if (active) {
+            // Hide the client's native cursor over the screen area
+            this.setClientCursorStyle('none');
+
+            // After a period of host inactivity, hand control back to the client
+            this.hostControlTimer = setTimeout(() => {
+                this.hostCursor.isHostControlling = false;
+                // Restore normal client cursor
+                this.setClientCursorStyle('default');
+            }, this.hostControlTimeoutMs);
+        } else {
+            this.setClientCursorStyle('default');
+        }
+    }
+
+    /**
+     * Set the CSS cursor style on all interactive screen elements.
+     */
+    setClientCursorStyle(cursorStyle) {
+        const targets = [
+            document.getElementById('screen'),
+            this.realCanvas,
+            this.videoScreen,
+        ];
+        for (const el of targets) {
+            if (el) el.style.cursor = cursorStyle;
+        }
+    }
+
+    /**
+     * Create (once) and update the host cursor overlay element.
+     * The overlay is a small cursor icon absolutely positioned over the
+     * remote screen content area, matching the host's reported coordinates.
+     */
+    renderHostCursor() {
+        // Lazily create the overlay element
+        if (!this.hostCursorOverlay) {
+            this.hostCursorOverlay = document.createElement('div');
+            this.hostCursorOverlay.id = 'host-cursor-overlay';
+            this.hostCursorOverlay.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" class="host-cursor-svg">
+                    <path d="M5 3l14 8-6.5 1.5L11 19z" fill="rgba(0,0,0,0.85)" stroke="white" stroke-width="1.5"
+                          stroke-linejoin="round"/>
+                </svg>
+                <span class="host-cursor-label">Host</span>
+            `;
+            const screenContainer = document.getElementById('screen');
+            if (screenContainer) {
+                screenContainer.appendChild(this.hostCursorOverlay);
+            }
+        }
+
+        if (!this.hostCursor.visible) {
+            this.hostCursorOverlay.style.display = 'none';
+            return;
+        }
+
+        this.hostCursorOverlay.style.display = '';
+
+        // Convert host screen coordinates → CSS pixel position on the rendered content area
+        const targetElement = this.realCanvas || this.videoScreen;
+        if (!targetElement || this.screenWidth <= 0 || this.screenHeight <= 0) return;
+
+        const content = this.getContentRect(targetElement);
+        if (content.width <= 0 || content.height <= 0) return;
+
+        const cssX = content.left + (this.hostCursor.x / this.screenWidth) * content.width;
+        const cssY = content.top + (this.hostCursor.y / this.screenHeight) * content.height;
+
+        this.hostCursorOverlay.style.left = `${cssX}px`;
+        this.hostCursorOverlay.style.top = `${cssY}px`;
+
+        // Update cursor shape class for different visual indicators
+        this.hostCursorOverlay.dataset.shape = this.hostCursor.shape;
+    }
+
     /**
      * Handle rdengine binary protocol video frame
      * Format: [1B type=0x01] [4B payload_len] [1B codec] [1B flags] [4B width] [4B height] [8B timestamp] [data...]
@@ -2062,7 +2254,7 @@ class KVMClient {
             image-rendering: pixelated;
             image-rendering: -moz-crisp-edges;
             image-rendering: crisp-edges;
-            cursor: crosshair;
+            cursor: default;
         `;
         
         // Get context with performance optimizations

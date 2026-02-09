@@ -1,4 +1,4 @@
-# Video Quality, Latency & Input Fixes
+# Video Quality, Latency & Input Fixes - Updated 9th February 2026
 
 This document details the fixes applied to the RDEngine streaming pipeline to resolve low video quality, high latency, and broken keyboard/mouse input on the web client.
 
