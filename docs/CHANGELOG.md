@@ -2,6 +2,33 @@
 
 ## Version History
 
+## [5.0.9] - 2026-02-09
+
+### WebRTC Media Track for Native Video Rendering with Keyframe Gating
+
+### Bug Fixes
+- **Rainbow/Overlay Video Artifacts**: Browser VP9 decoder received P-frames before any keyframe via the media track, producing rainbow colors and ghost overlay artifacts because P-frames cannot be decoded without a reference keyframe
+- **No RTCP PLI Handling**: Browser had no way to request a keyframe from the server when its decoder lost sync after packet loss, because RTCP PLI packets were not parsed
+- **Delayed Video Appearance**: Keyframe was requested immediately after `create_offer()` before ICE negotiation completed, so the keyframe was sent to a media track the browser was not connected to yet -- video only appeared after the encoder's periodic keyframe interval
+
+### Improvements
+- **Native Video Rendering**: Video delivered via WebRTC media track (`TrackLocalStaticSample`) for native `<video>` element rendering with hardware-accelerated VP9/VP8 decoding -- no WebCodecs or canvas needed
+- **Keyframe-First Gating**: P-frames blocked on the media track until a keyframe has been sent, preventing decoder artifacts; pre-keyframe P-frames routed to DataChannel/WebSocket fallback
+- **RTCP PLI Keyframe Requests**: Server parses RTCP PLI packets from the browser and immediately forces the encoder to produce a keyframe
+- **ICE-Connected Keyframe Timing**: Keyframe requested when `ConnectionStateChanged(Connected)` fires instead of at `create_offer()` time, with `connection_ready_signal` to reset the keyframe gate so the browser receives a fresh keyframe through the connected transport
+- **Dual Rendering Paths**: Primary path uses `<video>.srcObject` from WebRTC media track; fallback path uses WebCodecs `VideoDecoder` + canvas via DataChannel
+- **Video Element FPS Tracking**: `requestVideoFrameCallback` tracks FPS and updates `lastFrameTime` for connection health monitoring
+- **Connection Health for Video Element**: Health monitor checks `<video>` playback state when using native rendering, preventing false stale-stream detection
+
+### Technical Changes
+- **src-tauri/src/rdengine/webrtc_transport.rs**: Added `TrackLocalStaticSample` media track in `create_offer(codec)`, `send_video_sample()`, `is_video_track_ready()`, RTCP PLI reader task, `VideoTrackReady` and `KeyframeRequested` events, media track cleanup in `close()`
+- **src-tauri/src/rdengine/connection.rs**: Added `connection_ready_signal` (`AtomicBool`) for ICE gate reset, `keyframe_signal` shared with event task, `media_track_sent_keyframe` gate with keyframe-first routing, media track primary path with DataChannel/WebSocket fallback chain, keyframe request on `ConnectionStateChanged(Connected)`
+- **src-tauri/src/rdengine/video_service.rs**: Added `keyframe_signal()` method returning `Arc<AtomicBool>` for async task keyframe triggering
+- **src-tauri/web-client/webrtc-transport.js**: Added `onMediaStream` callback, `pc.ontrack` handler, `videoStream`/`hasMediaTrack` state, `hasVideoMediaTrack()`/`getVideoStream()` methods, media track cleanup
+- **src-tauri/web-client/kvm-client.js**: Added `activateVideoElementRendering(stream)` with `requestVideoFrameCallback` FPS tracking, `deactivateVideoElementRendering()` canvas fallback, `usingVideoElement` state, video element coordinate mapping for mouse/touch/cursor, health monitor video playback state check
+- **src-tauri/web-client/kvm-template.html**: Updated `<video>` element styling for native media track rendering, codec dropdown labels to "Native Video"
+- **docs/RDENGINE_STREAMING_IMPLEMENTATION.md**: Updated transport table, architecture diagrams, browser client docs, dependency tables, and comparison table for media track architecture
+
 ## [5.0.8] - 2026-02-09
 
 ### Replace H.264 Codec Defaults with VP9 Across UI and Server

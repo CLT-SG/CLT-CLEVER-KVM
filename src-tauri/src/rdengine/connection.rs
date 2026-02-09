@@ -24,6 +24,7 @@ use crossbeam_channel::Receiver;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use serde_json::json;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -31,7 +32,7 @@ use tokio::sync::mpsc;
 use crate::core::{InputHandler, InputEvent as CoreInputEvent};
 use crate::rdengine::audio_service::{AudioFrame, AudioService, AudioServiceConfig};
 use crate::rdengine::cursor_service::{CursorService, CursorServiceConfig, CursorUpdate};
-use crate::rdengine::protocol::{self, ControlMsg, InputMsg, ServerInfo, CODEC_VP8, CODEC_VP9};
+use crate::rdengine::protocol::{self, ControlMsg, InputMsg, ServerInfo, CODEC_VP8, CODEC_VP9, FLAG_KEYFRAME};
 use crate::rdengine::qos::QualityControl;
 use crate::rdengine::video_service::{VideoFrame, VideoService, VideoServiceConfig};
 use crate::rdengine::codec::VpxCodec;
@@ -187,6 +188,10 @@ impl ConnectionHandler {
         // ── WebRTC Transport Setup ──────────────────────────────────────
         // If WebRTC is enabled, create the transport and send the SDP offer
         // to the client via WebSocket signaling. The client will respond with
+        // Signal from WebRTC event task → main loop: ICE connected, reset keyframe gate.
+        // Created unconditionally; only used when WebRTC is active.
+        let connection_ready_signal = Arc::new(AtomicBool::new(false));
+
         // an SDP answer and ICE candidates, also via WebSocket.
         let webrtc_transport: Option<Arc<WebRtcTransport>> = if config.enable_webrtc {
             let rtc_config = config.webrtc_config.clone()
@@ -196,8 +201,8 @@ impl ConnectionHandler {
                 Ok((transport, mut rtc_event_rx)) => {
                     let transport = Arc::new(transport);
 
-                    // Create SDP offer and send to client
-                    match transport.create_offer().await {
+                    // Create SDP offer with video media track and send to client
+                    match transport.create_offer(codec_name).await {
                         Ok(sdp_offer) => {
                             let offer_msg = json!({
                                 "type": "webrtc_offer",
@@ -206,8 +211,14 @@ impl ConnectionHandler {
                             ws_tx.send(Message::Text(serde_json::to_string(&offer_msg)?)).await?;
                             info!("WebRTC SDP offer sent to client");
 
+                            // Don't request a keyframe here — ICE hasn't connected yet.
+                            // The keyframe will be requested when ConnectionStateChanged(Connected)
+                            // fires, ensuring the browser is actually ready to receive it.
+
                             // Spawn a task to forward WebRTC events to the WS control channel
                             let ctrl_tx_rtc = ctrl_tx.clone();
+                            let keyframe_signal = video_service.keyframe_signal();
+                            let connection_ready_signal_clone = connection_ready_signal.clone();
                             tokio::spawn(async move {
                                 while let Some(event) = rtc_event_rx.recv().await {
                                     match event {
@@ -220,6 +231,14 @@ impl ConnectionHandler {
                                                 serde_json::to_string(&msg).unwrap()
                                             ).await;
                                         }
+                                        WebRtcEvent::VideoTrackReady => {
+                                            info!("WebRTC video media track is ready (native <video> rendering)");
+                                            keyframe_signal.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                        WebRtcEvent::KeyframeRequested => {
+                                            info!("RTCP PLI: browser requested keyframe — forcing encoder");
+                                            keyframe_signal.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        }
                                         WebRtcEvent::VideoChannelReady => {
                                             info!("WebRTC video DataChannel is ready");
                                         }
@@ -231,7 +250,17 @@ impl ConnectionHandler {
                                         }
                                         WebRtcEvent::ConnectionStateChanged(state) => {
                                             info!("WebRTC connection state: {:?}", state);
-                                            if state == RTCPeerConnectionState::Failed
+                                            if state == RTCPeerConnectionState::Connected {
+                                                // ICE is connected — the browser can now receive
+                                                // RTP packets. Request a keyframe so the first
+                                                // frame the browser actually receives is decodable.
+                                                info!("ICE connected — requesting keyframe for immediate video");
+                                                keyframe_signal.store(true, std::sync::atomic::Ordering::Relaxed);
+                                                // Tell the main loop to reset the keyframe gate
+                                                // so P-frames are held until this fresh keyframe
+                                                // is delivered through the connected transport.
+                                                connection_ready_signal_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                                            } else if state == RTCPeerConnectionState::Failed
                                                 || state == RTCPeerConnectionState::Disconnected
                                             {
                                                 warn!("WebRTC peer connection lost — client should fall back to WebSocket");
@@ -366,6 +395,12 @@ impl ConnectionHandler {
         // QoS adjustment interval
         let mut qos_interval = tokio::time::interval(Duration::from_secs(3));
 
+        // Media track keyframe gate: don't send P-frames via the media track
+        // until we've successfully sent at least one keyframe. This prevents
+        // the browser's VP9 decoder from receiving undecodable P-frames that
+        // produce rainbow/ghost artifacts.
+        let mut media_track_sent_keyframe = false;
+
         // Optional stop signal
         let mut stop_rx = stop_rx;
 
@@ -386,20 +421,93 @@ impl ConnectionHandler {
                 }
 
                 // Priority 2: Video frames via bridge (crossbeam → tokio mpsc)
-                // Route through WebRTC DataChannel if available, fallback to WebSocket
+                // Route through WebRTC media track (primary), DataChannel (fallback),
+                // or WebSocket (legacy fallback).
+                //
+                // When media track is active, the browser renders video natively
+                // via `<video>.srcObject` — no WebCodecs/canvas needed.
                 frame = video_bridge_rx.recv() => {
                     match frame {
                         Some(video_frame) => {
                             if let Some(ref rtc) = webrtc {
-                                // WebRTC path: send via unreliable DataChannel (UDP, no HOL blocking)
-                                match rtc.send_video_frame(&video_frame.message).await {
-                                    Ok(true) => {} // Sent via WebRTC DataChannel
-                                    Ok(false) | Err(_) => {
-                                        // DataChannel not ready, buffer full, or send error
-                                        // — fall back to WebSocket binary so client still gets frames
-                                        if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
-                                            warn!("Failed to send video frame via WebSocket fallback: {}", e);
-                                            break;
+                                // ── Primary path: WebRTC Video Media Track ──────────────
+                                // Extract raw VP9/VP8 data from binary protocol message
+                                // Protocol: [1B type][4B len][1B codec][1B flags][4B w][4B h][8B ts][data...]
+                                // Raw encoded data starts at offset 23
+                                let use_media_track = rtc.is_video_track_ready().await
+                                    && video_frame.message.len() > 23;
+
+                                if use_media_track {
+                                    // When ICE transitions to Connected, the event task
+                                    // sets connection_ready_signal to tell us the transport
+                                    // is actually open. Reset the keyframe gate so we wait
+                                    // for a fresh keyframe that the browser will receive.
+                                    if connection_ready_signal.compare_exchange(
+                                        true, false,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                    ).is_ok() {
+                                        info!("ICE connected — resetting media track keyframe gate");
+                                        media_track_sent_keyframe = false;
+                                    }
+
+                                    // Check if this frame is a keyframe (flags byte at offset 6)
+                                    let is_keyframe = video_frame.message.len() > 6
+                                        && (video_frame.message[6] & FLAG_KEYFRAME) != 0;
+
+                                    // Gate: don't send P-frames via media track until
+                                    // we've sent a keyframe. The browser's VP9 decoder
+                                    // cannot decode P-frames without a reference keyframe.
+                                    if !media_track_sent_keyframe && !is_keyframe {
+                                        // Skip media track for this P-frame;
+                                        // fall through to DataChannel / WebSocket
+                                        match rtc.send_video_frame(&video_frame.message).await {
+                                            Ok(true) => {}
+                                            Ok(false) | Err(_) => {
+                                                if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
+                                                    warn!("Failed to send video frame via WebSocket fallback: {}", e);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        if is_keyframe {
+                                            if !media_track_sent_keyframe {
+                                                info!("First keyframe sent via media track — browser can now decode");
+                                            }
+                                            media_track_sent_keyframe = true;
+                                        }
+
+                                        let raw_data = &video_frame.message[23..];
+                                        let frame_duration = Duration::from_millis(
+                                            1000 / config.framerate.max(1) as u64
+                                        );
+                                        match rtc.send_video_sample(raw_data, frame_duration).await {
+                                            Ok(true) => {} // Sent via media track → <video> element
+                                            Ok(false) | Err(_) => {
+                                                // Media track send failed — fall through to DataChannel
+                                                match rtc.send_video_frame(&video_frame.message).await {
+                                                    Ok(true) => {} // Sent via DataChannel
+                                                    Ok(false) | Err(_) => {
+                                                        // DataChannel also failed — WebSocket fallback
+                                                        if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
+                                                            warn!("Failed to send video frame via WebSocket fallback: {}", e);
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // ── Fallback: DataChannel (raw binary protocol) ──────
+                                    match rtc.send_video_frame(&video_frame.message).await {
+                                        Ok(true) => {} // Sent via WebRTC DataChannel
+                                        Ok(false) | Err(_) => {
+                                            if let Err(e) = ws_tx.send(Message::Binary(video_frame.message)).await {
+                                                warn!("Failed to send video frame via WebSocket fallback: {}", e);
+                                                break;
+                                            }
                                         }
                                     }
                                 }

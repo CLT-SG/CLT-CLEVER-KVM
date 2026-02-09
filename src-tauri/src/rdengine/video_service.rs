@@ -162,6 +162,13 @@ impl VideoService {
         self.force_keyframe.store(true, Ordering::Relaxed);
     }
 
+    /// Get a cloneable keyframe request handle.
+    /// Can be shared with async tasks that need to trigger keyframes
+    /// (e.g., RTCP PLI handler) without holding a reference to VideoService.
+    pub fn keyframe_signal(&self) -> Arc<AtomicBool> {
+        self.force_keyframe.clone()
+    }
+
     /// Get QoS control (for updating FPS/bitrate)
     pub fn qos(&self) -> &Arc<parking_lot::Mutex<QualityControl>> {
         &self.qos

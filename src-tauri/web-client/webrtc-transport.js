@@ -22,9 +22,15 @@
  *     - Control messages (keyframe request, QoS)
  *
  *   WebRTC DataChannels (UDP, configurable reliability):
- *     - "video" channel: unreliable, unordered — VP9 encoded frames
+ *     - "video" channel: unreliable, unordered — VP9 encoded frames (fallback)
  *     - "audio" channel: reliable — Opus encoded frames
  *     - "cursor" channel: reliable — host cursor position/shape
+ *
+ *   WebRTC Media Track (Primary for video):
+ *     - Server adds a VP9/VP8 video track to the PeerConnection
+ *     - Client receives it via pc.ontrack → MediaStream → <video>.srcObject
+ *     - Browser handles VP9 decoding + rendering natively (hardware-accelerated)
+ *     - Eliminates need for WebCodecs VideoDecoder and canvas rendering
  *
  * ## Usage
  *
@@ -47,9 +53,10 @@
 class WebRtcTransport {
     /**
      * @param {Object} options
-     * @param {Function} options.onVideoFrame   - Called with ArrayBuffer for each video frame
+     * @param {Function} options.onVideoFrame   - Called with ArrayBuffer for each video frame (DataChannel fallback)
      * @param {Function} options.onAudioFrame   - Called with ArrayBuffer for each audio frame
      * @param {Function} options.onCursorUpdate  - Called with ArrayBuffer for cursor updates
+     * @param {Function} options.onMediaStream   - Called with MediaStream when video media track arrives (primary path)
      * @param {Function} options.onStateChange   - Called with string state ('connecting', 'connected', 'disconnected', 'failed')
      * @param {Function} options.onIceCandidate  - Called with ICE candidate JSON string to send via WebSocket
      * @param {Object}   options.rtcConfig       - Optional RTCConfiguration override
@@ -58,6 +65,7 @@ class WebRtcTransport {
         this.onVideoFrame = options.onVideoFrame || (() => {});
         this.onAudioFrame = options.onAudioFrame || (() => {});
         this.onCursorUpdate = options.onCursorUpdate || (() => {});
+        this.onMediaStream = options.onMediaStream || (() => {});
         this.onStateChange = options.onStateChange || (() => {});
         this.onIceCandidate = options.onIceCandidate || (() => {});
 
@@ -74,6 +82,8 @@ class WebRtcTransport {
         this.videoChannel = null;
         this.audioChannel = null;
         this.cursorChannel = null;
+        this.videoStream = null;     // MediaStream from server's video media track
+        this.hasMediaTrack = false;  // True when video media track is received
         this.localSdp = null;
         this.state = 'new';
         this.connected = false;
@@ -161,6 +171,41 @@ class WebRtcTransport {
             }
         };
 
+        // ── Media Track handler ──────────────────────────────────────────
+        // The server adds a VP9/VP8 video media track to the PeerConnection.
+        // We receive it here via ontrack and expose the MediaStream to the
+        // main client, which assigns it to a <video> element's srcObject.
+        // This bypasses the entire WebCodecs + canvas pipeline.
+        this.pc.ontrack = (event) => {
+            console.log(`WebRTC media track received: kind=${event.track.kind}, id=${event.track.id}, label=${event.track.label}`);
+
+            if (event.track.kind === 'video') {
+                // Use the stream from the event if available, otherwise create one
+                this.videoStream = event.streams[0] || new MediaStream([event.track]);
+                this.hasMediaTrack = true;
+
+                console.log('WebRTC video media track ready — native <video> rendering enabled');
+
+                // Notify the KVM client that a media stream is available
+                this.onMediaStream(this.videoStream);
+
+                // Track end handler
+                event.track.onended = () => {
+                    console.log('WebRTC video media track ended');
+                    this.hasMediaTrack = false;
+                    this.videoStream = null;
+                };
+
+                event.track.onmute = () => {
+                    console.log('WebRTC video media track muted');
+                };
+
+                event.track.onunmute = () => {
+                    console.log('WebRTC video media track unmuted');
+                };
+            }
+        };
+
         // Set remote description (server's offer)
         await this.pc.setRemoteDescription(
             new RTCSessionDescription({ type: 'offer', sdp: sdpOffer })
@@ -196,6 +241,23 @@ class WebRtcTransport {
         } catch (e) {
             console.warn('WebRTC: failed to add ICE candidate:', e);
         }
+    }
+
+    /**
+     * Check if a video media track has been received from the server.
+     * When true, the client should use <video>.srcObject for rendering.
+     * @returns {boolean}
+     */
+    hasVideoMediaTrack() {
+        return this.hasMediaTrack && this.videoStream !== null;
+    }
+
+    /**
+     * Get the video MediaStream (if available).
+     * @returns {MediaStream|null}
+     */
+    getVideoStream() {
+        return this.videoStream;
     }
 
     /**
@@ -256,6 +318,11 @@ class WebRtcTransport {
         if (this.cursorChannel) {
             try { this.cursorChannel.close(); } catch (e) {}
             this.cursorChannel = null;
+        }
+        if (this.videoStream) {
+            this.videoStream.getTracks().forEach(track => track.stop());
+            this.videoStream = null;
+            this.hasMediaTrack = false;
         }
         if (this.pc) {
             try { this.pc.close(); } catch (e) {}

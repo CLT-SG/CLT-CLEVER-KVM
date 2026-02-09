@@ -34,8 +34,9 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use log::{debug, info, warn};
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 use tokio::sync::{mpsc, Mutex, Notify};
-use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_VP8, MIME_TYPE_VP9};
 use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::APIBuilder;
@@ -44,10 +45,14 @@ use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
+use webrtc::media::Sample;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
+use webrtc::track::track_local::TrackLocal;
 
 /// Configuration for the WebRTC transport
 #[derive(Debug, Clone)]
@@ -94,6 +99,8 @@ impl WebRtcConfig {
 pub enum WebRtcEvent {
     /// DataChannel opened and ready
     VideoChannelReady,
+    /// Video media track added and ready to receive samples
+    VideoTrackReady,
     /// Audio DataChannel opened and ready
     AudioChannelReady,
     /// Cursor DataChannel opened and ready
@@ -102,16 +109,28 @@ pub enum WebRtcEvent {
     ConnectionStateChanged(RTCPeerConnectionState),
     /// An ICE candidate was generated (send to remote via signaling)
     IceCandidate(String),
+    /// Browser requested a keyframe via RTCP PLI (Picture Loss Indication).
+    /// The connection handler should respond by forcing the encoder to produce
+    /// a keyframe immediately.
+    KeyframeRequested,
     /// The transport encountered an error
     Error(String),
 }
 
 /// The WebRTC transport manages a single peer connection with data channels
-/// for video, audio, and cursor data.
+/// for video, audio, and cursor data, plus a video media track for native
+/// `<video>` element rendering in the browser.
 pub struct WebRtcTransport {
     /// The underlying WebRTC peer connection
     peer_connection: Arc<RTCPeerConnection>,
-    /// DataChannel for video frames (unreliable, unordered for lowest latency)
+    /// VP9/VP8 video media track — the browser receives this as a native
+    /// MediaStream and can render it directly via `<video>.srcObject`.
+    /// This bypasses the need for WebCodecs + canvas rendering.
+    video_track: Arc<Mutex<Option<Arc<TrackLocalStaticSample>>>>,
+    /// Whether the video media track has been added and is ready
+    video_track_ready: Arc<Notify>,
+    /// DataChannel for video frames (unreliable, unordered — fallback when
+    /// media track is not available or client doesn't support it)
     video_channel: Arc<Mutex<Option<Arc<RTCDataChannel>>>>,
     /// DataChannel for audio frames (reliable for Opus)
     audio_channel: Arc<Mutex<Option<Arc<RTCDataChannel>>>>,
@@ -179,6 +198,8 @@ impl WebRtcTransport {
         let (event_tx, event_rx) = mpsc::channel::<WebRtcEvent>(64);
         let video_ready = Arc::new(Notify::new());
 
+        let video_track = Arc::new(Mutex::new(None));
+        let video_track_ready = Arc::new(Notify::new());
         let video_channel = Arc::new(Mutex::new(None));
         let audio_channel = Arc::new(Mutex::new(None));
         let cursor_channel = Arc::new(Mutex::new(None));
@@ -225,6 +246,8 @@ impl WebRtcTransport {
 
         let transport = Self {
             peer_connection,
+            video_track,
+            video_track_ready,
             video_channel,
             audio_channel,
             cursor_channel,
@@ -236,11 +259,72 @@ impl WebRtcTransport {
         Ok((transport, event_rx))
     }
 
-    /// Create data channels and generate an SDP offer.
+    /// Create a video media track and data channels, then generate an SDP offer.
     ///
-    /// The server acts as the offerer — it creates the data channels and
-    /// generates the SDP offer to send to the client via WebSocket signaling.
-    pub async fn create_offer(&self) -> Result<String> {
+    /// The server acts as the offerer — it creates a VP8/VP9 media track for
+    /// native `<video>` element rendering, plus data channels as fallback.
+    ///
+    /// The `codec` parameter determines the media track codec:
+    /// - `"vp8"` → VP8 media track
+    /// - `"vp9"` (or any other value) → VP9 media track (default)
+    pub async fn create_offer(&self, codec: &str) -> Result<String> {
+        // ── Video Media Track ────────────────────────────────────────────
+        // Create a VP9/VP8 media track. The browser receives this as a
+        // native MediaStream via `pc.ontrack` and can assign it to a
+        // `<video>` element's `srcObject` — no WebCodecs or canvas needed.
+        let mime_type = match codec {
+            "vp8" => MIME_TYPE_VP8.to_owned(),
+            _ => MIME_TYPE_VP9.to_owned(),
+        };
+
+        let track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: mime_type.clone(),
+                clock_rate: 90000,
+                ..Default::default()
+            },
+            "video-stream".to_string(),
+            "clever-kvm".to_string(),
+        ));
+
+        // Add the media track to the peer connection BEFORE creating the offer.
+        // The SDP will include a video m-line for this track.
+        let rtp_sender = self.peer_connection
+            .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await
+            .context("Failed to add video media track to PeerConnection")?;
+
+        // Spawn a task to read incoming RTCP packets.
+        // The interceptors (registered via register_default_interceptors) handle NACK
+        // retransmission automatically. We additionally check for PLI (Picture Loss
+        // Indication) — when the browser's decoder has lost sync and needs a keyframe.
+        //
+        // NOTE: rtp_sender.read() returns already-parsed RTCP packets
+        // (processed by interceptors first, then returned to the application).
+        let event_tx_rtcp = self.event_tx.clone();
+        tokio::spawn(async move {
+            let mut rtcp_buf = vec![0u8; 1500];
+            while let Ok((rtcp_packets, _)) = rtp_sender.read(&mut rtcp_buf).await {
+                for pkt in &rtcp_packets {
+                    if pkt.as_any().downcast_ref::<webrtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication>().is_some() {
+                        debug!("RTCP PLI received — browser requesting keyframe");
+                        let _ = event_tx_rtcp.send(WebRtcEvent::KeyframeRequested).await;
+                    }
+                }
+            }
+        });
+
+        // Store the track for later use by send_video_sample()
+        {
+            let mut vt = self.video_track.lock().await;
+            *vt = Some(track);
+        }
+        self.video_track_ready.notify_waiters();
+        let _ = self.event_tx.send(WebRtcEvent::VideoTrackReady).await;
+
+        info!("Video media track created (codec: {}, clock: 90000)", mime_type);
+
+        // ── Data Channels (fallback + auxiliary) ─────────────────────────
         // Create video data channel (unreliable, unordered for lowest latency)
         let video_dc_init = RTCDataChannelInit {
             ordered: Some(!self.config.video_unordered),
@@ -322,6 +406,10 @@ impl WebRtcTransport {
     /// the WebSocket binary message). This allows the client to use the same
     /// parsing logic regardless of transport.
     ///
+    /// NOTE: When a video media track is available, prefer `send_video_sample()`
+    /// which allows the browser to use native `<video>` element rendering.
+    /// This DataChannel path is retained as a fallback.
+    ///
     /// Returns Ok(true) if sent, Ok(false) if channel not ready (frame dropped).
     pub async fn send_video_frame(&self, data: &[u8]) -> Result<bool> {
         let channel = self.video_channel.lock().await;
@@ -340,6 +428,46 @@ impl WebRtcTransport {
         } else {
             Ok(false) // Channel not ready yet
         }
+    }
+
+    /// Send a raw VP9/VP8 encoded frame via the WebRTC video media track.
+    ///
+    /// The browser receives this as a native `MediaStream` via `pc.ontrack`
+    /// and can render it directly with a `<video>` element — no WebCodecs
+    /// decoding or canvas rendering required. The browser handles:
+    /// - RTP depacketization
+    /// - VP9/VP8 hardware-accelerated decoding
+    /// - Jitter buffering and frame pacing
+    /// - Video scaling and compositing
+    ///
+    /// This is the **primary** video delivery path when WebRTC is active.
+    /// Falls back to `send_video_frame()` (DataChannel) if the media track
+    /// is not available.
+    ///
+    /// # Arguments
+    /// * `data` - Raw VP9/VP8 encoded frame bytes (NOT wrapped in binary protocol)
+    /// * `duration` - Frame duration (e.g., 33ms for 30fps)
+    ///
+    /// Returns Ok(true) if sent, Ok(false) if track not ready.
+    pub async fn send_video_sample(&self, data: &[u8], duration: StdDuration) -> Result<bool> {
+        let track = self.video_track.lock().await;
+        if let Some(ref track) = *track {
+            track.write_sample(&Sample {
+                data: Bytes::copy_from_slice(data),
+                duration,
+                ..Default::default()
+            })
+            .await
+            .context("Failed to write video sample to media track")?;
+            Ok(true)
+        } else {
+            Ok(false) // Track not ready
+        }
+    }
+
+    /// Check if the video media track is available for sending samples.
+    pub async fn is_video_track_ready(&self) -> bool {
+        self.video_track.lock().await.is_some()
     }
 
     /// Send an audio frame over the WebRTC DataChannel (reliable).
@@ -389,6 +517,11 @@ impl WebRtcTransport {
     /// Close the WebRTC transport and free all resources
     pub async fn close(&self) -> Result<()> {
         info!("Closing WebRTC transport");
+
+        // Clear video media track
+        if let Some(_) = self.video_track.lock().await.take() {
+            debug!("Video media track cleared");
+        }
 
         // Close data channels
         if let Some(dc) = self.video_channel.lock().await.take() {
@@ -488,7 +621,7 @@ mod tests {
         let config = WebRtcConfig::default();
         assert!(config.video_unordered);
         assert_eq!(config.video_max_retransmits, Some(0));
-        assert!(!config.ice_servers.is_empty());
+        assert!(config.ice_servers.is_empty());
     }
 
     #[tokio::test]

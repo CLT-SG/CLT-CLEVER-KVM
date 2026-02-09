@@ -2,9 +2,9 @@
 
 ## Overview
 
-This document describes the RDEngine streaming system — a low-latency video/audio streaming engine for the Clever KVM application. The architecture is inspired by [RustDesk](https://github.com/rustdesk/rustdesk)'s approach to remote desktop streaming, using VP8/VP9 encoding via libvpx and a **WebRTC DataChannel transport** for real-time peer-to-peer delivery.
+This document describes the RDEngine streaming system — a low-latency video/audio streaming engine for the Clever KVM application. The architecture is inspired by [RustDesk](https://github.com/rustdesk/rustdesk)'s approach to remote desktop streaming, using VP8/VP9 encoding via libvpx and a **WebRTC Media Track transport** for real-time peer-to-peer delivery.
 
-RDEngine replaces the previous H.264 pipeline and relay server architecture with a simpler, more maintainable system that delivers significantly lower latency through UDP-based WebRTC DataChannels, with an automatic fallback to WebSocket binary transport when WebRTC is unavailable.
+RDEngine replaces the previous H.264 pipeline and relay server architecture with a simpler, more maintainable system that delivers significantly lower latency. Video is delivered primarily via WebRTC media tracks (RTP/UDP) for native `<video>` element rendering in the browser, with automatic fallback to WebRTC DataChannels or WebSocket binary transport when media tracks are unavailable.
 
 ## Architecture
 
@@ -27,7 +27,8 @@ The system uses a **hybrid transport model**:
 
 | Data Type | Transport | Reliability | Why |
 |-----------|-----------|-------------|-----|
-| Video frames | WebRTC DataChannel | Unreliable, unordered | Lowest latency; dropped frames don't stall subsequent frames |
+| Video frames | **WebRTC Media Track** (primary) | RTP/UDP with NACK | Browser decodes VP9 natively → `<video>` element; no WebCodecs needed |
+| Video frames | WebRTC DataChannel (fallback) | Unreliable, unordered | Fallback when media track unavailable; decoded via WebCodecs → canvas |
 | Audio frames | WebRTC DataChannel | Reliable | Opus needs ordered delivery for continuous playback |
 | Cursor updates | WebRTC DataChannel | Reliable | Small messages, must arrive |
 | Input events | WebSocket (JSON) | Reliable (TCP) | Must be reliable; low frequency; direction: client → server |
@@ -58,9 +59,10 @@ The system uses a **hybrid transport model**:
 │                                                            │                │
 │  ┌──────────────────┐                    ┌─────────────────┴───────────┐    │
 │  │  QoS Controller  │◀── RTT ───────┐   │  WebRtcTransport            │    │
-│  │  (Adaptive FPS,  │               │   │  ┌─ video DC (unreliable) ──┼─┐  │
-│  │   Bitrate)       │               │   │  ├─ audio DC (reliable)   ──┼─┤  │
-│  └──────────────────┘               │   │  └─ cursor DC (reliable)  ──┼─┤  │
+│  │  (Adaptive FPS,  │               │   │  ┌─ media track (RTP/VP9) ──┼─┐  │
+│  │   Bitrate)       │               │   │  ├─ video DC (fallback)   ──┼─┤  │
+│  └──────────────────┘               │   │  ├─ audio DC (reliable)   ──┼─┤  │
+│                                     │   │  └─ cursor DC (reliable)  ──┼─┤  │
 │                                     │   └─────────────────────────────┘ │  │
 │                                     │                                   │  │
 │  ┌──────────────────────────────────┼───────────────────────────────┐   │  │
@@ -72,13 +74,13 @@ The system uses a **hybrid transport model**:
 │  └──────────────────────────────────┼───────────────────────────────┘   │  │
 │                                     │                                   │  │
 └─────────────────────────────────────┼───────────────────────────────────┼──┘
-                                      │                                   │
-                              WebSocket (TCP)                   WebRTC DC (UDP)
-                                      │                                   │
-┌─────────────────────────────────────┼───────────────────────────────────┼──┐
-│                              CLIENT (Browser)                           │  │
-├─────────────────────────────────────┼───────────────────────────────────┼──┤
-│                                     │                                   │  │
+                                      │                    ┌──────────────┤
+                              WebSocket (TCP)    Media Track│    WebRTC DC │
+                                      │            (RTP)   │       (UDP)  │
+┌─────────────────────────────────────┼────────────────────┼──────────────┼──┐
+│                              CLIENT (Browser)            │              │  │
+├─────────────────────────────────────┼────────────────────┼──────────────┼──┤
+│                                     │                    │              │  │
 │  ┌──────────────────────────────────┼───────────────────────────────┐   │  │
 │  │  WebSocket Handler              │                               │   │  │
 │  │  ├─ SDP answer generation       │                               │   │  │
@@ -86,18 +88,25 @@ The system uses a **hybrid transport model**:
 │  │  ├─ Input events (send)         │                               │   │  │
 │  │  └─ Control messages            │                               │   │  │
 │  └──────────────────────────────────┼───────────────────────────────┘   │  │
-│                                     │                                   │  │
-│  ┌──────────────────────────────────┼───────────────────────────────┐   │  │
-│  │  WebRtcTransport (JS)           │                               │   │  │
-│  │  ├─ "video" DC ─► handleBinaryVideoFrame() ─► VideoDecoder     │◄──┘  │
+│                                     │                    │              │  │
+│  ┌──────────────────────────────────┼────────────────────┼──────────┐   │  │
+│  │  WebRtcTransport (JS)           │                    │          │   │  │
+│  │  ├─ pc.ontrack ─► MediaStream ──┼── <video>.srcObject│(primary) │◄──┤  │
+│  │  ├─ "video" DC ─► VideoDecoder ─┼── canvas (fallback)│          │◄──┘  │
 │  │  ├─ "audio" DC ─► handleAudioFrame()                           │      │
 │  │  └─ "cursor" DC ─► handleCursorMessage()                       │      │
 │  └──────────────────────────────────┼───────────────────────────────┘      │
 │                                     │                                      │
 │  ┌──────────────────────┐    ┌──────────────────┐  ┌─────────────────┐    │
+│  │  <video> Element     │◀───│  Browser Native   │◀─│  RTP Media      │    │
+│  │  (native rendering)  │    │  VP9 Decoder      │  │  Track          │    │
+│  │  [PRIMARY PATH]      │    │  (hardware accel) │  │  (WebRTC)       │    │
+│  └──────────────────────┘    └──────────────────┘  └─────────────────┘    │
+│                                                                           │
+│  ┌──────────────────────┐    ┌──────────────────┐  ┌─────────────────┐    │
 │  │  Canvas Rendering    │◀───│  WebCodecs        │◀─│  Binary Frame   │    │
 │  │  (drawImage)         │    │  VideoDecoder     │  │  Parser         │    │
-│  │                      │    │  (VP9 HW decode)  │  │  (Header Parse) │    │
+│  │  [FALLBACK PATH]     │    │  (VP9 HW decode)  │  │  (DataChannel)  │    │
 │  └──────────────────────┘    └──────────────────┘  └─────────────────┘    │
 │                                                                           │
 │  ┌──────────────────────┐                                                 │
@@ -447,13 +456,19 @@ Each frame send attempts WebRTC first. On failure:
 
 ### WebRTC Transport (`webrtc-transport.js`)
 
-Client-side counterpart to the Rust `WebRtcTransport`. Manages the browser's `RTCPeerConnection` and DataChannel handlers.
+Client-side counterpart to the Rust `WebRtcTransport`. Manages the browser's `RTCPeerConnection`, media tracks, and DataChannel handlers.
 
 **Key responsibilities:**
 - Receives SDP offer from server → creates `RTCPeerConnection` → generates SDP answer
+- Handles incoming **media track** via `pc.ontrack` — captures the `MediaStream` for native `<video>` rendering
 - Handles incoming DataChannels (`"video"`, `"audio"`, `"cursor"`) created by the server
 - Routes binary DataChannel messages to existing `handleBinaryVideoFrame()`, `handleAudioFrame()`, and `handleCursorMessage()` handlers
 - Forwards local ICE candidates to the server via WebSocket
+
+**Dual-mode video delivery:**
+The transport supports two video paths simultaneously:
+1. **Media Track (primary):** Server sends VP9 frames via `TrackLocalStaticSample::write_sample()` → browser receives via `pc.ontrack` → `MediaStream` → `<video>.srcObject` for native hardware-accelerated decoding and rendering
+2. **DataChannel (fallback):** Server sends binary-framed VP9 data via DataChannel → client decodes with WebCodecs `VideoDecoder` → renders to `<canvas>`
 
 **Integration with `kvm-client.js`:**
 ```javascript
@@ -462,7 +477,8 @@ this.webrtcTransport = new WebRtcTransport({
     onVideoFrame: (data) => this.handleBinaryVideoFrame(new Uint8Array(data)),
     onAudioFrame: (data) => this.handleBinaryMessage(new Uint8Array(data)),
     onCursorUpdate: (data) => this.handleCursorMessage(new Uint8Array(data)),
-    onStateChange: (state) => { /* update UI */ },
+    onMediaStream: (stream) => this.activateVideoElementRendering(stream),
+    onStateChange: (state) => { /* update UI, deactivate video element on disconnect */ },
     onIceCandidate: (json) => ws.send(JSON.stringify({
         type: 'webrtc_ice_candidate', candidate: json
     })),
@@ -471,7 +487,30 @@ const answer = await this.webrtcTransport.handleOffer(offerSdp);
 ws.send(JSON.stringify({ type: 'webrtc_answer', sdp: answer }));
 ```
 
-### VP9 Decoding (`vpx-decoder.js`)
+### Native Video Element Rendering (`kvm-client.js`)
+
+When a media track is received, the client activates native `<video>` element rendering:
+
+```javascript
+activateVideoElementRendering(stream) {
+    this.videoScreen.srcObject = stream;
+    this.videoScreen.style.display = 'block';
+    this.usingVideoElement = true;
+    // Hide canvas, cancel rAF, track FPS via requestVideoFrameCallback
+}
+```
+
+**Benefits over canvas rendering:**
+- Browser handles VP9 decoding natively (hardware-accelerated where available)
+- No WebCodecs `VideoDecoder` overhead or manual frame management
+- No `canvas.drawImage()` per-frame overhead
+- Lower CPU usage and better battery life on mobile
+- Sub-frame latency: decoded frames go directly to compositor
+
+**Fallback behavior:**
+If the media track disconnects or WebRTC fails, the client falls back to DataChannel + WebCodecs + canvas rendering automatically via `deactivateVideoElementRendering()`.
+
+### VP9 Decoding — Fallback (`vpx-decoder.js`)
 
 Uses the WebCodecs API (`VideoDecoder`) for hardware-accelerated VP9 decoding:
 
@@ -537,16 +576,18 @@ All platforms output BGRA frames, which the video service converts to I420 for V
 | `crossbeam-queue` | 0.3 | Lock-free bounded queues |
 | `parking_lot` | 0.12 | High-performance locks |
 | `mimalloc` | 0.1 | Microsoft's high-performance allocator |
-| `webrtc` | 0.17 | Pure Rust WebRTC (DataChannels + media over UDP) |
+| `webrtc` | 0.17 | Pure Rust WebRTC (DataChannels + media tracks over UDP) |
 
 ### Browser (Frontend)
 
 | API / Library | Purpose | Support |
 |---------------|---------|---------|
-| WebCodecs `VideoDecoder` | VP9 hardware decoding | Chrome 94+, Edge 94+, Safari 16.4+ |
+| `<video>` element + `MediaStream` | Native VP9 rendering via WebRTC media track | All modern browsers |
+| WebCodecs `VideoDecoder` | VP9 hardware decoding (DataChannel fallback) | Chrome 94+, Edge 94+, Safari 16.4+ |
 | Web Audio API | Opus audio playback | All modern browsers |
-| `RTCPeerConnection` | WebRTC DataChannel transport | All modern browsers |
+| `RTCPeerConnection` | WebRTC media tracks + DataChannel transport | All modern browsers |
 | `RTCDataChannel` | Binary data transfer (UDP-based) | All modern browsers |
+| `requestVideoFrameCallback` | FPS tracking for `<video>` element | Chrome 83+, Edge 83+, Safari 15.4+ |
 | WebSocket | Signaling + input events (fallback for media) | All modern browsers |
 
 ## Performance Characteristics
@@ -589,10 +630,11 @@ All platforms output BGRA frames, which the video service converts to I420 for V
 |---------|---------------------|------------------------|---------------------|
 | Video codec | H.264 (HW-dependent) | VP9 via libvpx | VP9 via libvpx |
 | Audio | WebRTC peer connection | Opus over WebSocket | Opus over WebRTC DataChannel |
-| Video transport | fMP4 container | WebSocket binary (TCP) | WebRTC DataChannel (UDP) |
-| Protocol | fMP4 container | Minimal binary framing | Same binary framing over DataChannel |
-| Transport reliability | TCP (reliable) | TCP (reliable) | UDP (unreliable, configurable) |
-| HOL blocking | Yes (TCP) | Yes (TCP) | No (UDP DataChannels) |
+| Video transport | fMP4 container | WebSocket binary (TCP) | WebRTC Media Track (RTP/UDP) + DC fallback |
+| Video rendering | `<video>` via MSE | WebCodecs → `<canvas>` | Native `<video>` (primary) / canvas (fallback) |
+| Protocol | fMP4 container | Minimal binary framing | RTP for media track; binary framing for DC fallback |
+| Transport reliability | TCP (reliable) | TCP (reliable) | UDP with NACK (media track); configurable (DC) |
+| HOL blocking | Yes (TCP) | Yes (TCP) | No (UDP media track + DataChannels) |
 | NAT traversal | None | None | ICE (STUN/TURN) |
 | Encryption | TLS | TLS | DTLS (built into WebRTC) |
 | Relay server | Actix Web relay | Removed (direct only) | Removed (peer-to-peer) |

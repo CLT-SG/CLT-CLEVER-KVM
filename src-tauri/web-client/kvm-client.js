@@ -68,16 +68,19 @@ class KVMClient {
         this.audioStream = null;
 
         // ── WebRTC DataChannel Transport ─────────────────────────────────
-        // When the server supports WebRTC (protocol_version >= 3), video,
-        // audio, and cursor data are delivered via WebRTC DataChannels
-        // instead of WebSocket binary messages. This provides:
-        //   - UDP transport (no TCP head-of-line blocking)
-        //   - Unreliable delivery for video (dropped frames don't stall)
-        //   - Lower latency than WebSocket binary
+        // When the server supports WebRTC (protocol_version >= 3), video
+        // is delivered via a WebRTC *media track* for native <video>
+        // element rendering. Audio and cursor use DataChannels.
         // WebSocket remains for signaling (SDP/ICE) and input (keyboard/mouse).
+        //
+        // Rendering modes (in priority order):
+        //   1. WebRTC Media Track → <video>.srcObject (native, hw-accelerated)
+        //   2. WebRTC DataChannel  → WebCodecs + canvas (fallback)
+        //   3. WebSocket binary    → WebCodecs + canvas (legacy fallback)
         this.webrtcTransport = null;
         this.webrtcEnabled = false; // Will be set from server_info
         this.webrtcConnected = false;
+        this.usingVideoElement = false; // True when using native <video> rendering
 
         // ── Host cursor synchronization ──────────────────────────────────
         // Tracks the remote host cursor position and shape so the client
@@ -145,6 +148,15 @@ class KVMClient {
 
     // Handle decoded VP8/VP9 frame with requestAnimationFrame for vsync-aligned rendering
     handleVpxFrame(frame) {
+        // When using native <video> element rendering (WebRTC media track),
+        // the browser handles decoding and rendering — skip canvas path
+        if (this.usingVideoElement) {
+            if (frame instanceof VideoFrame) {
+                frame.close();
+            }
+            return;
+        }
+
         if (!this.realCanvas || !this.realCtx) {
             this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
         }
@@ -202,6 +214,13 @@ class KVMClient {
     
     // Handle decoded H.264 frame
     handleH264Frame(frame, metadata) {
+        // When using native <video> element rendering, skip canvas path
+        if (this.usingVideoElement) {
+            if (frame instanceof VideoFrame) frame.close();
+            if (frame instanceof ImageBitmap) frame.close();
+            return;
+        }
+
         if (!this.realCanvas || !this.realCtx) {
             this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
         }
@@ -591,7 +610,10 @@ class KVMClient {
         
         // Use the appropriate element - prefer realCanvas (dynamically created), then fallbackCanvas, then videoScreen
         let targetElement = null;
-        if (this.realCanvas && this.realCanvas.parentElement) {
+        if (this.usingVideoElement && this.videoScreen) {
+            // When using native <video> rendering, coordinate mapping uses the video element
+            targetElement = this.videoScreen;
+        } else if (this.realCanvas && this.realCanvas.parentElement) {
             targetElement = this.realCanvas;
         } else if (this.fallbackCanvas && this.fallbackCanvas.style.display !== 'none') {
             targetElement = this.fallbackCanvas;
@@ -692,9 +714,11 @@ class KVMClient {
         
         if (!this.connected) return;
         
-        // Use the appropriate target element - prefer realCanvas
+        // Use the appropriate target element - prefer native video element when active
         let targetElement = null;
-        if (this.realCanvas && this.realCanvas.parentElement) {
+        if (this.usingVideoElement && this.videoScreen) {
+            targetElement = this.videoScreen;
+        } else if (this.realCanvas && this.realCanvas.parentElement) {
             targetElement = this.realCanvas;
         } else if (this.fallbackCanvas && this.fallbackCanvas.style.display !== 'none') {
             targetElement = this.fallbackCanvas;
@@ -1106,6 +1130,12 @@ class KVMClient {
             // Create the WebRTC transport with callbacks that route frames
             // to the existing binary frame handler (same parsing logic)
             this.webrtcTransport = new WebRtcTransport({
+                // Primary video path: native media stream → <video> element
+                onMediaStream: (stream) => {
+                    console.log('WebRTC media stream received — switching to native <video> rendering');
+                    this.activateVideoElementRendering(stream);
+                },
+                // Fallback video path: DataChannel → WebCodecs → canvas
                 onVideoFrame: (arrayBuffer) => {
                     // Route through the existing binary video frame handler
                     this.lastFrameTime = Date.now();
@@ -1127,6 +1157,10 @@ class KVMClient {
                         this.showNotification('WebRTC connected — low-latency mode active', 3000);
                     } else if (state === 'failed' || state === 'disconnected') {
                         this.webrtcConnected = false;
+                        // Fall back to canvas rendering if media track was active
+                        if (this.usingVideoElement) {
+                            this.deactivateVideoElementRendering();
+                        }
                         this.showNotification('WebRTC disconnected — using WebSocket fallback', 3000);
                     }
                 },
@@ -1895,7 +1929,9 @@ class KVMClient {
         this.hostCursorOverlay.classList.remove('host-cursor-hidden');
 
         // Convert host screen coordinates → CSS pixel position on the rendered content area
-        const targetElement = this.realCanvas || this.videoScreen;
+        const targetElement = (this.usingVideoElement && this.videoScreen)
+            ? this.videoScreen
+            : (this.realCanvas || this.videoScreen);
         if (!targetElement || this.screenWidth <= 0 || this.screenHeight <= 0) return;
 
         const content = this.getContentRect(targetElement);
@@ -2637,6 +2673,148 @@ class KVMClient {
         console.log(`✅ Optimized canvas initialized: ${width}x${height}`);
     }
 
+    /**
+     * Activate native <video> element rendering using a WebRTC MediaStream.
+     *
+     * When the server sends video via a WebRTC media track (instead of
+     * DataChannel binary frames), the browser can decode and render it
+     * natively — no WebCodecs VideoDecoder or canvas drawing needed.
+     *
+     * Benefits over canvas rendering:
+     *   - Hardware-accelerated VP9/VP8 decoding by the browser
+     *   - Browser handles jitter buffering and frame pacing
+     *   - Native video scaling, compositing, and vsync
+     *   - Lower CPU usage (no manual drawImage/putImageData calls)
+     *   - No WebCodecs API dependency (broader browser support)
+     *
+     * @param {MediaStream} stream - The video MediaStream from WebRTC ontrack
+     */
+    activateVideoElementRendering(stream) {
+        if (!this.videoScreen) {
+            console.warn('Cannot activate video element rendering: <video> element not found');
+            return;
+        }
+
+        // Assign the media stream to the video element
+        this.videoScreen.srcObject = stream;
+        this.videoScreen.style.display = 'block';
+        this.videoScreen.style.cssText = `
+            width: 100%;
+            height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
+            object-fit: contain;
+            background-color: #000;
+            display: block;
+        `;
+
+        // Attempt autoplay (required for WebRTC streams)
+        this.videoScreen.play().catch(e => {
+            console.warn('Video autoplay failed (user interaction may be required):', e.message);
+        });
+
+        // Update screen dimensions from the video metadata
+        this.videoScreen.onloadedmetadata = () => {
+            if (this.videoScreen.videoWidth > 0 && this.videoScreen.videoHeight > 0) {
+                this.screenWidth = this.videoScreen.videoWidth;
+                this.screenHeight = this.videoScreen.videoHeight;
+                console.log(`Video element dimensions: ${this.screenWidth}x${this.screenHeight}`);
+            }
+        };
+
+        // Also listen for resize events (resolution changes during streaming)
+        this.videoScreen.onresize = () => {
+            if (this.videoScreen.videoWidth > 0 && this.videoScreen.videoHeight > 0) {
+                if (this.screenWidth !== this.videoScreen.videoWidth ||
+                    this.screenHeight !== this.videoScreen.videoHeight) {
+                    this.screenWidth = this.videoScreen.videoWidth;
+                    this.screenHeight = this.videoScreen.videoHeight;
+                    console.log(`Video resolution changed: ${this.screenWidth}x${this.screenHeight}`);
+                }
+            }
+        };
+
+        // Hide the canvas (not needed for native video rendering)
+        if (this.realCanvas) {
+            this.realCanvas.style.display = 'none';
+        }
+
+        // Cancel any pending VP9 requestAnimationFrame rendering
+        if (this._vpxRafId) {
+            cancelAnimationFrame(this._vpxRafId);
+            this._vpxRafId = null;
+        }
+        if (this._pendingVpxFrame) {
+            this._pendingVpxFrame.close();
+            this._pendingVpxFrame = null;
+        }
+
+        // Mark that we're using native video rendering
+        this.usingVideoElement = true;
+
+        // Hide status display since we're now receiving video
+        if (this.statusDisplay) {
+            this.statusDisplay.style.display = 'none';
+        }
+
+        // FPS tracking for the video element
+        if (this.videoScreen.requestVideoFrameCallback) {
+            let lastTime = performance.now();
+            let frameCounter = 0;
+            const trackFps = (now, metadata) => {
+                frameCounter++;
+                // Keep lastFrameTime updated so the health monitor
+                // knows we're still receiving frames via the media track
+                this.lastFrameTime = Date.now();
+                if (now - lastTime >= 1000) {
+                    this.frameStats.currentFps = frameCounter;
+                    frameCounter = 0;
+                    lastTime = now;
+                    // Update FPS display
+                    const fpsElements = document.querySelectorAll('#fps');
+                    fpsElements.forEach(el => el.textContent = this.frameStats.currentFps);
+                }
+                if (this.usingVideoElement) {
+                    this.videoScreen.requestVideoFrameCallback(trackFps);
+                }
+            };
+            this.videoScreen.requestVideoFrameCallback(trackFps);
+        } else {
+            // Fallback: use timeupdate event for browsers without requestVideoFrameCallback
+            this.videoScreen.ontimeupdate = () => {
+                this.lastFrameTime = Date.now();
+            };
+        }
+
+        console.log('✅ Native <video> element rendering activated (WebRTC media track)');
+    }
+
+    /**
+     * Deactivate native <video> element rendering and fall back to canvas.
+     * Called when WebRTC connection drops or media track ends.
+     */
+    deactivateVideoElementRendering() {
+        if (!this.usingVideoElement) return;
+
+        console.log('Deactivating native <video> rendering, falling back to canvas');
+
+        this.usingVideoElement = false;
+
+        // Clear the video element
+        if (this.videoScreen) {
+            this.videoScreen.srcObject = null;
+            this.videoScreen.style.display = 'none';
+        }
+
+        // Re-show the canvas for fallback rendering
+        if (this.realCanvas) {
+            this.realCanvas.style.display = 'block';
+        }
+
+        // Request a keyframe so the canvas decoder can start fresh
+        this.requestKeyframe();
+    }
+
     updatePerformanceDisplay() {
         const { decompressTime, renderTime, totalFrames, droppedFrames } = this.perfStats;
         
@@ -3021,6 +3199,20 @@ class KVMClient {
     startConnectionHealthMonitoring() {
         // Check connection health every 3 seconds
         this.connectionHealthInterval = setInterval(() => {
+            // When using native <video> rendering, check the video element's
+            // playback state instead of relying solely on lastFrameTime.
+            // requestVideoFrameCallback already updates lastFrameTime, but
+            // also check the element directly as an extra safety net.
+            if (this.usingVideoElement && this.videoScreen) {
+                const isPlaying = !this.videoScreen.paused && !this.videoScreen.ended
+                    && this.videoScreen.readyState >= 2;
+                if (isPlaying) {
+                    // Video element is actively playing — stream is healthy
+                    this.lastFrameTime = Date.now();
+                    return;
+                }
+            }
+
             const timeSinceLastFrame = Date.now() - this.lastFrameTime;
             
             // If no frames received for more than 10 seconds, consider connection stale
