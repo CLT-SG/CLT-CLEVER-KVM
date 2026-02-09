@@ -144,48 +144,99 @@ body, html {
     pointer-events: auto;
 }
 
-/* Status display - centered like video player */
+/* Status display — always visible, positioned directly in #screen
+ * (outside the OSD overlay so it doesn't depend on hover) */
 .status-display {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(10px);
     border-radius: 12px;
-    padding: 20px 30px;
+    padding: 24px 32px;
     text-align: center;
-    min-width: 200px;
+    min-width: 240px;
+    max-width: 380px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    z-index: 200;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
 }
 
 .status-display h2 {
-    margin: 0 0 10px 0;
+    margin: 0;
     font-size: 18px;
     font-weight: 600;
     color: white;
+    order: 2;
 }
 
 .status-display p {
-    margin: 5px 0;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.8);
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    order: 3;
+}
+
+.status-display .loading-spinner {
+    order: 1;
+}
+
+.status-display .status-tips {
+    order: 4;
 }
 
 .loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid rgba(255, 255, 255, 0.3);
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(255, 255, 255, 0.2);
     border-top: 3px solid #fff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
-    margin: 10px auto;
+    margin: 0 auto 4px;
 }
 
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* Troubleshooting tips shown during reconnection */
+.status-tips {
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: left;
+    width: 100%;
+}
+
+.status-tips:empty {
+    display: none;
+}
+
+.status-tips ul {
+    margin: 0;
+    padding: 0 0 0 16px;
+    list-style: none;
+}
+
+.status-tips li {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.6;
+    position: relative;
+}
+
+.status-tips li::before {
+    content: '•';
+    position: absolute;
+    left: -12px;
+    color: rgba(255, 255, 255, 0.35);
 }
 
 /* Top OSD Bar */

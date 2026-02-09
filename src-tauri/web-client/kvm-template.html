@@ -15,15 +15,16 @@
         <!-- Canvas layer for input handling only (transparent overlay) -->
         <canvas id="canvas-layer" style="position: absolute; top: 0; left: 0; pointer-events: auto; opacity: 0; z-index: 1;"></canvas>
         
+        <!-- Status Display (always visible, independent of OSD hover) -->
+        <div class="status-display">
+            <div class="loading-spinner"></div>
+            <h2>Connecting</h2>
+            <p>Establishing connection...</p>
+            <div class="status-tips"></div>
+        </div>
+        
         <!-- OSD Overlay -->
         <div class="osd-overlay">
-            <!-- Status Display (center) -->
-            <div class="status-display">
-                <h2>Connecting</h2>
-                <p>Establishing connection...</p>
-                <div class="loading-spinner"></div>
-            </div>
-            
             <!-- Top OSD Bar -->
             <div class="osd-top">
                 <div class="osd-title">Clever KVM</div>

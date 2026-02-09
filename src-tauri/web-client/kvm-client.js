@@ -51,7 +51,11 @@ class KVMClient {
         this.lastFrameTime = Date.now();
         this.connectionHealthInterval = null;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
+        this.maxReconnectAttempts = Infinity; // Never give up reconnecting
+        this._reconnectTimer = null;         // Pending reconnect setTimeout ID
+        this._isReconnecting = false;        // Guard against overlapping reconnect attempts
+        this._consecutiveFailures = 0;       // Track failures to trigger page reload fallback
+        this._maxConsecutiveFailuresBeforeReload = 30; // ~60-90s of failures before reload
         
         // Multi-touch and gesture support
         this.touchIdentifiers = new Map();
@@ -893,20 +897,123 @@ class KVMClient {
     }
 
     disconnect() {
-        if (this.connected) {
-            this.ws.close();
-        }
+        // Cancel any pending reconnection — user explicitly disconnected
+        this._cancelPendingReconnect();
+        this._isReconnecting = false;
+
+        this.cleanupConnection();
         
+        window.location.href = '/';
+    }
+
+    // ── Connection cleanup ─────────────────────────────────────────
+    // Properly tears down the current WebSocket connection and all
+    // associated state (intervals, decoder, pending frames) so that
+    // a subsequent connect() call starts from a clean slate.
+    cleanupConnection() {
+        this.connected = false;
+
         // Stop all monitoring intervals
-        this.stopNetworkMonitoring();
-        this.stopConnectionHealthMonitoring();
-        
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
             this.pingInterval = null;
         }
-        
-        window.location.href = '/';
+        this.stopNetworkMonitoring();
+        this.stopConnectionHealthMonitoring();
+
+        // Close the WebSocket and remove event handlers so the old
+        // socket's onclose/onerror cannot fire after we create a new one.
+        if (this.ws) {
+            try {
+                this.ws.onopen = null;
+                this.ws.onmessage = null;
+                this.ws.onclose = null;
+                this.ws.onerror = null;
+                if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+                    this.ws.close();
+                }
+            } catch (e) {
+                // Ignore errors during cleanup
+            }
+            this.ws = null;
+        }
+
+        // Clean up pending VPX frames to avoid stale VideoFrame references
+        if (this._pendingVpxFrame) {
+            try { this._pendingVpxFrame.close(); } catch (e) {}
+            this._pendingVpxFrame = null;
+        }
+        if (this._vpxRafId) {
+            cancelAnimationFrame(this._vpxRafId);
+            this._vpxRafId = null;
+        }
+
+        // Clear host cursor state
+        if (this.hostControlTimer) {
+            clearTimeout(this.hostControlTimer);
+            this.hostControlTimer = null;
+        }
+        if (this.clientActiveTimer) {
+            clearTimeout(this.clientActiveTimer);
+            this.clientActiveTimer = null;
+        }
+        this.hostCursor.isHostControlling = false;
+        this.clientActive = false;
+
+        // Remove host cursor overlay from DOM
+        const overlay = document.getElementById('host-cursor-overlay');
+        if (overlay) overlay.remove();
+
+        // Clear the video canvas to black so the user sees a blank screen
+        // instead of a stale frozen frame while reconnecting.
+        this.clearCanvasToBlack();
+    }
+
+    // Paint the rendering canvas solid black.
+    // Called on disconnect/connection-lost so the last video frame
+    // doesn't remain frozen on screen.
+    clearCanvasToBlack() {
+        if (this.realCanvas && this.realCtx) {
+            this.realCtx.fillStyle = '#000';
+            this.realCtx.fillRect(0, 0, this.realCanvas.width, this.realCanvas.height);
+        }
+        // Also clear the video element if visible
+        if (this.videoScreen) {
+            this.videoScreen.pause();
+            this.videoScreen.removeAttribute('src');
+            this.videoScreen.load();
+        }
+    }
+
+    // Reset decoder state so a fresh connection gets a clean decoder
+    // that will accept a new keyframe. Called before each reconnect.
+    resetDecoderState() {
+        this.needsKeyframe = true;
+        this.frameLogCounter = 0;
+
+        // Reset VPX decoder — close the old one and create a fresh instance
+        if (this.vpxDecoder) {
+            try { this.vpxDecoder.destroy(); } catch (e) {}
+            this.vpxDecoder = null;
+        }
+        this.initializeVpxDecoder();
+
+        // Reset H.264 decoder if present
+        if (this.h264Decoder) {
+            try { this.h264Decoder.destroy?.(); } catch (e) {}
+            this.h264Decoder = null;
+        }
+        this.initializeH264Decoder();
+
+        console.log('Decoder state reset for reconnection');
+    }
+
+    // Cancel any pending reconnect timer
+    _cancelPendingReconnect() {
+        if (this._reconnectTimer) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
     }
 
     // Monitor and codec switching
@@ -1006,22 +1113,21 @@ class KVMClient {
 
     // Connect method
     connect() {
-        this.updateStatus('Connecting', 'Establishing connection to server...', true);
-        
-        // Send a test HTTP request to verify connectivity
-        fetch('/static/kvm-client.css')
-            .then(response => console.log('Test connectivity check successful:', response.status))
-            .catch(error => console.error('Test connectivity check failed:', error));
+        // Guard: if already reconnecting, don't create parallel connections
+        if (this._isReconnecting) {
+            console.log('Reconnection already in progress, skipping duplicate connect()');
+            return;
+        }
+
+        this.updateStatus(
+            this.reconnectAttempts > 0 ? 'Reconnecting' : 'Connecting',
+            this.reconnectAttempts > 0 ? 'Attempting to reach the server...' : 'Establishing connection...',
+            true);
         
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         
         // Get the hostname from the current URL - this should preserve IP addresses and hostnames
         let hostname = window.location.hostname;
-        
-        // Debug logging
-        console.log('Current location:', window.location.href);
-        console.log('Hostname extracted:', hostname);
-        console.log('Port from location:', window.location.port);
         
         // Check for manual server override in URL parameters
         const urlParams = new URLSearchParams(window.location.search);
@@ -1030,34 +1136,39 @@ class KVMClient {
         // Determine the WebSocket host
         let wsHost;
         if (serverOverride) {
-            // Manual server override via URL parameter: ?server=192.168.1.100:9921
             wsHost = serverOverride;
-            console.log('Using server override from URL:', wsHost);
         } else if (window.location.port && window.location.port !== '80' && window.location.port !== '443') {
-            // If we're on a custom port (like the Vite dev server), use the hostname with port 9921
             wsHost = `${hostname}:9921`;
         } else {
-            // If we're on standard HTTP/HTTPS ports, assume KVM is also on the same host with port 9921
             wsHost = `${hostname}:9921`;
         }
         
         const wsUrl = `${protocol}//${wsHost}/ws?monitor=${this.currentMonitor}&codec=${this.currentCodec}${this.config.audio ? '&audio=true' : ''}`;
         
-        console.log('Connecting to WebSocket:', wsUrl);
-        console.log('WebSocket host resolved to:', wsHost);
+        console.log(`Connecting to WebSocket: ${wsUrl} (attempt ${this.reconnectAttempts})`);
         
-        this.ws = new WebSocket(wsUrl);
-        this.ws.binaryType = 'arraybuffer'; // Receive binary data as ArrayBuffer (avoid Blob async conversion)
+        // Clean up any existing connection state before creating a new one.
+        // This prevents old onclose/onerror handlers from firing and creating
+        // cascading reconnect attempts.
+        this.cleanupConnection();
+
+        try {
+            this.ws = new WebSocket(wsUrl);
+        } catch (e) {
+            console.error('Failed to create WebSocket:', e);
+            this._scheduleReconnect(wsHost);
+            return;
+        }
+        this.ws.binaryType = 'arraybuffer';
         
         this.ws.onopen = () => {
             this.connected = true;
             this.reconnectAttempts = 0;
-            this.lastFrameTime = Date.now(); // Reset frame timer on each new connection
+            this._consecutiveFailures = 0;
+            this._isReconnecting = false;
+            this.lastFrameTime = Date.now();
             this.updateStatus('Connected', 'Connection established successfully');
             console.log('WebSocket connection established');
-            
-            // H.264 streaming uses WebCodecs decoder - no MediaSource needed
-            console.log('🎬 Using H.264 hardware-accelerated streaming');
             
             // Start sending ping messages to measure latency
             this.pingInterval = setInterval(() => {
@@ -1073,8 +1184,6 @@ class KVMClient {
             // Request monitor list if not received within 2 seconds
             setTimeout(() => {
                 if (this.availableMonitors.length === 0) {
-                    console.log('No monitors received, using fallback...');
-                    // Create a fallback monitor entry
                     this.availableMonitors = [{
                         id: "primary",
                         name: "Primary Monitor", 
@@ -1089,16 +1198,12 @@ class KVMClient {
         
         this.ws.onmessage = async (event) => {
             try {
-                // Check if the message is binary data (video frame) or text data (control message)
                 if (event.data instanceof ArrayBuffer) {
-                    // ArrayBuffer - handle as video frame directly
                     this.handleBinaryVideoFrame(event.data);
                 } else if (event.data instanceof Blob) {
-                    // Blob - convert to ArrayBuffer first
                     const arrayBuffer = await event.data.arrayBuffer();
                     this.handleBinaryVideoFrame(arrayBuffer);
                 } else {
-                    // Text data - handle as JSON control message
                     const data = JSON.parse(event.data);
                     this.handleMessage(data);
                 }
@@ -1108,9 +1213,10 @@ class KVMClient {
         };
         
         this.ws.onclose = (event) => {
+            const wasConnected = this.connected;
             this.connected = false;
             
-            // Stop all monitoring intervals
+            // Stop intervals (ping, network monitor, health check)
             if (this.pingInterval) {
                 clearInterval(this.pingInterval);
                 this.pingInterval = null;
@@ -1118,31 +1224,70 @@ class KVMClient {
             this.stopNetworkMonitoring();
             this.stopConnectionHealthMonitoring();
             
-            console.log('WebSocket closed. Code:', event.code, 'Reason:', event.reason);
+            console.log('WebSocket closed. Code:', event.code, 'Reason:', event.reason,
+                        wasConnected ? '(was connected)' : '(was not connected)');
             
             if (event.code === 1006) {
-                this.updateStatus('Connection Failed', `Could not connect to KVM server at ${wsHost}. Please check that the server is running and accessible.`);
+                this.updateStatus('Connection Lost',
+                    'Lost connection to the server', true);
+            } else if (event.code === 1000) {
+                this.updateStatus('Reconnecting',
+                    'Server closed the connection', true);
             } else {
-                this.updateStatus('Disconnected', 'Connection closed');
+                this.updateStatus('Reconnecting',
+                    'Connection closed unexpectedly', true);
             }
             
-            // Attempt to reconnect with backoff
-            if (this.reconnectAttempts < this.maxReconnectAttempts) {
-                const delay = Math.min(3000 * (this.reconnectAttempts + 1), 15000);
-                setTimeout(() => {
-                    if (!this.connected) {
-                        console.log(`Attempting to reconnect... (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
-                        this.connect();
-                    }
-                }, delay);
-            }
+            // Schedule automatic reconnection
+            this._scheduleReconnect(wsHost);
         };
         
         this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            console.error('Failed to connect to:', wsUrl);
-            this.updateStatus('Connection Error', `Failed to connect to KVM server. Check that port 9921 is accessible on ${hostname}.`);
+            // onerror always fires before onclose for connection failures,
+            // so we only log here — onclose handles the reconnect scheduling.
+            console.error('WebSocket error for:', wsUrl);
         };
+    }
+
+    // Schedule a reconnection attempt with exponential backoff.
+    // Capped at 10 seconds. After many consecutive failures, falls back
+    // to a full page reload (to re-accept any changed TLS certificates).
+    _scheduleReconnect(wsHost) {
+        // Don't schedule if there's already a pending reconnect
+        if (this._reconnectTimer) return;
+
+        this.reconnectAttempts++;
+        this._consecutiveFailures++;
+
+        // Exponential backoff: 1s, 2s, 3s, 4s, 5s, ... capped at 10s
+        const delay = Math.min(1000 * Math.min(this.reconnectAttempts, 10), 10000);
+
+        console.log(`Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts}, consecutive failures: ${this._consecutiveFailures})`);
+
+        // After many consecutive failures the TLS certificate may have changed
+        // (server was restarted and generated a new self-signed cert).
+        // In that case, a full page reload is the only way for the browser
+        // to re-accept the new certificate.
+        if (this._consecutiveFailures >= this._maxConsecutiveFailuresBeforeReload) {
+            console.warn('Too many consecutive failures — reloading page to re-accept TLS certificate');
+            this.updateStatus('Reconnecting',
+                'Reloading page...', true);
+            setTimeout(() => window.location.reload(), 1000);
+            return;
+        }
+
+        this.updateStatus('Reconnecting',
+            'Attempting to reach the server...', true);
+
+        this._reconnectTimer = setTimeout(() => {
+            this._reconnectTimer = null;
+            if (!this.connected) {
+                // Reset decoder state before reconnect so the new connection
+                // starts with a clean decoder ready to accept a keyframe.
+                this.resetDecoderState();
+                this.connect();
+            }
+        }, delay);
     }
 
     handleMessage(data) {
@@ -2802,28 +2947,26 @@ class KVMClient {
         }
     }
 
-    // Attempt to reconnect when connection is stale
+    // Attempt to reconnect when connection is stale (called from health monitor)
     attemptReconnection() {
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('❌ Max reconnection attempts reached');
-            this.updateStatus('Connection Lost', 'Unable to reconnect after multiple attempts. Please refresh the page.');
-            return;
+        console.log('Stream frozen — triggering reconnection');
+        
+        // Clean up the current (stale) connection and schedule a reconnect
+        // via the unified _scheduleReconnect path.
+        this.cleanupConnection();
+        
+        // Determine wsHost (same logic as connect)
+        const hostname = window.location.hostname;
+        const urlParams = new URLSearchParams(window.location.search);
+        const serverOverride = urlParams.get('server');
+        let wsHost;
+        if (serverOverride) {
+            wsHost = serverOverride;
+        } else {
+            wsHost = `${hostname}:9921`;
         }
         
-        this.reconnectAttempts++;
-        console.log(`🔄 Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-        
-        // Close existing connection
-        if (this.ws) {
-            this.ws.close();
-        }
-        
-        // Wait a moment before reconnecting
-        setTimeout(() => {
-            if (!this.connected) {
-                this.connect();
-            }
-        }, 1000);
+        this._scheduleReconnect(wsHost);
     }
 
     // Update network stats display
@@ -2869,6 +3012,7 @@ class KVMClient {
             const titleElement = this.statusDisplay.querySelector('h2');
             const messageElement = this.statusDisplay.querySelector('p');
             const spinnerElement = this.statusDisplay.querySelector('.loading-spinner');
+            const tipsElement = this.statusDisplay.querySelector('.status-tips');
             
             if (titleElement) {
                 titleElement.textContent = title;
@@ -2878,6 +3022,21 @@ class KVMClient {
             }
             if (spinnerElement) {
                 spinnerElement.style.display = showSpinner ? 'block' : 'none';
+            }
+
+            // Show troubleshooting tips when reconnecting or connection lost
+            if (tipsElement) {
+                const isReconnecting = /reconnect|connection lost|disconnected/i.test(title);
+                if (isReconnecting) {
+                    tipsElement.innerHTML = `<ul>
+                        <li>Check that the Clever KVM app is running on the host</li>
+                        <li>Verify the host machine is reachable on the network</li>
+                        <li>Ensure port 9921 is not blocked by a firewall</li>
+                        <li>Try refreshing the page if the issue persists</li>
+                    </ul>`;
+                } else {
+                    tipsElement.innerHTML = '';
+                }
             }
             
             // Show the status display

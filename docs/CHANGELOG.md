@@ -2,6 +2,35 @@
 
 ## Version History
 
+## [5.0.6] - 2026-02-09
+
+### Persistent TLS Certificates and Infinite WebSocket Reconnection
+
+### Bug Fixes
+- **TLS Certificate Regenerated on Every Restart**: Self-signed TLS certificate was regenerated each time the server restarted, causing browsers to silently reject the new wss:// certificate (close code 1006) and fail all WebSocket connections
+- **Reconnection Stops After 5 Attempts**: WebSocket reconnection had a hard cap of 5 retries, after which the client permanently gave up and required a manual page reload
+- **Reconnect Counter Never Incremented**: `reconnectAttempts` was never incremented in the `ws.onclose` handler, making the retry count meaningless
+- **Overlapping Reconnect Timers**: No guard against multiple `setTimeout` reconnect timers running simultaneously, causing duplicate WebSocket connections
+- **Stale WebSocket Event Handlers**: Old WebSocket `onmessage`/`onerror` handlers were not nulled before closing, allowing callbacks to fire on the previous socket after a new connection was created
+- **Decoder State Not Reset**: VPX decoder was left in a stale state after reconnection (closed decoder, wrong `needsKeyframe` flag), causing decode errors on the new stream
+- **VideoFrame Memory Leak**: Pending `VideoFrame` references from the previous connection were never closed, leaking GPU memory
+
+### Improvements
+- **TLS Certificate Persistence**: Certificates are now saved to `~/.local/share/clever-kvm/server.crt` and `server.key`, reused across restarts, and only regenerated if missing or corrupt
+- **Infinite Reconnection**: Changed from 5 attempts to infinite retry with exponential backoff (1-10 second cap), with page reload fallback after 30 consecutive failures
+- **Clean Connection Teardown**: New `cleanupConnection()` method properly nulls WebSocket handlers, cancels animation frames, closes pending VPX frames, and clears host cursor state
+- **Decoder Reinitialization**: New `resetDecoderState()` destroys and reinitializes both VPX and H264 decoders on each reconnection
+- **Canvas Cleared to Black**: Display clears to solid black on disconnect instead of showing a frozen last frame
+- **Always-Visible Status Display**: Status display moved outside OSD overlay with `z-index: 200` so reconnection messages are visible without hovering
+- **Troubleshooting Tips**: Reconnection states now show common troubleshooting steps (check server running, refresh page, check network, check firewall)
+- **Loading Spinner Reorder**: Spinner positioned above the title text with description and tips below
+
+### Technical Changes
+- **src-tauri/src/network/server/server.rs**: Added `get_cert_dir()` returning `~/.local/share/clever-kvm/`, added `load_or_generate_cert()` that loads existing cert/key from disk or generates and persists new ones, `WebSocketServer::new()` calls `load_or_generate_cert()` instead of `generate_self_signed_cert()`
+- **src-tauri/web-client/kvm-client.js**: `maxReconnectAttempts` from 5 to `Infinity`, added `_reconnectTimer`/`_isReconnecting`/`_consecutiveFailures`/`_maxConsecutiveFailuresBeforeReload` state, added `cleanupConnection()`, `resetDecoderState()`, `_cancelPendingReconnect()`, `_scheduleReconnect()`, `clearCanvasToBlack()`, duplicate-call guard in `connect()`, troubleshooting tips in `updateStatus()`, removed attempt counts from status messages
+- **src-tauri/web-client/kvm-template.html**: Moved `.status-display` from inside `.osd-overlay` to directly inside `#screen`, reordered children to spinner/h2/p/`.status-tips`
+- **src-tauri/web-client/kvm-client.css**: `.status-display` with `z-index: 200` and `pointer-events: none`, flexbox column with CSS `order` properties, `.status-tips` bullet list with `:empty { display: none }`, spinner 36px
+
 ## [5.0.5] - 2026-02-09
 
 ### Low-Latency Default Quality and Adaptive Quality Fixes

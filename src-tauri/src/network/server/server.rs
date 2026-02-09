@@ -54,6 +54,84 @@ async fn handle_404() -> Result<Response<Body>, Infallible> {
         .unwrap())
 }
 
+/// Get the directory for persisting TLS certificates across restarts.
+/// Uses the system data directory or falls back to a local `.tls` directory.
+fn get_cert_dir() -> PathBuf {
+    // Try XDG data home first, then fallback to local directory
+    if let Ok(data_dir) = std::env::var("XDG_DATA_HOME") {
+        let dir = PathBuf::from(data_dir).join("clever-kvm");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            return dir;
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let dir = PathBuf::from(home).join(".local/share/clever-kvm");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            return dir;
+        }
+    }
+    // Last resort: local .tls directory
+    let dir = PathBuf::from(".tls");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Load or generate a self-signed TLS certificate for HTTPS.
+///
+/// Certificates are persisted to disk so that the same certificate is reused
+/// across application restarts. This is critical because when a web client has
+/// already accepted a self-signed certificate, regenerating it on restart would
+/// cause the browser to reject subsequent `wss://` WebSocket connections
+/// (the browser has no opportunity to re-accept a changed certificate via
+/// WebSocket — only a full page reload and manual re-acceptance would work).
+///
+/// The certificate is regenerated only when:
+/// - No persisted certificate exists yet (first run)
+/// - The persisted certificate files are corrupt or unreadable
+fn load_or_generate_cert() -> Result<(Vec<u8>, Vec<u8>), String> {
+    let cert_dir = get_cert_dir();
+    let cert_path = cert_dir.join("server.crt");
+    let key_path = cert_dir.join("server.key");
+
+    // Try to load existing certificate
+    if cert_path.exists() && key_path.exists() {
+        match (std::fs::read(&cert_path), std::fs::read(&key_path)) {
+            (Ok(cert_pem), Ok(key_pem)) if !cert_pem.is_empty() && !key_pem.is_empty() => {
+                log::info!(
+                    "✅ Loaded persisted TLS certificate from {}",
+                    cert_dir.display()
+                );
+                return Ok((cert_pem, key_pem));
+            }
+            _ => {
+                log::warn!(
+                    "Persisted TLS certificate files are corrupt, regenerating..."
+                );
+            }
+        }
+    }
+
+    // Generate a new certificate
+    let (cert_pem, key_pem) = generate_self_signed_cert()?;
+
+    // Persist to disk for future restarts
+    if let Err(e) = std::fs::write(&cert_path, &cert_pem) {
+        log::warn!("Failed to persist TLS certificate: {}", e);
+    }
+    if let Err(e) = std::fs::write(&key_path, &key_pem) {
+        log::warn!("Failed to persist TLS private key: {}", e);
+    }
+
+    if cert_path.exists() && key_path.exists() {
+        log::info!(
+            "✅ TLS certificate persisted to {} (reused across restarts)",
+            cert_dir.display()
+        );
+    }
+
+    Ok((cert_pem, key_pem))
+}
+
 /// Generate a self-signed TLS certificate for HTTPS.
 /// WebCodecs API requires a secure context (HTTPS) when accessed from non-localhost.
 fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>), String> {
@@ -124,8 +202,11 @@ impl WebSocketServer {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
         log::info!("Attempting to bind HTTPS server to address: {}", addr);
         
-        // Generate self-signed TLS certificate
-        let (cert_pem, key_pem) = generate_self_signed_cert()?;
+        // Load persisted TLS certificate or generate a new one.
+        // Persisting the cert ensures browsers that previously accepted it
+        // can reconnect via wss:// after a server restart without needing
+        // to re-accept a new certificate.
+        let (cert_pem, key_pem) = load_or_generate_cert()?;
         let tls_config = RustlsConfig::from_pem(cert_pem, key_pem).await
             .map_err(|e| format!("Failed to configure TLS: {}", e))?;
         
