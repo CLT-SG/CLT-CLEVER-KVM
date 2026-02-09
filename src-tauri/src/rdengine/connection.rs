@@ -44,8 +44,8 @@ impl Default for ConnectionConfig {
         Self {
             monitor_id: 0,
             codec: VpxCodec::VP9,
-            framerate: 30,
-            bitrate_kbps: 4000,
+            framerate: 24,
+            bitrate_kbps: 1500,
             enable_audio: false,
         }
     }
@@ -175,11 +175,11 @@ impl ConnectionHandler {
         // the crossbeam channel and forwards to a tokio mpsc channel.
         // This avoids the spawn_blocking-per-iteration race where orphaned tasks
         // steal frames from the channel.
-        let (video_bridge_tx, mut video_bridge_rx) = mpsc::channel::<VideoFrame>(4);
+        let (video_bridge_tx, mut video_bridge_rx) = mpsc::channel::<VideoFrame>(2);
         let bridge_frame_rx = frame_rx.clone();
         tokio::task::spawn_blocking(move || {
             loop {
-                match bridge_frame_rx.recv_timeout(Duration::from_millis(100)) {
+                match bridge_frame_rx.recv_timeout(Duration::from_millis(50)) {
                     Ok(frame) => {
                         if video_bridge_tx.blocking_send(frame).is_err() {
                             // Receiver dropped (connection closed)
@@ -472,17 +472,17 @@ impl ConnectionHandler {
                     // Map quality names to presets
                     match quality.as_str() {
                         "high" => {
-                            qos.lock().set_fps(60);
-                            qos.lock().set_bitrate(8000);
+                            qos.lock().set_fps(30);
+                            qos.lock().set_bitrate(4000);
                         }
                         "low" => {
                             qos.lock().set_fps(15);
-                            qos.lock().set_bitrate(1500);
+                            qos.lock().set_bitrate(1000);
                         }
                         _ => {
                             // "balanced" / default
-                            qos.lock().set_fps(30);
-                            qos.lock().set_bitrate(4000);
+                            qos.lock().set_fps(24);
+                            qos.lock().set_bitrate(1500);
                         }
                     }
                 }

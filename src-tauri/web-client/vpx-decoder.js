@@ -328,7 +328,8 @@ class VpxDecoder {
 
         try {
             // Check for decoder queue buildup — drop frames if too many queued
-            if (this.decoder.decodeQueueSize > 3) {
+            // Hardware decoders can drain queues sub-millisecond, so allow a higher threshold
+            if (this.decoder.decodeQueueSize > 8) {
                 this.stats.framesDropped++;
                 return false;
             }

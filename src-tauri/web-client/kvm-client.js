@@ -12,7 +12,7 @@ class KVMClient {
         this.latency = 0;
         this.lastPingTime = 0;
         this.pingInterval = null;
-        this.qualityLevel = 85;
+        this.qualityLevel = 50;
         this.availableMonitors = [];
         this.currentMonitor = config.monitor;
         this.currentCodec = "h264"; // Use H.264 for low latency hardware-accelerated streaming
@@ -28,6 +28,10 @@ class KVMClient {
         this.vpxDecoder = null;
         this.serverCodec = 'vp9'; // Will be updated from server_info
         this.protocolVersion = 1; // v2 = rdengine binary protocol
+
+        // rAF-based frame rendering for VP9 (vsync-aligned)
+        this._pendingVpxFrame = null;
+        this._vpxRafId = null;
         
         // Canvas for frame rendering
         this.decoderCanvas = null;
@@ -123,15 +127,32 @@ class KVMClient {
         }
     }
 
-    // Handle decoded VP8/VP9 frame
+    // Handle decoded VP8/VP9 frame with requestAnimationFrame for vsync-aligned rendering
     handleVpxFrame(frame) {
         if (!this.realCanvas || !this.realCtx) {
             this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
         }
         
         if (frame instanceof VideoFrame) {
-            this.realCtx.drawImage(frame, 0, 0);
-            frame.close();
+            // Drop any previous pending frame that hasn't been rendered yet
+            // (we always want the newest frame, not old queued ones)
+            if (this._pendingVpxFrame) {
+                this._pendingVpxFrame.close();
+            }
+            this._pendingVpxFrame = frame;
+
+            // Schedule rendering on the next display vsync if not already scheduled
+            if (!this._vpxRafId) {
+                this._vpxRafId = requestAnimationFrame(() => {
+                    this._vpxRafId = null;
+                    const f = this._pendingVpxFrame;
+                    if (f) {
+                        this._pendingVpxFrame = null;
+                        this.realCtx.drawImage(f, 0, 0);
+                        f.close();
+                    }
+                });
+            }
         }
         
         this.updateFrameStats();
@@ -211,7 +232,7 @@ class KVMClient {
         // Adaptive quality system
         this.adaptiveQuality = {
             enabled: true,
-            currentLevel: 'high',  // high, medium, low
+            currentLevel: 'low',  // high, medium, low — default low for maximum smoothness
             performanceHistory: [],
             lastAdjustment: 0,
             adjustmentInterval: 2000  // Adjust every 2 seconds max
@@ -245,7 +266,7 @@ class KVMClient {
         this.settingsPanel = document.querySelector('.settings-panel');
         
         // WebRTC quality tracking
-        this.currentQuality = 'medium';
+        this.currentQuality = 'low';
         this.adaptiveQuality = true;
         this.networkStats = {
             bandwidth: 0,
@@ -2414,20 +2435,19 @@ class KVMClient {
         
         let newLevel = this.adaptiveQuality.currentLevel;
         
-        // Determine quality adjustment needed
-        if (processingTime > thresholds.poor || dropRate > 5 || fps < 45) {
-            // Performance is poor - reduce quality
+        // Determine quality adjustment needed — bias toward LOW for smoothness
+        if (processingTime > thresholds.good || dropRate > 3 || fps < 20) {
+            // Performance is not great - reduce quality
             if (this.adaptiveQuality.currentLevel === 'high') {
                 newLevel = 'medium';
             } else if (this.adaptiveQuality.currentLevel === 'medium') {
                 newLevel = 'low';
             }
-        } else if (processingTime < thresholds.excellent && dropRate < 1 && fps >= 58) {
-            // Performance is excellent - can increase quality
+        } else if (processingTime < thresholds.excellent && dropRate < 0.5 && fps >= 22) {
+            // Performance is excellent for sustained period - cautiously increase
+            // Only go up to medium, never auto-promote to high
             if (this.adaptiveQuality.currentLevel === 'low') {
                 newLevel = 'medium';
-            } else if (this.adaptiveQuality.currentLevel === 'medium') {
-                newLevel = 'high';
             }
         }
         
@@ -2459,11 +2479,9 @@ class KVMClient {
         
         // Send quality preference to server if connection exists
         if (this.connected && this.ws.readyState === WebSocket.OPEN) {
-            const qualityMap = { low: 65, medium: 80, high: 95 };
             this.ws.send(JSON.stringify({
                 type: 'quality_update',
-                quality: qualityMap[level],
-                adaptive: true
+                quality: level
             }));
         }
     }
@@ -2701,7 +2719,7 @@ class KVMClient {
     switchQuality(quality) {
         if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
             this.websocket.send(JSON.stringify({
-                type: 'quality_change',
+                type: 'quality_update',
                 quality: quality
             }));
             
@@ -2715,15 +2733,15 @@ class KVMClient {
         if (!this.config.adaptiveQuality) return;
         
         const stats = this.networkStats;
-        let recommendedQuality = 'medium';
+        let recommendedQuality = 'low';
         
-        // High quality: Good bandwidth (>6 Mbps), low latency (<50ms), minimal packet loss (<1%)
-        if (stats.bandwidth > 6000 && stats.latency < 50 && stats.packetLoss < 1.0) {
+        // High quality: Only under excellent conditions
+        if (stats.bandwidth > 10000 && stats.latency < 20 && stats.packetLoss < 0.5) {
             recommendedQuality = 'high';
         }
-        // Low quality: Poor conditions
-        else if (stats.bandwidth < 2000 || stats.latency > 200 || stats.packetLoss > 5.0) {
-            recommendedQuality = 'low';
+        // Medium quality: Good conditions
+        else if (stats.bandwidth > 4000 && stats.latency < 40 && stats.packetLoss < 2.0) {
+            recommendedQuality = 'medium';
         }
         
         if (recommendedQuality !== this.currentQuality) {

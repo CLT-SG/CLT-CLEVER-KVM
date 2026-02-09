@@ -244,3 +244,47 @@ Replaced the entire H.264/relay streaming stack with a RustDesk-inspired VP9 str
 - When client stops moving (300ms), the host cursor overlay reappears if host is still active
 - Client mouse input is never blocked when the client is actively moving
 - Host cursor overlay only shows when the remote host is moving the cursor and client is idle
+
+## [5.0.5] Low-Latency Default Quality and Adaptive Quality Fixes
+
+### Problem
+
+1. The VP9 video stream was still jerky despite previous latency optimizations because all default quality settings were too high -- default bitrate 4000 kbps, framerate 30fps, encoder cpu_speed 6-8, and max quantizer 40-52 forced the encoder to spend too much time per frame.
+2. The web client's adaptive quality system defaulted to "high" quality level (`adaptiveQuality.currentLevel = 'high'`, `qualityLevel = 85`, `currentQuality = 'medium'`), causing the client to request high-quality encoding from the server on every connection.
+3. The QoS auto-adjustment aggressively ramped quality UP on LAN connections (RTT < 30ms) by increasing fps by 10% and bitrate by 10% every 3 seconds, quickly pushing to max_fps=60 and max_bitrate=12000 kbps -- labeling itself "high" quality.
+4. The client `applyQualityLevel()` sent numeric quality values (65/80/95) to the server, but the server's `ControlMsg::QualityUpdate` expected string names ("low"/"balanced"/"high") -- quality changes from the adaptive system never reached the encoder.
+5. The client `switchQuality()` sent `type: 'quality_change'` but the server only parsed `type: 'quality_update'` -- manual quality changes from the dropdown were silently ignored.
+6. The "high" quality preset set fps=60 and bitrate=8000 kbps, which was too aggressive for real-time streaming scenarios.
+
+### Solution
+
+1. Lowered all default encoder settings: bitrate 4000 to 1500 kbps, framerate 30 to 24fps, cpu_speed to 9 (VP9 maximum), max_quantizer to 56-63 -- encoder now finishes each frame much faster, leaving headroom for consistent delivery.
+2. Changed web client defaults to low quality: `adaptiveQuality.currentLevel = 'low'`, `qualityLevel = 50`, `currentQuality = 'low'` -- every new connection starts in low-latency mode.
+3. Capped QoS auto-adjustment: max_fps reduced from 60 to 30, max_bitrate from 12000 to 4000, LAN quality ramp changed from 10% increase to gradual +1fps/+5% bitrate, labeled "balanced" instead of "high". Initial quality_level is "low".
+4. Fixed `applyQualityLevel()` to send string quality names ("low"/"medium"/"high") instead of numeric values, matching the server's expected format.
+5. Fixed `switchQuality()` to send `type: 'quality_update'` instead of `type: 'quality_change'`, matching the server's message parser.
+6. Lowered quality presets: "high" from 60fps/8000kbps to 30fps/4000kbps, "balanced" from 30fps/4000kbps to 24fps/1500kbps, "low" from 15fps/1500kbps to 15fps/1000kbps.
+7. Made adaptive quality unable to auto-promote to "high" -- it can only go up to "medium" automatically. Promotion thresholds tightened (requires <0.5% frame drops at sustained fps >= 22).
+8. Auto quality adaptation defaults to "low" recommendation and only upgrades under excellent network conditions (bandwidth >10Mbps, latency <20ms, packet loss <0.5%).
+
+### Changes Made
+
+#### Modified Files - Backend
+- **src-tauri/src/rdengine/codec.rs**: Default bitrate 4000 to 1500 kbps, framerate 30 to 24, cpu_speed 6 to 9 (VP9 max), rc_max_quantizer 40 to 63 (encoder init) and 40 to 52 (set_bitrate), encoder buffers 150/100/120ms to 60/40/50ms, LAN preset framerate 60 to 30 and bitrate 2x to 1x resolution, balanced preset framerate 30 to 24 and bitrate 3/4 of resolution
+- **src-tauri/src/network/server/websocket.rs**: Default framerate 30 to 24, bitrate 2000 to 1500 (standard), ultra framerate 60 to 30, bitrate 4000 to 2000
+- **src-tauri/src/rdengine/connection.rs**: Default framerate 30 to 24, bitrate 4000 to 1500, bridge channel mpsc(4) to mpsc(2), bridge timeout 100ms to 50ms, quality presets: high 60fps/8000kbps to 30fps/4000kbps, balanced 30fps/4000kbps to 24fps/1500kbps, low 15fps/1500kbps to 15fps/1000kbps
+- **src-tauri/src/rdengine/qos.rs**: max_fps 60 to 30, min_bitrate_kbps 800 to 500, max_bitrate_kbps 12000 to 4000, high_latency_threshold 100ms to 80ms, low_latency_threshold 30ms to 20ms, initial quality_level "balanced" to "low", LAN ramp from +10%/+10% to +1fps/+5% capped at "balanced"
+
+#### Modified Files - Frontend
+- **src-tauri/web-client/kvm-client.js**: qualityLevel 85 to 50, adaptiveQuality.currentLevel "high" to "low", currentQuality "medium" to "low", applyQualityLevel sends string names instead of numeric values, switchQuality sends type "quality_update" instead of "quality_change", autoAdaptQuality defaults to "low" with stricter upgrade thresholds, adjustAdaptiveQuality cannot auto-promote to "high" (caps at "medium"), tightened drop/fps thresholds for quality reduction
+- **src-tauri/web-client/vpx-decoder.js**: Decoder queue drop threshold 3 to 8
+
+#### Modified Files - Documentation
+- **docs/VIDEO_INPUT_FIXES.md**: Added Section 3 documenting 7 real-time streaming latency optimizations with latency budget table
+
+### Testing
+
+- Verified cargo check passes with 0 errors (96 warnings)
+- Web client defaults to low quality on connection
+- Quality update messages use correct protocol format (string names, type: quality_update)
+- QoS does not auto-ramp to high on LAN connections

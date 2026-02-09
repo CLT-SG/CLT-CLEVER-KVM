@@ -2,6 +2,33 @@
 
 ## Version History
 
+## [5.0.5] - 2026-02-09
+
+### Low-Latency Default Quality and Adaptive Quality Fixes
+
+### Bug Fixes
+- **Quality Update Protocol Mismatch**: Client `applyQualityLevel()` sent numeric quality values (65/80/95) but server expected string names ("low"/"balanced"/"high") -- adaptive quality changes never reached the encoder
+- **Quality Change Message Type**: Client `switchQuality()` sent `type: 'quality_change'` but server only parsed `type: 'quality_update'` -- manual quality dropdown changes were silently ignored
+- **QoS Auto-Ramp to Max on LAN**: QoS controller aggressively increased fps by 10% and bitrate by 10% every 3 seconds on low-latency LAN connections (RTT < 30ms), pushing to max_fps=60 and max_bitrate=12000 kbps and labeling quality as "high"
+- **Client Default Quality Too High**: Web client initialized with `adaptiveQuality.currentLevel = 'high'`, `qualityLevel = 85`, and `currentQuality = 'medium'` -- every connection started requesting high-quality encoding
+
+### Improvements
+- **Low-Latency Encoder Defaults**: Default bitrate reduced from 4000 to 1500 kbps, framerate from 30 to 24fps, cpu_speed increased to 9 (VP9 maximum), max_quantizer raised to 56-63 for faster per-frame encoding
+- **Low Quality Default**: Web client now defaults to low quality level on every connection for maximum streaming smoothness
+- **Conservative QoS Adjustment**: QoS max_fps capped at 30, max_bitrate at 4000 kbps, LAN quality ramp changed from +10% to +1fps/+5% bitrate, initial quality level set to "low"
+- **Capped Auto-Promotion**: Adaptive quality system can no longer auto-promote to "high" -- maximum auto-promotion is "medium", requires sustained excellent performance (<0.5% drops, fps >= 22)
+- **Stricter Quality Upgrade Thresholds**: Auto quality only recommends "high" under excellent conditions (bandwidth >10Mbps, latency <20ms, packet loss <0.5%)
+- **Lowered Quality Presets**: "high" from 60fps/8000kbps to 30fps/4000kbps, "balanced" from 30fps/4000kbps to 24fps/1500kbps, "low" bitrate from 1500 to 1000 kbps
+
+### Technical Changes
+- **src-tauri/src/rdengine/codec.rs**: Default bitrate 1500 kbps, framerate 24, cpu_speed 9, rc_max_quantizer 63 (init) / 52 (set_bitrate), encoder buffers 60/40/50ms, LAN preset 30fps/1x bitrate, balanced preset 24fps/0.75x bitrate
+- **src-tauri/src/network/server/websocket.rs**: Standard config 24fps/1500kbps, ultra config 30fps/2000kbps
+- **src-tauri/src/rdengine/connection.rs**: Default 24fps/1500kbps, mpsc(2) bridge channel, 50ms bridge timeout, preset adjustments (high: 30fps/4000kbps, balanced: 24fps/1500kbps, low: 15fps/1000kbps)
+- **src-tauri/src/rdengine/qos.rs**: max_fps 30, min_bitrate 500, max_bitrate 4000, thresholds 80ms/20ms, initial quality "low", LAN ramp +1fps/+5% capped at "balanced"
+- **src-tauri/web-client/kvm-client.js**: qualityLevel 50, adaptiveQuality.currentLevel "low", currentQuality "low", applyQualityLevel sends string names, switchQuality uses type "quality_update", auto-adapt caps at "medium", stricter thresholds
+- **src-tauri/web-client/vpx-decoder.js**: Decoder queue drop threshold 3 to 8
+- **docs/VIDEO_INPUT_FIXES.md**: Added Section 3 with 7 real-time streaming latency optimizations and latency budget table
+
 ## [5.0.3] - 2026-02-09
 
 ### Host Cursor Synchronization and Control Priority

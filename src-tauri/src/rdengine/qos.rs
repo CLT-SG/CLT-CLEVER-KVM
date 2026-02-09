@@ -34,12 +34,12 @@ impl Default for QosConfig {
     fn default() -> Self {
         Self {
             min_fps: 5,
-            max_fps: 60,
-            min_bitrate_kbps: 800,
-            max_bitrate_kbps: 12000,
+            max_fps: 30,
+            min_bitrate_kbps: 500,
+            max_bitrate_kbps: 4000,
             adjustment_interval_secs: 3.0,
-            high_latency_threshold_ms: 100,
-            low_latency_threshold_ms: 30,
+            high_latency_threshold_ms: 80,
+            low_latency_threshold_ms: 20,
         }
     }
 }
@@ -75,7 +75,7 @@ impl QualityControl {
             last_adjustment: Instant::now(),
             frames_sent: AtomicU64::new(0),
             frames_acked: AtomicU64::new(0),
-            quality_level: "balanced".to_string(),
+            quality_level: "low".to_string(),
             config,
         }
     }
@@ -145,10 +145,11 @@ impl QualityControl {
             self.quality_level = "low".to_string();
             (fps, bitrate)
         } else if rtt < self.config.low_latency_threshold_ms && rtt > 0 {
-            // Low latency (LAN) — increase quality
-            let fps = (old_fps * 11 / 10).min(self.config.max_fps); // Increase by 10%
-            let bitrate = (old_bitrate * 11 / 10).min(self.config.max_bitrate_kbps);
-            self.quality_level = "high".to_string();
+            // Low latency (LAN) — keep stable, don't ramp up aggressively
+            // Only increase slightly and cap at moderate levels for smooth streaming
+            let fps = (old_fps + 1).min(self.config.max_fps);
+            let bitrate = (old_bitrate * 105 / 100).min(self.config.max_bitrate_kbps);
+            self.quality_level = "balanced".to_string();
             (fps, bitrate)
         } else {
             self.quality_level = "balanced".to_string();

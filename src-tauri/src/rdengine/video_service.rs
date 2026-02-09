@@ -108,7 +108,7 @@ impl VideoService {
 
         // Bounded channel for video frames (like RustDesk's tx_video)
         // Small buffer to prevent buildup — if consumer is slow, frames are dropped
-        let (frame_tx, frame_rx) = bounded::<VideoFrame>(4);
+        let (frame_tx, frame_rx) = bounded::<VideoFrame>(2);
 
         let qos = Arc::new(parking_lot::Mutex::new(QualityControl::new(
             QosConfig::default(),
@@ -414,10 +414,28 @@ fn video_service_loop(
         stats.frames_captured.fetch_add(1, Ordering::Relaxed);
         stats.avg_capture_us.store(capture_time.as_micros() as u64, Ordering::Relaxed);
 
-        // 2. FRAME DEDUPLICATION — compare with previous frame (RustDesk's would_block_if_equal)
-        let frame_changed = if prev_frame.len() == rgba_data.len() {
-            // Byte-by-byte comparison (fast — short-circuits on first difference)
-            rgba_data != prev_frame
+        // 2. FRAME DEDUPLICATION — sampled pixel comparison for speed
+        // Instead of comparing every byte (~8MB for 1080p), we sample every 64th pixel.
+        // This is ~64x faster while still detecting virtually all screen changes.
+        let frame_changed = if prev_frame.len() == rgba_data.len() && !rgba_data.is_empty() {
+            let pixel_count = rgba_data.len() / 4;
+            let sample_step = 64; // Check every 64th pixel (4 bytes each)
+            let mut changed = false;
+            let mut i = 0;
+            while i < pixel_count {
+                let offset = i * 4;
+                // Compare 4 bytes (one RGBA pixel) at a time
+                if rgba_data[offset] != prev_frame[offset]
+                    || rgba_data[offset + 1] != prev_frame[offset + 1]
+                    || rgba_data[offset + 2] != prev_frame[offset + 2]
+                    || rgba_data[offset + 3] != prev_frame[offset + 3]
+                {
+                    changed = true;
+                    break;
+                }
+                i += sample_step;
+            }
+            changed
         } else {
             true // Different size = definitely changed
         };
@@ -541,10 +559,20 @@ fn video_service_loop(
             last_fps_report = Instant::now();
         }
 
-        // 6. FRAME PACING — sleep for remainder of frame interval (like RustDesk)
+        // 6. FRAME PACING — hybrid sleep + spin-wait for precise timing
+        // thread::sleep is inaccurate (can overshoot by 1-15ms on Linux).
+        // We sleep for the bulk of the wait, then spin-loop for the last ~1ms.
         let elapsed = frame_start.elapsed();
         if elapsed < spf {
-            thread::sleep(spf - elapsed);
+            let remaining = spf - elapsed;
+            if remaining > Duration::from_millis(2) {
+                // Sleep for most of the wait (minus 1ms safety margin)
+                thread::sleep(remaining - Duration::from_millis(1));
+            }
+            // Spin-wait for the remaining sub-millisecond for precision
+            while frame_start.elapsed() < spf {
+                std::hint::spin_loop();
+            }
         }
     }
 

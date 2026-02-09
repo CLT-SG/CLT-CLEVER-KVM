@@ -100,8 +100,8 @@ async fn handle_h264_socket(
     let rd_config = ConnectionConfig {
         monitor_id: monitor,
         codec: VpxCodec::VP9,
-        framerate: 30,
-        bitrate_kbps: 2000,
+        framerate: 24,
+        bitrate_kbps: 1500,
         enable_audio,
     };
 
@@ -133,8 +133,8 @@ async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<()
     let config = ConnectionConfig {
         monitor_id: monitor,
         codec: VpxCodec::VP9,
-        framerate: 60,
-        bitrate_kbps: 4000,
+        framerate: 30,
+        bitrate_kbps: 2000,
         enable_audio: false,
     };
 
