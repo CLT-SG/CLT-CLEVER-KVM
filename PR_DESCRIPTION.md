@@ -1,5 +1,43 @@
 # Replace H.264/Relay Architecture with RDEngine VP9 Streaming and HTTPS
 
+## [5.0.8] Replace H.264 Codec Defaults with VP9 Across UI and Server
+
+### Problem
+
+1. The web client template, codec dropdown, KVM_CONFIG, and server handlers all defaulted to H.264, contradicting the RDEngine VP9/WebRTC architecture documented in RDENGINE_STREAMING_IMPLEMENTATION.md.
+2. The codec dropdown in the OSD was hardcoded to a single disabled "H.264 (Hardware)" option, preventing users from selecting VP8 or VP9.
+3. The `KVM_CONFIG.codec` was hardcoded to `"h264"` instead of using the server-provided `{{codec}}` template variable, so the server's codec preference was ignored.
+4. Server-side handlers (`kvm_client_handler`, `ws_handler`, `ws_handler_with_stop`) all defaulted to `"h264"` when no codec parameter was provided.
+5. The codec dropdown had no change event listener, making codec switching impossible even if options were present.
+6. VPX decoder was initialized after H.264 decoder despite being the primary codec, and stale H.264 references throughout kvm-client.js caused confusion.
+
+### Solution
+
+1. Changed all default codec values from `"h264"` to `"vp9"` across server handlers, client config, and fallback defaults.
+2. Replaced the disabled single-option H.264 dropdown with an enabled VP9/VP8 selector.
+3. Changed `KVM_CONFIG.codec` from hardcoded `"h264"` to dynamic `"{{codec}}"` so the server template variable is used.
+4. Added a codec dropdown change event listener that updates `currentCodec`/`serverCodec` and triggers a WebSocket reconnect to apply the new codec.
+5. Reordered decoder initialization to prioritize VPX over H.264 (legacy fallback).
+6. Updated all stale H.264 comments and defaults throughout the codebase while retaining H.264 decoder as a functional legacy fallback.
+
+### Changes Made
+
+#### Modified Files - Backend
+- **src-tauri/src/network/server/handlers.rs**: Changed default codec from `"h264"` to `"vp9"` in `kvm_client_handler`, `ws_handler`, and `ws_handler_with_stop`; updated comments
+
+#### Modified Files - Frontend
+- **src-tauri/web-client/kvm-template.html**: Changed video element comment to VP9/WebRTC, replaced disabled H.264 dropdown with VP9/VP8 options, changed `KVM_CONFIG.codec` from `"h264"` to `"{{codec}}"`, reordered script tags to load vpx-decoder.js before h264-decoder.js, marked h264-decoder.js as legacy fallback
+- **src-tauri/web-client/kvm-client.js**: Changed `currentCodec` default from `"h264"` to `config.codec || "vp9"`, reordered `initializeVpxDecoder()` before `initializeH264Decoder()`, added codec dropdown change event listener with reconnect, updated `handleServerInfo` default codec to `"vp9"`, updated `handleStreamInfo` to sync dropdown to `currentCodec`, updated `handleWebRTCFrame` default codec to `"vp9"`, updated fallback config default to `"vp9"`, replaced stale H.264 comments throughout
+- **src-tauri/web-client/kvm-template-parts.js**: Changed codec dropdown initialization from hardcoded `"h264"` to `config.codec || "vp9"`, updated comment
+
+### Testing
+
+- Codec dropdown displays VP9 (WebRTC) and VP8 (WebRTC) options
+- Selecting VP8 triggers WebSocket reconnect with codec=vp8 in URL
+- Server defaults to vp9 when no codec parameter is provided
+- KVM_CONFIG.codec reflects server template variable
+- H.264 legacy fallback path remains functional for rdengine codec ID 0x03
+
 ## [5.0.7] WebRTC DataChannel Transport for Low-Latency Streaming
 
 ### Problem

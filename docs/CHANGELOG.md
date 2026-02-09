@@ -2,6 +2,30 @@
 
 ## Version History
 
+## [5.0.8] - 2026-02-09
+
+### Replace H.264 Codec Defaults with VP9 Across UI and Server
+
+### Bug Fixes
+- **Hardcoded H.264 Default Codec**: Web client template, KVM_CONFIG, and all server handlers defaulted to H.264 despite the RDEngine architecture using VP9/WebRTC for streaming
+- **Disabled Codec Dropdown**: The codec dropdown in the OSD was hardcoded to a single disabled "H.264 (Hardware)" option, preventing codec selection
+- **Ignored Server Codec Template Variable**: `KVM_CONFIG.codec` was hardcoded to `"h264"` instead of using the server-provided `{{codec}}` template variable
+- **No Codec Switching**: The codec dropdown had no change event listener, making runtime codec switching impossible
+- **Wrong Decoder Priority**: H.264 decoder was initialized before VPX decoder despite VP9 being the primary codec
+
+### Improvements
+- **VP9 Default Codec**: All default codec values changed from `"h264"` to `"vp9"` across server handlers, client config, and fallback defaults
+- **VP9/VP8 Codec Dropdown**: Replaced disabled H.264 dropdown with enabled VP9 (WebRTC) and VP8 (WebRTC) options in the OSD
+- **Dynamic Codec Config**: `KVM_CONFIG.codec` now uses the server template variable `"{{codec}}"` instead of a hardcoded value
+- **Runtime Codec Switching**: Added codec dropdown change event listener that updates codec state and triggers WebSocket reconnect to apply the new codec
+- **VPX Decoder Priority**: VPX decoder initialized before H.264 decoder; H.264 retained as legacy fallback
+
+### Technical Changes
+- **src-tauri/src/network/server/handlers.rs**: Default codec changed from `"h264"` to `"vp9"` in `kvm_client_handler`, `ws_handler`, and `ws_handler_with_stop`
+- **src-tauri/web-client/kvm-template.html**: Video element comment updated, codec dropdown replaced with VP9/VP8 options, `KVM_CONFIG.codec` changed to `"{{codec}}"`, script load order changed (vpx-decoder.js first, h264-decoder.js as legacy fallback)
+- **src-tauri/web-client/kvm-client.js**: `currentCodec` default changed to `config.codec || "vp9"`, decoder init order swapped, codec dropdown change listener added, `handleServerInfo`/`handleStreamInfo`/`handleWebRTCFrame` defaults changed to `"vp9"`, fallback config default changed to `"vp9"`, stale H.264 comments updated
+- **src-tauri/web-client/kvm-template-parts.js**: Codec dropdown initialization changed from `"h264"` to `config.codec || "vp9"`
+
 ## [5.0.7] - 2026-02-09
 
 ### WebRTC DataChannel Transport for Low-Latency Streaming

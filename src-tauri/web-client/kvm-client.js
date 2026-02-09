@@ -15,11 +15,11 @@ class KVMClient {
         this.qualityLevel = 50;
         this.availableMonitors = [];
         this.currentMonitor = config.monitor;
-        this.currentCodec = "h264"; // Use H.264 for low latency hardware-accelerated streaming
+        this.currentCodec = config.codec || "vp9"; // VP9 via WebRTC DataChannel (RDEngine primary codec)
         this.videoQueue = [];
         this.showStats = false;
         
-        // H.264 decoder for low-latency streaming
+        // H.264 decoder (legacy fallback)
         this.h264Decoder = null;
         this.h264SPS = null;
         this.h264PPS = null;
@@ -105,8 +105,8 @@ class KVMClient {
         this.clientActiveTimeoutMs = 300; // ms of client inactivity before host cursor can reappear
 
         this.initializeElements();
-        this.initializeH264Decoder();
         this.initializeVpxDecoder();
+        this.initializeH264Decoder(); // Legacy fallback
         this.initializeFrameTracking();
         this.setupEventListeners();
         this.connect();
@@ -262,7 +262,7 @@ class KVMClient {
     }
 
     initializeElements() {
-        // Main elements - H.264 uses canvas for display with WebCodecs decoder
+        // Main elements - VP9/VP8 uses canvas for display with WebCodecs decoder
         this.videoScreen = document.getElementById('video-screen');
         this.canvasLayer = document.getElementById('canvas-layer'); // Used only for input handling
         this.audioElement = document.getElementById('remote-audio');
@@ -407,7 +407,22 @@ class KVMClient {
             });
         }
 
-        // Codec dropdown is disabled - using H.264 only
+        // Codec dropdown - VP9/VP8 selection
+        if (this.codecDropdown) {
+            this.codecDropdown.addEventListener('change', (e) => {
+                const newCodec = e.target.value;
+                if (newCodec !== this.currentCodec) {
+                    this.currentCodec = newCodec;
+                    this.serverCodec = newCodec;
+                    console.log(`Switching codec to: ${newCodec}`);
+                    this.showNotification(`Switched to ${newCodec.toUpperCase()}`, 2000);
+                    // Reconnect to apply new codec
+                    if (this.ws) {
+                        this.ws.close();
+                    }
+                }
+            });
+        }
 
         if (this.qualityDropdown) {
             this.qualityDropdown.addEventListener('change', (e) => {
@@ -1437,7 +1452,7 @@ class KVMClient {
         }
         
         // Detect server codec
-        const serverCodec = (data.codec || 'h264').toLowerCase();
+        const serverCodec = (data.codec || 'vp9').toLowerCase();
         this.serverCodec = serverCodec;
         this.currentCodec = serverCodec;
         console.log('Server codec:', serverCodec);
@@ -1529,10 +1544,10 @@ class KVMClient {
             this.osdTitle.textContent = `${serverInfo.hostname} - Monitor ${serverInfo.current_monitor} (${videoConfig.width}x${videoConfig.height})`;
         }
         
-        // Keep the codec that was initialized - always H.264
+        // Update codec dropdown to match server codec
         console.log('Using codec:', this.currentCodec);
         if (this.codecDropdown) {
-            this.codecDropdown.value = 'h264';
+            this.codecDropdown.value = this.currentCodec;
         }
         
         // Initialize canvas size
@@ -2248,7 +2263,7 @@ class KVMClient {
         this.realCtx.putImageData(imageData, 0, 0);
     }
 
-    // H.264 is the only supported codec - no WebM/VP8 fallback needed
+    // VP9 is the primary codec via RDEngine — H.264 legacy fallback retained
 
     parseAndRenderFrame(arrayBuffer) {
         const now = performance.now();
@@ -2907,9 +2922,9 @@ class KVMClient {
                 return;
             }
 
-            // H.264 is the only supported codec
+            // Default to VP9 codec if not specified
             if (!data.codec) {
-                data.codec = 'h264';
+                data.codec = 'vp9';
             }
 
             // Skip non-keyframes if we haven't received a keyframe yet
@@ -2921,7 +2936,7 @@ class KVMClient {
 
             if (data.is_keyframe) {
                 this.needsKeyframe = false;
-                console.log('Received H.264 keyframe, enabling playback');
+                console.log('Received keyframe, enabling playback');
             }
 
             // Process the frame via standard video frame handler
@@ -3175,7 +3190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         remoteOnly: false,
         encryption: false,
         monitor: 0,
-        codec: "h264"
+        codec: "vp9"
     };
 
     // Initialize template components

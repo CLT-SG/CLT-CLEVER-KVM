@@ -46,8 +46,8 @@ class TemplateInitializer {
         // Initialize codec dropdown with correct value
         const codecDropdown = document.getElementById('codec-dropdown');
         if (codecDropdown && config.codec) {
-            // H.264 is the only supported codec
-            codecDropdown.value = 'h264';
+            // VP9 is the primary codec (RDEngine via WebRTC DataChannel)
+            codecDropdown.value = config.codec || 'vp9';
         }
     }
     

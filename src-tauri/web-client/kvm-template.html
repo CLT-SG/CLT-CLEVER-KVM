@@ -9,7 +9,7 @@
 <body>
     <!-- Main screen container -->
     <div id="screen">
-        <!-- Video element for H.264 streaming -->
+        <!-- Video element for VP9/WebRTC streaming (RDEngine) -->
         <video id="video-screen" autoplay playsinline muted></video>
         
         <!-- Canvas layer for input handling only (transparent overlay) -->
@@ -42,8 +42,9 @@
                         <option value="0">Primary Monitor</option>
                     </select>
                     
-                    <select id="codec-dropdown" class="osd-select" disabled>
-                        <option value="h264" selected>H.264 (Hardware)</option>
+                    <select id="codec-dropdown" class="osd-select">
+                        <option value="vp9" selected>VP9 (WebRTC)</option>
+                        <option value="vp8">VP8 (WebRTC)</option>
                     </select>
                     
                     <select id="quality-dropdown" class="osd-select">
@@ -180,11 +181,10 @@
             remoteOnly: {{remote_only}},
             encryption: {{encryption}},
             monitor: {{monitor}},
-            codec: "h264"
+            codec: "{{codec}}"
         };
     </script>
     <script src="/static/kvm-template-parts.js"></script>
-    <script src="/static/h264-decoder.js"></script>
     <script src="/static/vpx-decoder.js"></script>
     <script src="/static/webrtc-transport.js"></script>
     <script src="/static/kvm-client.js"></script>
