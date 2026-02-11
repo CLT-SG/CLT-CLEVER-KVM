@@ -5,60 +5,19 @@
       <p class="status-text">{{ serverStatus ? 'VNC Server Running' : 'VNC Server Stopped' }}</p>
     </div>
     
-    <div v-if="serverStatus && vncInfo" class="server-info">
-      <h4>VNC Connection Information</h4>
-      <div class="info-item">
-        <span class="label">VNC URL:</span>
-        <div class="url-display">
-          <code class="url">{{ vncInfo.vnc_url }}</code>
-          <button class="copy-button" @click="copyUrl" title="Copy VNC URL">Copy</button>
-        </div>
+    <div v-if="serverStatus" class="server-info">
+      <div class="info-header">
+        <span class="info-label">Direct Access URL</span>
+        <span class="info-badge">Local Network</span>
       </div>
-      
-      <div v-if="vncInfo.websockify_url" class="info-item">
-        <span class="label">WebSocket URL:</span>
-        <div class="url-display">
-          <code class="url">{{ vncInfo.websockify_url }}</code>
-          <button class="copy-button" @click="copyWebsockifyUrl" title="Copy WebSocket URL">Copy</button>
-        </div>
-        <span class="url-note">For NoVNC browser-based clients</span>
+      <div class="url-display">
+        <span class="url">{{ displayUrl }}</span>
+        <button class="icon-button" @click="openUrl" title="Open in browser">Open</button>
+        <button class="icon-button" @click="copyUrl" title="Copy URL">Copy</button>
       </div>
-      
-      <div v-if="vncInfo.audio_url" class="info-item">
-        <span class="label">Audio URL:</span>
-        <div class="url-display">
-          <code class="url">{{ vncInfo.audio_url }}</code>
-          <button class="copy-button" @click="copyAudioUrl" title="Copy Audio URL">Copy</button>
-        </div>
-        <span class="url-note">Shared WebSocket audio stream (Opus encoded)</span>
-      </div>
-      
-      <div class="info-item">
-        <span class="label">Monitor:</span>
-        <span class="value">
-          {{ vncInfo.monitor_name || `Monitor ${vncInfo.monitor_id || 0}` }}
-          <span v-if="vncInfo.width && vncInfo.height"> ({{ vncInfo.width }}x{{ vncInfo.height }})</span>
-        </span>
-      </div>
-      
-      <div class="info-item">
-        <span class="label">Port:</span>
-        <span class="value">{{ vncInfo.port }}</span>
-      </div>
-      
-      <div v-if="vncInfo.clients_connected !== undefined" class="info-item">
-        <span class="label">Connected Clients:</span>
-        <span class="value">{{ vncInfo.clients_connected }}</span>
-      </div>
-      
-      <div class="connection-help">
-        <p><strong>How to connect:</strong></p>
-        <ul>
-          <li><strong>Desktop VNC clients:</strong> Use the VNC URL with TigerVNC, RealVNC, etc.</li>
-          <li v-if="vncInfo.websockify_url"><strong>Browser (NoVNC):</strong> Use the WebSocket URL</li>
-          <li v-if="vncInfo.audio_url"><strong>Audio:</strong> Separate WebSocket stream on port 6900</li>
-        </ul>
-      </div>
+      <p class="info-hint">
+        Use this URL to connect directly from devices on the same network
+      </p>
     </div>
 
     <div class="actions">
@@ -96,17 +55,12 @@ const props = defineProps({
   copyUrl: Function
 });
 
-function copyAudioUrl() {
-  if (props.vncInfo && props.vncInfo.audio_url) {
-    navigator.clipboard.writeText(props.vncInfo.audio_url);
-  }
-}
-
-function copyWebsockifyUrl() {
-  if (props.vncInfo && props.vncInfo.websockify_url) {
-    navigator.clipboard.writeText(props.vncInfo.websockify_url);
-  }
-}
+// Computed property to display the KVM URL
+// The backend already returns the full URL with https:// and /kvm path
+const displayUrl = computed(() => {
+  if (!props.serverUrl) return '';
+  return props.serverUrl;
+});
 </script>
 
 <style scoped>
@@ -141,103 +95,70 @@ function copyWebsockifyUrl() {
 }
 
 .server-info {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
   background-color: #f8f9fa;
   border-radius: 8px;
-  border: 1px solid #dee2e6;
+  border: 1px solid #e9ecef;
 }
 
-.server-info h4 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-  color: #2c3e50;
-  font-size: 1.1rem;
-}
-
-.info-item {
-  margin-bottom: 1rem;
+.info-header {
   display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
 }
 
-.info-item .label {
-  font-weight: 600;
-  min-width: 150px;
-  color: #495057;
+.info-label {
+  font-weight: 500;
+  color: #2c3e50;
 }
 
-.info-item .value {
-  color: #212529;
+.info-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  background: #e3f2fd;
+  color: #1976d2;
+  border-radius: 4px;
 }
 
 .url-display {
   display: flex;
   align-items: center;
-  background-color: #ffffff;
+  background-color: #fff;
   padding: 0.5rem;
   border-radius: 4px;
-  border: 1px solid #ced4da;
-  flex: 1;
-}
-
-.url-note {
-  display: block;
-  margin-top: 0.25rem;
-  margin-left: 150px;
-  font-size: 0.8rem;
-  color: #6c757d;
-  font-style: italic;
+  border: 1px solid #dee2e6;
 }
 
 .url {
   flex: 1;
-  font-family: 'Courier New', monospace;
+  font-family: monospace;
   font-size: 0.9rem;
   word-break: break-all;
-  background-color: #ffffff;
-  padding: 0.25rem;
+  color: #2c3e50;
 }
 
-.copy-button {
-  background-color: #007bff;
-  color: white;
-  border: none;
+.info-hint {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin: 0.5rem 0 0 0;
+}
+
+.icon-button {
+  background: #e9ecef;
+  border: 1px solid #dee2e6;
   cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 500;
+  font-size: 0.75rem;
   margin-left: 0.5rem;
-  padding: 0.4rem 0.75rem;
+  padding: 0.35rem 0.6rem;
   border-radius: 4px;
-  transition: background-color 0.2s;
+  color: #495057;
+  font-weight: 500;
 }
 
-.copy-button:hover {
-  background-color: #0056b3;
-}
-
-.connection-help {
-  margin-top: 1rem;
-  padding: 1rem;
-  background-color: #e7f3ff;
-  border-left: 3px solid #0066cc;
-  border-radius: 4px;
-}
-
-.connection-help p {
-  margin: 0.5rem 0;
-  font-size: 0.9rem;
-}
-
-.connection-help ul {
-  margin: 0.5rem 0;
-  padding-left: 1.5rem;
-  font-size: 0.9rem;
-}
-
-.connection-help li {
-  margin: 0.5rem 0;
+.icon-button:hover {
+  background-color: #dee2e6;
 }
 
 .actions {

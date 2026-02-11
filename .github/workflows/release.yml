@@ -52,10 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-14'
-            args: ''
-            rust-targets: ''
-          - platform: 'ubuntu-22.04'
+          - platform: 'ubuntu-latest'
             args: ''
             rust-targets: ''
           - platform: 'windows-2022'
@@ -74,9 +71,6 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          # Those targets are only used on macOS runners so it's in an `if` to slightly speed up the CI.
-          targets: ${{ matrix.rust-targets }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -84,16 +78,14 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libxdo-dev libxrandr-dev libxcb-randr0-dev
-
-      - name: Install dependencies (macOS only)
-        if: matrix.platform == 'macos-14'
-        run: |
-          # Set up environment for cross-compilation
-          echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
+          sudo apt-get install -y build-essential curl wget file libssl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libxcb-randr0-dev xdg-desktop-portal libpipewire-0.3-dev libopus-dev \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+            patchelf libxrandr-dev
 
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-2022'
@@ -109,8 +101,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          # macOS specific environment for universal builds
-          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'macos-14' && '10.13' || '' }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}

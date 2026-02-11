@@ -27,3 +27,8 @@ Cargo.lock
 *.sln
 *.sw?
 .env
+bin
+
+# relay server
+relay-server/targetrustdesk/
+rustdesk-bak/

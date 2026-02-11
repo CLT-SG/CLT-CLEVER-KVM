@@ -19,9 +19,9 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 
-const props = defineProps({
+defineProps({
   settings: Object,
   disabled: {
     type: Boolean,
@@ -32,13 +32,12 @@ const props = defineProps({
 defineEmits(['apply-preset']);
 
 const showPresets = ref(false);
-const selectedPreset = ref('default');
+const selectedPreset = ref('desktop');
 
 const presetOptions = {
-  default: { name: 'Default' },
-  highQuality: { name: 'High Quality' },
-  lowBandwidth: { name: 'Low Bandwidth' },
-  secure: { name: 'Secure' }
+  gaming: { name: 'Gaming (60 FPS)' },
+  desktop: { name: 'Desktop (Balanced)' },
+  lowBandwidth: { name: 'Low Bandwidth' }
 };
 </script>
 

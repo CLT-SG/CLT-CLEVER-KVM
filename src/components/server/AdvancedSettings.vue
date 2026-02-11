@@ -4,50 +4,31 @@
       {{ showAdvancedSettings ? '▲ Hide Advanced Settings' : '▼ Show Advanced Settings' }}
     </button>
   </div>
-  
+  git
   <div v-if="showAdvancedSettings" class="advanced-settings" :class="{ disabled: disabled }">
-    <div class="setting-group tls-section">
-      <h4>🔒 Security & Connectivity</h4>
-      <label>
-        <input type="checkbox" v-model="useTlsUrls" :disabled="disabled" @change="handleTlsToggle" />
-        Enable TLS/SSL (WSS) URLs for secure WebSocket connections
-      </label>
-      
-      <div class="info-box" :class="{ 'active': useTlsUrls }">
-        <p v-if="!useTlsUrls" class="info-text">
-          ⚠️ <strong>Currently using unsecured connections (ws://)</strong><br>
-          NoVNC and modern browsers require secure contexts (HTTPS/WSS) to function properly.
-        </p>
-        <p v-else class="info-text success">
-          ✅ <strong>Secure WebSocket URLs enabled (wss://)</strong><br>
-          Compatible with NoVNC and modern browsers in secure contexts.
-        </p>
-        
-        <div class="url-examples">
-          <p><strong>URL Format:</strong></p>
-          <ul>
-            <li v-if="!useTlsUrls">VNC WebSocket: <code>ws://hostname:6080/</code></li>
-            <li v-else>VNC WebSocket: <code>wss://hostname:6080/</code></li>
-            <li v-if="!useTlsUrls">Audio: <code>ws://hostname:6900/audio</code></li>
-            <li v-else>Audio: <code>wss://hostname:6900/audio</code></li>
-          </ul>
-          <p class="url-note">Note: Websockify runs on port 6080+, not the VNC port 5900+</p>
-        </div>
-        
-        <div class="tls-requirements">
-          <p><strong>⚙️ Requirements for WSS:</strong></p>
-          <ul>
-            <li>Reverse proxy (Nginx, Caddy, or HAProxy) with TLS termination</li>
-            <li>Valid SSL certificate (Let's Encrypt recommended)</li>
-            <li>Proxy must forward WebSocket connections to CLT-CLEVER-KVM</li>
-          </ul>
-          <p class="doc-link">
-            📖 See <strong>docs/TLS_SETUP.md</strong> for detailed configuration guide
-          </p>
-        </div>
+    <div class="setting-group">
+      <h4>Video Codec</h4>
+      <div class="codec-info">
+        <span class="codec-badge">VP9</span>
+        <span class="codec-description">Software encoding via libvpx (VP8/VP9)</span>
       </div>
     </div>
     
+    <div class="setting-group">
+      <h4>Bitrate &amp; Quality</h4>
+      <div class="slider-group">
+        <label for="video-bitrate">Video Bitrate: {{ settings.bitrate }} kbps</label>
+        <input type="range" id="video-bitrate" v-model.number="settings.bitrate"
+               min="1000" max="12000" step="500" :disabled="disabled" />
+      </div>
+      
+      <div class="slider-group">
+        <label for="framerate">Framerate: {{ settings.fps }} FPS</label>
+        <input type="range" id="framerate" v-model.number="settings.fps"
+               min="15" max="60" step="5" :disabled="disabled" />
+      </div>
+    </div>
+
     <div class="setting-group">
       <h4>🖥️ VNC Server Configuration</h4>
       <div class="config-grid">
@@ -187,8 +168,8 @@
     <div class="setting-group">
       <h4>VNC Audio Settings</h4>
       <label>
-        <input type="checkbox" v-model="settings.enableAudio" :disabled="disabled" @change="$emit('settings-changed')" />
-        Enable Audio Streaming (via WebSocket on port {{ settings.audioPort }})
+        <input type="checkbox" v-model="settings.allowRemoteInput" :disabled="disabled" />
+        Allow Remote Input (keyboard &amp; mouse)
       </label>
       
       <div v-if="settings.enableAudio" class="slider-group">
@@ -535,92 +516,27 @@ input:disabled {
   opacity: 0.6;
 }
 
-/* Configuration Grid Layout */
-.config-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  margin-top: 0.75rem;
-}
-
-@media (min-width: 768px) {
-  .config-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.config-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.config-item label {
-  font-weight: 500;
-  font-size: 0.9rem;
-  color: #495057;
-}
-
-.config-item input[type="number"],
-.config-item select {
-  padding: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 0.9rem;
-}
-
-.config-item input[type="range"] {
-  width: 100%;
-}
-
-.slider-container {
+.codec-info {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  padding: 0.5rem;
+  background-color: #e8f4fd;
+  border-radius: 4px;
+  border-left: 3px solid #3498db;
 }
 
-.slider-container input[type="range"] {
-  flex: 1;
-}
-
-.value-display {
-  min-width: 60px;
-  text-align: right;
-  font-weight: 500;
-  color: #495057;
-  font-size: 0.9rem;
-}
-
-.input-with-unit {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.input-with-unit input {
-  flex: 1;
-}
-
-.unit {
+.codec-badge {
+  background-color: #3498db;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-weight: bold;
   font-size: 0.85rem;
-  color: #666;
-  white-space: nowrap;
 }
 
-.checkbox-item {
-  flex-direction: row;
-  align-items: flex-start;
-}
-
-.checkbox-item label {
-  display: flex;
-  align-items: flex-start;
-  cursor: pointer;
-  font-weight: normal;
-}
-
-.checkbox-item input[type="checkbox"] {
-  margin-right: 0.5rem;
-  margin-top: 0.15rem;
+.codec-description {
+  color: #555;
+  font-size: 0.85rem;
 }
 </style>

@@ -11,6 +11,18 @@ export function useServer() {
   const loadingMonitors = ref(false);
   const vncInfo = ref(null);
 
+  // Relay server state
+  const relayStatus = reactive({
+    connected: false,
+    relayUrl: null,
+    relayHostname: null,
+    state: "disconnected",
+    autoReconnect: true,
+    reconnectAttempts: 0
+  });
+  const discoveredRelays = ref([]);
+  const relayLoading = ref(false);
+
   // Status check interval
   let statusCheckInterval = null;
 
@@ -23,7 +35,11 @@ export function useServer() {
 
   // VNC Server settings
   const settings = reactive({
-    enableAudio: true,
+    deltaEncoding: true,
+    adaptiveQuality: true,
+    encryptionEnabled: false,
+    useWebRTC: true,
+    hardwareAcceleration: true,
     selectedMonitor: 0,
     audioPort: 6900,
     autoStart: true,
@@ -31,57 +47,9 @@ export function useServer() {
     mediamtxAutoScan: true
   });
 
-  // Load settings from localStorage
-  function loadSettings() {
-    try {
-      const savedSettings = localStorage.getItem('vnc-settings');
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        Object.assign(settings, parsed);
-      }
-    } catch (error) {
-      console.error("Failed to load settings from localStorage:", error);
-    }
-  }
-
-  // Save settings to localStorage
-  function saveSettings() {
-    try {
-      localStorage.setItem('vnc-settings', JSON.stringify(settings));
-    } catch (error) {
-      console.error("Failed to save settings to localStorage:", error);
-    }
-  }
-
-  // Load settings on initialization
-  loadSettings();
-
-  // MediaMTX scanning state
-  const scanningMediaMtx = ref(false);
-  const mediamtxServers = ref([]);
-
-  async function scanMediaMtxServers() {
-    scanningMediaMtx.value = true;
-    try {
-      const servers = await invoke("scan_mediamtx_servers");
-      mediamtxServers.value = servers;
-      
-      // Auto-select first found server if auto-scan is enabled and no URL is set
-      if (settings.mediamtxAutoScan && servers.length > 0 && !settings.mediamtxUrl) {
-        settings.mediamtxUrl = servers[0].url;
-        saveSettings();
-        console.log("Auto-selected MediaMTX server:", settings.mediamtxUrl);
-      }
-      
-      return servers;
-    } catch (error) {
-      console.error("Failed to scan for MediaMTX servers:", error);
-      mediamtxServers.value = [];
-      return [];
-    } finally {
-      scanningMediaMtx.value = false;
-    }
-  }
+  const selectedCodec = computed(() => {
+    return 'h264'; // H.264 is the only supported codec
+  });
 
   async function loadMonitors() {
     loadingMonitors.value = true;
@@ -97,6 +65,22 @@ export function useServer() {
       monitors.value = [];
     } finally {
       loadingMonitors.value = false;
+    }
+  }
+
+  async function checkRelayStatus() {
+    try {
+      const status = await invoke("get_relay_status");
+      relayStatus.connected = status.connected;
+      relayStatus.relayUrl = status.relay_url;
+      relayStatus.relayHostname = status.relay_hostname;
+      relayStatus.state = status.state;
+      relayStatus.autoReconnect = status.auto_reconnect ?? true;
+      relayStatus.reconnectAttempts = status.reconnect_attempts ?? 0;
+    } catch (error) {
+      console.warn("Failed to check relay status:", error);
+      relayStatus.connected = false;
+      relayStatus.state = "error";
     }
   }
 
@@ -127,6 +111,7 @@ export function useServer() {
       }
       
       await loadMonitors();
+      await checkRelayStatus();
     } catch (error) {
       console.error("Failed to check VNC status:", error);
       errorMessage.value = `Failed to check VNC status: ${error}`;
@@ -163,9 +148,18 @@ export function useServer() {
     try {
       const info = await invoke("start_vnc_server", { 
         port: serverPort.value,
-        monitor: settings.selectedMonitor,
-        enableAudio: settings.enableAudio,
-        audioPort: settings.enableAudio ? settings.audioPort : null
+        options: {
+          deltaEncoding: settings.deltaEncoding,
+          adaptiveQuality: settings.adaptiveQuality,
+          encryption: settings.encryptionEnabled,
+          webrtc: settings.useWebRTC,
+          hardware_accel: settings.hardwareAcceleration, // H.264 hardware acceleration
+          hardwareAcceleration: settings.hardwareAcceleration,
+          monitor: settings.selectedMonitor,
+          audioBitrate: settings.audioBitrate * 1000,
+          videoBitrate: settings.videoBitrate * 1000,
+          framerate: settings.framerate
+        }
       });
       
       vncInfo.value = info;
@@ -236,6 +230,88 @@ export function useServer() {
     }
   }
 
+  // Relay server functions
+  async function discoverRelays() {
+    relayLoading.value = true;
+    try {
+      const relays = await invoke("discover_relay_servers", { timeoutMs: 3000 });
+      discoveredRelays.value = relays;
+      return relays;
+    } catch (error) {
+      console.error("Failed to discover relay servers:", error);
+      return [];
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
+  async function connectToRelay(relayUrl) {
+    relayLoading.value = true;
+    try {
+      const status = await invoke("connect_to_relay", { relayUrl });
+      relayStatus.connected = status.connected;
+      relayStatus.relayUrl = status.relay_url;
+      relayStatus.relayHostname = status.relay_hostname;
+      relayStatus.state = status.state;
+      relayStatus.autoReconnect = status.auto_reconnect ?? true;
+      relayStatus.reconnectAttempts = status.reconnect_attempts ?? 0;
+      return status;
+    } catch (error) {
+      console.error("Failed to connect to relay:", error);
+      errorMessage.value = `Failed to connect to relay: ${error}`;
+      throw error;
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
+  async function disconnectFromRelay() {
+    relayLoading.value = true;
+    try {
+      const status = await invoke("disconnect_from_relay");
+      relayStatus.connected = false;
+      relayStatus.relayUrl = null;
+      relayStatus.relayHostname = null;
+      relayStatus.state = "disconnected";
+      return status;
+    } catch (error) {
+      console.error("Failed to disconnect from relay:", error);
+      throw error;
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
+  async function autoConnectRelay() {
+    relayLoading.value = true;
+    try {
+      const status = await invoke("auto_connect_relay");
+      relayStatus.connected = status.connected;
+      relayStatus.relayUrl = status.relay_url;
+      relayStatus.relayHostname = status.relay_hostname;
+      relayStatus.state = status.state;
+      relayStatus.autoReconnect = status.auto_reconnect ?? true;
+      relayStatus.reconnectAttempts = status.reconnect_attempts ?? 0;
+      return status;
+    } catch (error) {
+      console.error("Failed to auto-connect to relay:", error);
+      return { connected: false };
+    } finally {
+      relayLoading.value = false;
+    }
+  }
+
+  async function setRelayAutoReconnect(enabled) {
+    try {
+      const status = await invoke("set_relay_auto_reconnect", { enabled });
+      relayStatus.autoReconnect = status.auto_reconnect ?? enabled;
+      return status;
+    } catch (error) {
+      console.error("Failed to set auto-reconnect:", error);
+      throw error;
+    }
+  }
+
   // Initialize monitoring when composable is created
   checkServerStatus().then(async () => {
     startStatusMonitoring();
@@ -279,9 +355,15 @@ export function useServer() {
     loadMonitors,
     startStatusMonitoring,
     stopStatusMonitoring,
-    saveSettings,
-    scanningMediaMtx,
-    mediamtxServers,
-    scanMediaMtxServers
+    // Relay exports
+    relayStatus,
+    discoveredRelays,
+    relayLoading,
+    discoverRelays,
+    connectToRelay,
+    disconnectFromRelay,
+    autoConnectRelay,
+    checkRelayStatus,
+    setRelayAutoReconnect
   };
 }

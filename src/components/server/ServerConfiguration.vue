@@ -26,16 +26,16 @@
       <span class="help-text">Default: 5900</span>
     </div>
     
-    <div class="form-group" v-if="monitors.length > 0">
-      <label for="monitor">Monitor:</label>
+    <div class="form-group" v-if="displays.length > 0">
+      <label for="display">Display:</label>
       <select 
-        id="monitor" 
-        :value="settings.selectedMonitor"
-        @change="$emit('update:selected-monitor', parseInt($event.target.value))"
+        id="display" 
+        :value="settings.selectedWebrtcDisplay"
+        @change="$emit('update:selected-display', parseInt($event.target.value))"
         :disabled="disabled"
       >
-        <option v-for="(monitor, index) in monitors" :key="index" :value="index">
-          {{ monitor.name }} {{ monitor.is_primary ? '(Primary)' : '' }} - {{ monitor.width }}x{{ monitor.height }}
+        <option v-for="(display, index) in displays" :key="index" :value="index">
+          {{ display.name }} {{ display.is_primary ? '(Primary)' : '' }} - {{ display.width }}x{{ display.height }}
         </option>
       </select>
     </div>
@@ -57,7 +57,7 @@ import AdvancedSettings from './AdvancedSettings.vue';
 defineProps({
   serverPort: Number,
   settings: Object,
-  monitors: Array,
+  displays: Array,
   disabled: {
     type: Boolean,
     default: false
@@ -72,7 +72,7 @@ defineProps({
   }
 });
 
-defineEmits(['update:server-port', 'update:selected-monitor', 'settings-changed', 'scan-mediamtx']);
+defineEmits(['apply-preset', 'update:server-port', 'update:selected-display']);
 </script>
 
 <style scoped>

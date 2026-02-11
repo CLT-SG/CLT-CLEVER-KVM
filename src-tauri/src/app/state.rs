@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 use tokio::runtime::Runtime;
 use parking_lot::RwLock as ParkingLotRwLock;
 use parking_lot::Mutex as ParkingLotMutex;
@@ -13,11 +11,6 @@ use crate::app::commands::{VncConfig, AudioConfig, ConnectionConfig};
 /// Server configuration options
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServerOptions {
-    pub delta_encoding: Option<bool>,
-    pub adaptive_quality: Option<bool>,
-    pub encryption: Option<bool>,
-    pub webrtc: Option<bool>,
-    pub vp8: Option<bool>,
     pub monitor: Option<usize>,
 }
 
@@ -71,3 +64,4 @@ impl ServerState {
         }
     }
 }
+

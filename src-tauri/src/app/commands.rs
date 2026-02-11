@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
-use log::{debug, error, info, warn};
+use log::{info, warn, debug, error};
 use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 
@@ -79,9 +79,111 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
 // - stop_vnc_server() for stopping VNC servers  
 // - get_vnc_status() for checking VNC server status
 
+    if state.running {
+        warn!("Attempted to start server when already running");
+        return Err("Server is already running".to_string());
+    }
+    
+    // Store options
+    if let Some(opts) = options {
+        debug!("Server options: monitor={:?}", opts.monitor);
+        state.options = opts;
+    }
 
 
-use crate::lib::get_log_directory;
+    state.server_handle = Some(server);
+    state.port = port;
+    state.running = true;
+
+    // Get local IP address with better detection
+    let ip = get_network_ip().unwrap_or_else(|| {
+        warn!("Could not determine network IP, falling back to localhost");
+        "127.0.0.1".to_string()
+    });
+
+    let url = format!("https://{}:{}/kvm", ip, port);
+    info!("Server URL: {}", url);
+    info!("Server is now accessible from network at: {}", url);
+    info!("⚠️  Browser will show a certificate warning (self-signed cert) — click 'Advanced' → 'Proceed' to continue");
+    Ok(url)
+}
+
+#[tauri::command]
+pub fn stop_server(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock().unwrap();
+
+    if !state.running {
+        warn!("Attempted to stop server when not running");
+        return Err("Server is not running".to_string());
+    }
+
+    info!("Stopping KVM server");
+    if let Some(server) = state.server_handle.take() {
+        state.runtime.block_on(async {
+            server.shutdown().await;
+        });
+        info!("Server stopped successfully");
+    }
+
+    state.running = false;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn start_kvm_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option<ServerOptions>) -> Result<String, String> {
+    start_server(app_handle, port, options)
+}
+
+#[tauri::command]
+pub fn stop_kvm_server(app_handle: tauri::AppHandle) -> Result<(), String> {
+    stop_server(app_handle)
+}
+
+#[tauri::command]
+pub fn check_server_status(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock().unwrap();
+    Ok(state.running)
+}
+
+#[tauri::command]
+pub fn get_server_config(app_handle: tauri::AppHandle) -> Result<(u16, ServerOptions), String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock().unwrap();
+        
+    Ok((state.port, state.options.clone()))
+}
+
+#[tauri::command]
+pub fn get_server_status(app_handle: tauri::AppHandle) -> bool {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock().unwrap();
+    debug!("Server status requested: {}", state.running);
+    state.running
+}
+
+#[tauri::command]
+pub fn get_server_url(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let state = state.lock().unwrap();
+
+    if !state.running {
+        warn!("URL requested but server is not running");
+        return Err("Server is not running".to_string());
+    }
+
+    // Get local IP address with better error handling and multiple attempts
+    let ip = get_network_ip().unwrap_or_else(|| {
+        warn!("Could not determine network IP, falling back to localhost");
+        "127.0.0.1".to_string()
+    });
+
+    let url = format!("https://{}:{}/kvm", ip, state.port);
+    debug!("Returning server URL: {}", url);
+    info!("KVM server accessible at: {}", url);
+    Ok(url)
+}
 
 #[tauri::command]
 pub fn get_logs() -> Result<(String, String), String> {
@@ -411,803 +513,3 @@ pub fn get_available_network_interfaces() -> Result<Vec<String>, String> {
     }
 }
 
-// ============================================================================
-// MediaMTX Server Discovery Commands
-// ============================================================================
-
-use std::net::SocketAddr;
-use std::time::Duration;
-
-/// MediaMTX server information
-#[derive(Debug, Serialize, Clone)]
-pub struct MediaMtxServer {
-    pub ip: String,
-    pub port: u16,
-    pub url: String,
-}
-
-/// Scan local network for MediaMTX servers on port 9997
-#[tauri::command]
-pub async fn scan_mediamtx_servers() -> Result<Vec<MediaMtxServer>, String> {
-    info!("🔍 Scanning local network for MediaMTX servers on port 9997...");
-    
-    // Get the local IP to determine the subnet
-    let local_ip = match get_network_ip() {
-        Some(ip) => ip,
-        None => {
-            warn!("Could not determine local IP address, scanning localhost only");
-            // Try localhost
-            if test_mediamtx_connection("127.0.0.1", 9997).await {
-                info!("✅ Found MediaMTX server on localhost:9997");
-                return Ok(vec![MediaMtxServer {
-                    ip: "127.0.0.1".to_string(),
-                    port: 9997,
-                    url: "http://127.0.0.1:9997".to_string(),
-                }]);
-            }
-            return Ok(vec![]);
-        }
-    };
-    
-    info!("Local IP detected: {}", local_ip);
-    
-    // Parse the IP to get subnet
-    let parts: Vec<&str> = local_ip.split('.').collect();
-    if parts.len() != 4 {
-        return Err("Invalid IP address format".to_string());
-    }
-    
-    let subnet_base = format!("{}.{}.{}", parts[0], parts[1], parts[2]);
-    info!("Scanning subnet: {}.0/24 for MediaMTX servers", subnet_base);
-    
-    let mut servers = Vec::new();
-    let port = 9997;
-    
-    // Test localhost first
-    if test_mediamtx_connection("127.0.0.1", port).await {
-        info!("✅ Found MediaMTX server on localhost:9997");
-        servers.push(MediaMtxServer {
-            ip: "127.0.0.1".to_string(),
-            port,
-            url: "http://127.0.0.1:9997".to_string(),
-        });
-    }
-    
-    // Scan the subnet in parallel using tokio
-    let mut tasks = Vec::new();
-    
-    for i in 1..=254 {
-        let ip = format!("{}.{}", subnet_base, i);
-        
-        // Skip scanning our own IP if we already found localhost
-        if ip == local_ip && servers.iter().any(|s| s.ip == "127.0.0.1") {
-            continue;
-        }
-        
-        let task = tokio::spawn(async move {
-            if test_mediamtx_connection(&ip, port).await {
-                Some(MediaMtxServer {
-                    ip: ip.clone(),
-                    port,
-                    url: format!("http://{}:{}", ip, port),
-                })
-            } else {
-                None
-            }
-        });
-        
-        tasks.push(task);
-    }
-    
-    // Wait for all tasks to complete
-    let results = futures_util::future::join_all(tasks).await;
-    
-    for result in results {
-        if let Ok(Some(server)) = result {
-            info!("✅ Found MediaMTX server at {}", server.url);
-            servers.push(server);
-        }
-    }
-    
-    if servers.is_empty() {
-        info!("❌ No MediaMTX servers found on the network");
-    } else {
-        info!("✅ Found {} MediaMTX server(s)", servers.len());
-    }
-    
-    Ok(servers)
-}
-
-/// Test if a MediaMTX server is running at the given address
-async fn test_mediamtx_connection(ip: &str, port: u16) -> bool {
-    let addr = match format!("{}:{}", ip, port).parse::<SocketAddr>() {
-        Ok(addr) => addr,
-        Err(_) => return false,
-    };
-    
-    // Try to connect with a short timeout
-    let result = tokio::time::timeout(
-        Duration::from_millis(200),
-        tokio::net::TcpStream::connect(addr)
-    ).await;
-    
-    result.is_ok() && result.unwrap().is_ok()
-}
-
-// ============================================================================
-// VNC Server Commands
-// ============================================================================
-
-use crate::vnc::{VncKvmServer, VncServerConfig, ScreencastRegistration, register_vnc_with_clever_service};
-use crate::vnc::websockify::WebsockifyProxy;
-use parking_lot::Mutex as ParkingLotMutex;
-
-/// VNC server information returned to frontend
-#[derive(Debug, Serialize, Clone)]
-pub struct VncServerInfo {
-    pub vnc_url: String,
-    pub websockify_url: String,
-    pub audio_url: Option<String>,
-    pub port: u16,
-    pub websockify_port: u16,
-    pub audio_port: Option<u16>,
-    pub clients_connected: usize,
-    pub monitor_id: usize,
-    pub monitor_name: String,
-    pub width: usize,
-    pub height: usize,
-    pub position_x: i32,
-    pub position_y: i32,
-    pub hostname: String,
-}
-
-/// VNC servers information for multi-monitor setup
-#[derive(Debug, Serialize)]
-pub struct VncServersInfo {
-    pub servers: Vec<VncServerInfo>,
-    pub audio_url: Option<String>,
-}
-
-/// VNC server status
-#[derive(Debug, Serialize)]
-pub struct VncStatus {
-    pub running: bool,
-    pub clients: usize,
-    pub audio_enabled: bool,
-    pub registration_status: Option<RegistrationStatus>,
-}
-
-/// Registration status
-#[derive(Debug, Serialize)]
-pub struct RegistrationStatus {
-    pub registered: bool,
-    pub id: Option<u64>,
-    pub vnc_url: Option<String>,
-    pub audio_url: Option<String>,
-}
-
-/// Start VNC server for a single monitor
-#[tauri::command]
-pub async fn start_vnc_server(
-    app_handle: tauri::AppHandle,
-    port: Option<u16>,
-    monitor: Option<usize>,
-    enable_audio: bool,
-    audio_port: Option<u16>,
-) -> Result<VncServerInfo, String> {
-    info!("🚀 Starting VNC server...");
-    
-    let monitor_id = monitor.unwrap_or(0);
-    
-    // Check if VNC server for this monitor is already running and get monitor info
-    let monitor_info = {
-        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-        let state = state.lock()
-            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-
-        // Check if VNC server for this monitor is already running
-        for vnc_server in &state.vnc_servers {
-        let vnc = vnc_server.lock()
-            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-        if vnc.is_running() && vnc.get_config().monitor_id == monitor_id {
-            warn!("VNC server for monitor {} is already running", monitor_id);
-            return Err(format!("VNC server for monitor {} is already running", monitor_id));
-        }
-    }
-    
-    // Get monitor info
-    let monitors = match ScreenCapture::get_all_monitors() {
-        Ok(m) => m,
-        Err(e) => return Err(format!("Failed to get monitors: {}", e)),
-    };
-    
-    if monitor_id >= monitors.len() {
-        return Err(format!("Monitor {} not found", monitor_id));
-    }
-    
-    // Extract the data we need before dropping the lock
-    let monitor_name = monitors[monitor_id].name.clone();
-    let monitor_width = monitors[monitor_id].width;
-    let monitor_height = monitors[monitor_id].height;
-    let monitor_position_x = monitors[monitor_id].position_x;
-    let monitor_position_y = monitors[monitor_id].position_y;
-    
-    (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_position_y)
-}; // Drop state lock here before async operations
-
-let (monitor_name, monitor_width, monitor_height, monitor_position_x, monitor_position_y) = monitor_info;
-
-    // Get hostname for URL generation (before creating VNC server)
-    let hostname = gethostname::gethostname()
-        .into_string()
-        .unwrap_or_else(|_| "localhost".into());
-
-    // Calculate port with bounds checking to avoid collisions
-    let vnc_port = if let Some(p) = port {
-        p
-    } else {
-        let calculated_port = 5900 + monitor_id as u16;
-        // Ensure port is in valid range and not too high
-        if calculated_port > 5950 {
-            warn!("Monitor ID {} results in port {} which may be too high, using 5900", monitor_id, calculated_port);
-            return Err(format!("Too many monitors (max 50 supported for automatic port assignment)"));
-        }
-        calculated_port
-    };
-
-    // Create VNC server configuration
-    let config = VncServerConfig {
-        port: vnc_port,
-        monitor_id,
-        enable_audio,
-        audio_port: if enable_audio { Some(audio_port.unwrap_or(6900)) } else { None },
-        max_clients: 10,
-        password: None,
-        hostname: Some(hostname.clone()),
-    };
-
-    // Calculate websockify port (6080 base + monitor_id) with bounds checking
-    let websockify_port = 6080 + monitor_id as u16;
-    if websockify_port > 6130 {
-        return Err(format!("Too many monitors for websockify port assignment (max 50 supported)"));
-    }
-
-    // Create and start VNC server
-    match VncKvmServer::new(config.clone()) {
-        Ok(mut vnc_server) => {
-            match vnc_server.start().await {
-                Ok(_) => {
-                    // Get local IP as fallback
-                    let local_ip = match local_ip() {
-                        Ok(ip) => ip.to_string(),
-                        Err(_) => hostname.clone(),
-                    };
-
-                    // Start websockify proxy to bridge WebSocket (NoVNC) to VNC
-                    let mut websockify_proxy = WebsockifyProxy::new(
-                        websockify_port,
-                        "localhost".to_string(),
-                        config.port
-                    );
-                    
-                    if let Err(e) = websockify_proxy.start().await {
-                        error!("❌ Failed to start websockify proxy: {}", e);
-                        // Stop VNC server since websockify failed
-                        let _ = vnc_server.stop().await;
-                        return Err(format!("Failed to start websockify proxy: {}", e));
-                    }
-                    
-                    info!("✅ Websockify proxy started on port {} → VNC port {}", websockify_port, config.port);
-
-                    // Use hostname in VNC URL instead of IP address
-                    let vnc_url = format!("vnc://{}:{}", hostname, config.port);
-                    // Websockify URL uses the websockify port, not the VNC port
-                    let websockify_url = format!("ws://{}:{}/", hostname, websockify_port);
-                    let audio_url = vnc_server.get_audio_url();
-                    let clients_connected = vnc_server.get_client_count();
-                    
-                    // Store VNC server and websockify proxy in state (acquire lock again after async operation)
-                    {
-                        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-                        let mut state = state.lock()
-                            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-                        state.vnc_servers.push(Arc::new(Mutex::new(vnc_server)));
-                        state.websockify_proxies.insert(monitor_id, Arc::new(ParkingLotMutex::new(websockify_proxy)));
-                    }
-
-                    info!("✅ VNC server started successfully");
-                    info!("   Hostname: {}", hostname);
-                    info!("   VNC URL: {}", vnc_url);
-                    info!("   WebSockify URL: {}", websockify_url);
-                    info!("   Monitor: {} ({}x{}) at ({}, {})", 
-                          monitor_name, monitor_width, monitor_height,
-                          monitor_position_x, monitor_position_y);
-                    if let Some(ref audio) = audio_url {
-                        info!("   Audio URL: {}", audio);
-                    }
-                    info!("   Fallback IP: {}", local_ip);
-
-                    Ok(VncServerInfo {
-                        vnc_url,
-                        websockify_url,
-                        audio_url,
-                        port: config.port,
-                        websockify_port,
-                        audio_port: config.audio_port,
-                        clients_connected,
-                        monitor_id,
-                        monitor_name: monitor_name.clone(),
-                        width: monitor_width,
-                        height: monitor_height,
-                        position_x: monitor_position_x,
-                        position_y: monitor_position_y,
-                        hostname: hostname.clone(),
-                    })
-                }
-                Err(e) => {
-                    error!("❌ Failed to start VNC server: {}", e);
-                    Err(format!("Failed to start VNC server: {}", e))
-                }
-            }
-        }
-        Err(e) => {
-            error!("❌ Failed to create VNC server: {}", e);
-            Err(format!("Failed to create VNC server: {}", e))
-        }
-    }
-}
-
-/// Start VNC servers for all monitors
-#[tauri::command]
-pub async fn start_vnc_servers_all(
-    app_handle: tauri::AppHandle,
-    enable_audio: bool,
-) -> Result<VncServersInfo, String> {
-    info!("🚀 Starting VNC servers for all monitors...");
-    
-    // Get all monitors
-    let monitors = match ScreenCapture::get_all_monitors() {
-        Ok(m) => m,
-        Err(e) => return Err(format!("Failed to get monitors: {}", e)),
-    };
-    
-    if monitors.is_empty() {
-        return Err("No monitors found".to_string());
-    }
-    
-    let mut server_infos = Vec::new();
-    let mut shared_audio_url = None;
-    let mut errors = Vec::new();
-    
-    // Start VNC server for each monitor
-    for (idx, _monitor_info) in monitors.iter().enumerate() {
-        // Ensure port doesn't exceed safe range
-        if idx >= 50 {
-            warn!("Skipping monitor {} - too many monitors (max 50 supported)", idx);
-            continue;
-        }
-        
-        let port = 5900 + idx as u16;
-        let audio_port = if enable_audio && idx == 0 { Some(6900) } else { None };
-        
-        info!("Starting VNC server for monitor {} on port {}", idx, port);
-        
-        match start_vnc_server(
-            app_handle.clone(),
-            Some(port),
-            Some(idx),
-            enable_audio && idx == 0, // Only enable audio for first monitor
-            audio_port,
-        ).await {
-            Ok(server_info) => {
-                if server_info.audio_url.is_some() {
-                    shared_audio_url = server_info.audio_url.clone();
-                }
-                server_infos.push(server_info);
-            }
-            Err(e) => {
-                error!("❌ Failed to start VNC server for monitor {}: {}", idx, e);
-                errors.push(format!("Monitor {}: {}", idx, e));
-            }
-        }
-    }
-    
-    if server_infos.is_empty() {
-        let error_msg = if !errors.is_empty() {
-            format!("Failed to start any VNC servers. Errors: {}", errors.join("; "))
-        } else {
-            "Failed to start any VNC servers".to_string()
-        };
-        return Err(error_msg);
-    }
-    
-    if !errors.is_empty() {
-        warn!("⚠️  Started {} VNC server(s) but {} failed: {}", 
-              server_infos.len(), errors.len(), errors.join("; "));
-    } else {
-        info!("✅ Started {} VNC server(s)", server_infos.len());
-    }
-    
-    Ok(VncServersInfo {
-        servers: server_infos,
-        audio_url: shared_audio_url,
-    })
-}
-
-/// Stop all VNC servers
-#[tauri::command]
-pub async fn stop_vnc_server(
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    info!("🛑 Stopping all VNC servers...");
-    
-    let (servers, websockify_proxies) = {
-        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-        let mut state = state.lock()
-            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-
-        if state.vnc_servers.is_empty() {
-            warn!("No VNC servers running");
-            return Err("No VNC servers running".to_string());
-        }
-
-        let servers = std::mem::take(&mut state.vnc_servers);
-        let proxies = std::mem::take(&mut state.websockify_proxies);
-        (servers, proxies)
-    }; // Drop state lock here before async operations
-    
-    // Stop all websockify proxies first
-    for (monitor_id, proxy) in websockify_proxies {
-        let mut proxy_guard = proxy.lock();
-        if let Err(e) = proxy_guard.stop() {
-            error!("❌ Failed to stop websockify proxy for monitor {}: {}", monitor_id, e);
-        } else {
-            info!("✅ Websockify proxy for monitor {} stopped", monitor_id);
-        }
-    }
-    
-    // Stop all VNC servers in parallel using blocking tasks
-    // We use spawn_blocking because we're using std::sync::Mutex which is not Send across await points
-    let stop_tasks: Vec<_> = servers.into_iter().map(|vnc_server| {
-        tokio::task::spawn_blocking(move || {
-            let mut vnc = vnc_server.lock()
-                .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-            // Use block_on since stop() is async but we're in a blocking context
-            tokio::runtime::Handle::current().block_on(vnc.stop())
-                .map_err(|e| format!("Failed to stop VNC server: {}", e))
-        })
-    }).collect();
-    
-    let results = futures_util::future::join_all(stop_tasks).await;
-    
-    let mut errors = Vec::new();
-    for (idx, result) in results.into_iter().enumerate() {
-        match result {
-            Ok(Ok(())) => {
-                info!("✅ VNC server {} stopped successfully", idx);
-            }
-            Ok(Err(e)) => {
-                error!("❌ VNC server {} failed to stop: {}", idx, e);
-                errors.push(e);
-            }
-            Err(e) => {
-                error!("❌ VNC server {} task failed: {}", idx, e);
-                errors.push(format!("Task failed: {}", e));
-            }
-        }
-    }
-    
-    // Re-acquire state lock to update registration
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    state.vnc_registration = None;
-    
-    if !errors.is_empty() {
-        error!("❌ Some VNC servers failed to stop: {:?}", errors);
-        return Err(format!("Some servers failed to stop: {}", errors.join(", ")));
-    }
-    
-    info!("✅ All VNC servers stopped");
-    Ok(())
-}
-
-/// Get VNC server status
-#[tauri::command]
-pub async fn get_vnc_status(
-    app_handle: tauri::AppHandle,
-) -> Result<VncStatus, String> {
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-
-    let mut running = false;
-    let mut total_clients = 0;
-    let mut audio_enabled = false;
-    
-    for vnc_server in &state.vnc_servers {
-        let vnc = vnc_server.lock()
-            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-        if vnc.is_running() {
-            running = true;
-            total_clients += vnc.get_client_count();
-            audio_enabled = audio_enabled || vnc.get_config().enable_audio;
-        }
-    }
-
-    let registration_status = state.vnc_registration.as_ref().map(|reg| {
-        RegistrationStatus {
-            registered: true,
-            id: Some(reg.id),
-            vnc_url: Some(reg.vnc_url.clone()),
-            audio_url: reg.audio_url.clone(),
-        }
-    });
-
-    Ok(VncStatus {
-        running,
-        clients: total_clients,
-        audio_enabled,
-        registration_status,
-    })
-}
-
-/// Register with CLEVER service
-#[tauri::command]
-pub async fn register_with_clever_service(
-    app_handle: tauri::AppHandle,
-    clever_url: String,
-) -> Result<ScreencastRegistration, String> {
-    info!("📡 Registering with CLEVER service at {}", clever_url);
-    
-    // Get VNC port and audio port (drop state lock before async call)
-    let (vnc_port, audio_port) = {
-        let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-        let state = state.lock()
-            .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-
-        // Check if VNC servers are running
-        if state.vnc_servers.is_empty() {
-            return Err("No VNC servers running".to_string());
-        }
-        
-        // Get the first VNC server's port and audio port for registration
-        let vnc_server = &state.vnc_servers[0];
-        let vnc = vnc_server.lock()
-            .map_err(|e| format!("Failed to acquire VNC server lock: {}", e))?;
-        if !vnc.is_running() {
-            return Err("VNC server is not running".to_string());
-        }
-        let config = vnc.get_config();
-        (config.port, config.audio_port)
-    }; // Drop state lock here before async call
-
-    // Get hostname
-    let hostname = gethostname::gethostname()
-        .to_string_lossy()
-        .to_string();
-
-    // Register with clever-service
-    match register_vnc_with_clever_service(&clever_url, vnc_port, audio_port, &hostname).await {
-        Ok(registration) => {
-            // Re-acquire state lock to store registration
-            let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-            let mut state = state.lock()
-                .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-            state.vnc_registration = Some(registration.clone());
-            
-            info!("✅ Successfully registered with CLEVER service");
-            Ok(registration)
-        }
-        Err(e) => {
-            error!("❌ Failed to register with CLEVER service: {}", e);
-            Err(format!("Failed to register: {}", e))
-        }
-    }
-}
-
-/// Enable or disable TLS URLs (wss:// instead of ws://)
-#[tauri::command]
-pub fn set_use_tls_urls(
-    app_handle: tauri::AppHandle,
-    use_tls: bool,
-) -> Result<(), String> {
-    info!("🔒 Setting TLS URLs to: {}", use_tls);
-    
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    // Update VNC manager if it exists
-    if let Some(manager) = &state.vnc_manager {
-        let mut manager_guard = manager.write();
-        manager_guard.set_use_tls_urls(use_tls);
-        info!("✅ TLS URL setting updated");
-        Ok(())
-    } else {
-        Err("VNC manager not initialized".to_string())
-    }
-}
-
-/// Get current TLS URL setting
-#[tauri::command]
-pub fn get_use_tls_urls(
-    app_handle: tauri::AppHandle,
-) -> Result<bool, String> {
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    // Get TLS setting from VNC manager if it exists
-    if let Some(manager) = &state.vnc_manager {
-        let manager_guard = manager.read();
-        Ok(manager_guard.get_use_tls_urls())
-    } else {
-        // Default to false if manager not initialized
-        Ok(false)
-    }
-}
-
-// ============================================================================
-// VNC and Audio Configuration Commands
-// ============================================================================
-
-/// VNC Server Configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VncConfig {
-    pub base_port: u16,          // Starting VNC port (default: 5900)
-    pub quality: String,         // "low", "medium", "high"
-    pub frame_rate_limit: u32,   // 15-60 FPS
-    pub cursor_encoding: bool,   // Enable cursor pseudo-encoding
-    pub desktop_resize: bool,    // Allow client-side resize
-    pub view_only: bool,         // Disable input (view-only)
-}
-
-impl Default for VncConfig {
-    fn default() -> Self {
-        Self {
-            base_port: 5900,
-            quality: "high".to_string(),
-            frame_rate_limit: 60,
-            cursor_encoding: true,
-            desktop_resize: true,
-            view_only: false,
-        }
-    }
-}
-
-/// Audio Streaming Configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AudioConfig {
-    pub sample_rate: u32,        // 44100 or 48000 Hz
-    pub quality: String,         // "voip", "audio", "high"
-    pub channels: String,        // "mono" or "stereo"
-    pub latency: String,         // "ultra_low", "low", "normal"
-}
-
-impl Default for AudioConfig {
-    fn default() -> Self {
-        Self {
-            sample_rate: 48000,
-            quality: "high".to_string(),
-            channels: "stereo".to_string(),
-            latency: "low".to_string(),
-        }
-    }
-}
-
-/// WebSocket Connection Configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionConfig {
-    pub keep_alive_interval: u32,      // Seconds (default: 30)
-    pub connection_timeout: u32,       // Seconds (default: 300)
-    pub auto_reconnect: bool,          // Enable auto-reconnect
-    pub max_clients_per_monitor: u32,  // Max concurrent connections
-}
-
-impl Default for ConnectionConfig {
-    fn default() -> Self {
-        Self {
-            keep_alive_interval: 30,
-            connection_timeout: 300,
-            auto_reconnect: true,
-            max_clients_per_monitor: 5,
-        }
-    }
-}
-
-/// Get VNC configuration
-#[tauri::command]
-pub fn get_vnc_config(
-    app_handle: tauri::AppHandle,
-) -> Result<VncConfig, String> {
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    let config = state.vnc_config.read();
-    Ok(config.clone())
-}
-
-/// Set VNC configuration
-#[tauri::command]
-pub fn set_vnc_config(
-    app_handle: tauri::AppHandle,
-    config: VncConfig,
-) -> Result<(), String> {
-    info!("⚙️  Updating VNC configuration: {:?}", config);
-    
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    let mut vnc_config = state.vnc_config.write();
-    *vnc_config = config;
-    
-    info!("✅ VNC configuration updated");
-    Ok(())
-}
-
-/// Get audio configuration
-#[tauri::command]
-pub fn get_audio_config(
-    app_handle: tauri::AppHandle,
-) -> Result<AudioConfig, String> {
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    let config = state.audio_config.read();
-    Ok(config.clone())
-}
-
-/// Set audio configuration
-#[tauri::command]
-pub fn set_audio_config(
-    app_handle: tauri::AppHandle,
-    config: AudioConfig,
-) -> Result<(), String> {
-    info!("⚙️  Updating audio configuration: {:?}", config);
-    
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    let mut audio_config = state.audio_config.write();
-    *audio_config = config;
-    
-    info!("✅ Audio configuration updated");
-    Ok(())
-}
-
-/// Get connection configuration
-#[tauri::command]
-pub fn get_connection_config(
-    app_handle: tauri::AppHandle,
-) -> Result<ConnectionConfig, String> {
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    let config = state.connection_config.read();
-    Ok(config.clone())
-}
-
-/// Set connection configuration
-#[tauri::command]
-pub fn set_connection_config(
-    app_handle: tauri::AppHandle,
-    config: ConnectionConfig,
-) -> Result<(), String> {
-    info!("⚙️  Updating connection configuration: {:?}", config);
-    
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let state = state.lock()
-        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
-    
-    let mut connection_config = state.connection_config.write();
-    *connection_config = config;
-    
-    info!("✅ Connection configuration updated");
-    Ok(())
-}

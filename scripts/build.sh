@@ -23,15 +23,15 @@ fi
 echo "📦 Installing dependencies..."
 npm install
 
-# Build the application with native WebM encoding
-echo "🔨 Building application with VP8/Opus codecs..."
+# Build the application with H.264 hardware acceleration
+echo "🔨 Building application with H.264 hardware-accelerated encoding..."
 npm run tauri:build
 
-echo "✅ Build completed with native WebM support!"
+echo "✅ Build completed with H.264 hardware acceleration support!"
 echo ""
 echo "📁 Built files can be found in:"
 echo "  - Linux: src-tauri/target/release/bundle/deb/ and src-tauri/target/release/bundle/appimage/"
 echo "  - Windows: src-tauri/target/release/bundle/msi/ and src-tauri/target/release/bundle/nsis/"
 echo "  - macOS: src-tauri/target/release/bundle/dmg/ and src-tauri/target/release/bundle/macos/"
 echo ""
-echo "🎉 Ready to distribute with native WebM streaming!"
+echo "🎉 Ready to distribute with H.264 hardware-accelerated streaming!"

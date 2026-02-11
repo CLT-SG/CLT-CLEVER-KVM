@@ -19,9 +19,8 @@ const {
   loading,
   errorMessage,
   settings,
-  monitors,
-  loadingMonitors,
-  vncInfo,
+  displays,
+  loadingDisplays,
   checkServerStatus,
   startServer,
   stopServer,
@@ -33,39 +32,32 @@ const {
   scanMediaMtxServers
 } = useServer();
 
-// The status checking is now automatic, but we can still call it manually if needed
-onMounted(async () => {
-  // Initial check is now handled by the composable
-  // await checkServerStatus();
-});
+function applyPreset(presetName) {
+  const preset = presets[presetName];
+  if (preset) {
+    Object.keys(preset).forEach(key => {
+      if (key in settings) {
+        settings[key] = preset[key];
+      }
+    });
+  }
+}
 
 function updateServerPort(value) {
   serverPort.value = value;
 }
 
-function updateSelectedMonitor(value) {
-  settings.selectedMonitor = value;
+function updateSelectedDisplay(value) {
+  settings.selectedWebrtcDisplay = value;
 }
 
-function handleSettingsChanged() {
-  saveSettings();
-}
-
-async function handleScanMediaMtx() {
-  await scanMediaMtxServers();
-}
-
-// Define tabs based on server status
-const tabs = computed(() => {
-  const baseTabs = [
-    { id: 'status', label: 'Server Status' },
-    { id: 'config', label: 'Configuration' },
-    { id: 'options', label: 'Connection Options' },
-    { id: 'logs', label: 'Logs' }
-  ];
-
-  return baseTabs;
-});
+// Define tabs
+const tabs = computed(() => [
+  { id: 'status', label: 'Server Status' },
+  { id: 'config', label: 'Configuration' },
+  { id: 'options', label: 'Connection Options' },
+  { id: 'logs', label: 'Logs' }
+]);
 </script>
 
 <template>
@@ -99,19 +91,17 @@ const tabs = computed(() => {
         <div class="config-content">
           <h2>Server Configuration</h2>
           <div v-if="serverStatus" class="config-warning">
-            <p><strong>Warning:</strong> Server is currently running. Stop the server to modify these settings.</p>
+            <p>Server is currently running. Stop the server to modify these settings.</p>
           </div>
           <ServerConfiguration 
             :server-port="serverPort"
             :settings="settings"
-            :monitors="monitors"
+            :displays="displays"
             :disabled="serverStatus"
             :scanningMediaMtx="scanningMediaMtx"
             :mediamtxServers="mediamtxServers"
             @update:server-port="updateServerPort"
-            @update:selected-monitor="updateSelectedMonitor"
-            @settings-changed="handleSettingsChanged"
-            @scan-mediamtx="handleScanMediaMtx"
+            @update:selected-display="updateSelectedDisplay"
           />
         </div>
       </template>

@@ -2,6 +2,14 @@
 
 This document describes the professional modular structure of the Tauri Rust backend.
 
+## Related Components
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| **Tauri App** | `src-tauri/` | Desktop application with screen capture, encoding, and local server |
+| **Relay Server** | `relay-server/` | Centralized device management with Actix Web (see [relay-server/README.md](../../relay-server/README.md)) |
+| **Web Client** | `src-tauri/web-client/` | Browser-based KVM viewer with H.264 WebCodecs decoder |
+
 ## Directory Structure
 
 ```
@@ -35,17 +43,17 @@ src-tauri/src/
 │   ├── mod.rs                     # Streaming module exports (organized)
 │   ├── codecs/                    # Encoding/decoding implementations
 │   │   ├── mod.rs                 # Codecs module exports
+│   │   ├── h264_encoder.rs        # H.264 hardware-accelerated encoder
 │   │   ├── realtime_codec.rs      # Real-time codec implementation
 │   │   └── yuv420_encoder.rs      # YUV420 video encoder
 │   ├── enhanced/                  # High-performance implementations
 │   │   ├── mod.rs                 # Enhanced module exports
 │   │   ├── enhanced_audio.rs      # Enhanced audio processing
-│   │   ├── enhanced_video.rs      # Enhanced video processing (disabled)
-│   │   ├── enhanced_video_vp8.rs  # VP8 video processing (disabled)
 │   │   └── ultra_low_latency.rs   # Ultra-low latency encoder
 │   └── handlers/                  # Stream management handlers
 │       ├── mod.rs                 # Handlers module exports
-│       ├── integrated_handler.rs  # Integrated streaming handler
+│       ├── integrated_handler.rs  # Integrated H.264 streaming handler
+│       ├── low_latency_pipeline.rs # Low-latency H.264 pipeline
 │       ├── realtime_stream.rs     # Real-time stream handler
 │       └── ultra_stream.rs        # Ultra-performance stream handler
 └── system/                       # System optimization functionality
@@ -74,11 +82,20 @@ src-tauri/src/
 - Better organization than single file approach
 
 ### 3. **core/** - Core System Operations
-- **capture.rs**: Screen capture functionality
+- **capture.rs**: Screen capture functionality (cross-platform unified interface)
+- **native_capture.rs**: Native platform-specific screen capture implementations
 - **input.rs**: Input handling (keyboard/mouse)
 - **mod.rs**: Core functionality exports
 
+**Native Screen Capture - Platform Support:**
+- **Windows**: GDI (GetDC, BitBlt, GetDIBits) for maximum compatibility
+- **Linux X11**: X11 library with RandR extension for multi-monitor support
+- **macOS**: Core Graphics (CGDisplayCreateImage) for Quartz display capture
+
 **Benefits:**
+- Cross-platform native screen capture without external dependencies
+- High-performance direct platform API access
+- Multi-monitor support on all platforms
 - Clear separation of core system operations
 - Logical grouping of related functionality
 
@@ -166,6 +183,41 @@ src-tauri/src/
 ✅ **Same public API** - All Tauri commands and public interfaces remain the same.
 
 ✅ **Build compatibility** - The project builds successfully with the new structure.
+
+## Cross-Platform Screen Capture
+
+The native screen capture module (`core/native_capture.rs`) provides high-performance screen capture using platform-native APIs:
+
+### Windows
+- **API**: Windows GDI (Graphics Device Interface)
+- **Functions**: `GetDC`, `BitBlt`, `GetDIBits`
+- **Format**: BGRA → RGBA conversion
+- **Dependencies**: `windows-capture` crate for monitor enumeration
+
+### Linux (X11)
+- **API**: X11 with RandR extension
+- **Functions**: `XGetImage`, `RandR` for multi-monitor
+- **Format**: Depth-aware conversion (16/24/32-bit support)
+- **Dependencies**: `x11rb` crate with `randr` feature
+
+### macOS
+- **API**: Core Graphics (Quartz)
+- **Functions**: `CGDisplayCreateImage`, `CGDataProvider`
+- **Format**: BGRA → RGBA conversion
+- **Dependencies**: `core-graphics` and `core-foundation` crates
+
+### Usage Example
+```rust
+use crate::core::native_capture::{NativeScreenCapture, capture_screen_native};
+
+// Using the struct
+let mut capture = NativeScreenCapture::new(Some(0))?; // Monitor 0
+let rgba_data = capture.capture_rgba()?;
+let (width, height) = capture.dimensions();
+
+// Using the standalone function
+let (data, width, height) = capture_screen_native(0)?;
+```
 
 ## Build Status
 
