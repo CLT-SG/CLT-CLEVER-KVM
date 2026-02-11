@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+// Old WebSocket/WebRTC presets removed - no longer applicable for VNC mode
+// VNC configuration is simplified and doesn't require presets
+export const presets = {};
+=======
 export const presets = {
   gaming: {
     bitrate: 12000,
@@ -12,3 +17,4 @@ export const presets = {
     fps: 15
   }
 };
+>>>>>>> feat/rdengine-vp9-streaming-with-https

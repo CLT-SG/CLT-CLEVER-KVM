@@ -2,6 +2,7 @@ use std::fmt;
 
 /// Custom error types for better error handling
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum KvmError {
     ServerError(String),
     NetworkError(String),

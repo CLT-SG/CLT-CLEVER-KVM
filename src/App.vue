@@ -1,7 +1,6 @@
 <script setup>
 import { onMounted, computed } from "vue";
 import { useServer } from "./composables";
-import { presets } from "./constants";
 
 import {
   TabContainer,
@@ -27,7 +26,11 @@ const {
   startServer,
   stopServer,
   openUrl,
-  copyUrl
+  copyUrl,
+  saveSettings,
+  scanningMediaMtx,
+  mediamtxServers,
+  scanMediaMtxServers
 } = useServer();
 
 function applyPreset(presetName) {
@@ -112,7 +115,8 @@ const tabs = computed(() => [
             :settings="settings"
             :displays="displays"
             :disabled="serverStatus"
-            @apply-preset="applyPreset"
+            :scanningMediaMtx="scanningMediaMtx"
+            :mediamtxServers="mediamtxServers"
             @update:server-port="updateServerPort"
             @update:selected-display="updateSelectedDisplay"
           />

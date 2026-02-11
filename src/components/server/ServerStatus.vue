@@ -76,16 +76,14 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
-
 const props = defineProps({
   serverStatus: Boolean,
   serverUrl: String,
+  vncInfo: Object,
   loading: Boolean,
   errorMessage: String,
   startServer: Function,
   stopServer: Function,
-  openUrl: Function,
   copyUrl: Function
 });
 

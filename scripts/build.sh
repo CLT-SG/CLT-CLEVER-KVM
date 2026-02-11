@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Build script for Clever KVM
-# This script builds the WebM-native remote desktop application
+# This script builds the VNC server application
 
 set -e
 
-echo "🚀 Building Clever KVM with native WebM support..."
+echo "🚀 Building Clever KVM VNC server..."
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then

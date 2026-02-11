@@ -52,12 +52,15 @@
     <AdvancedSettings 
       :settings="settings" 
       :disabled="disabled"
+      :scanningMediaMtx="scanningMediaMtx"
+      :mediamtxServers="mediamtxServers"
+      @settings-changed="$emit('settings-changed')"
+      @scan-mediamtx="$emit('scan-mediamtx')"
     />
   </div>
 </template>
 
 <script setup>
-import PresetSelector from './PresetSelector.vue';
 import AdvancedSettings from './AdvancedSettings.vue';
 
 defineProps({
@@ -70,6 +73,14 @@ defineProps({
   disabled: {
     type: Boolean,
     default: false
+  },
+  scanningMediaMtx: {
+    type: Boolean,
+    default: false
+  },
+  mediamtxServers: {
+    type: Array,
+    default: () => []
   }
 });
 
