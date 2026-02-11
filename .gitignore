@@ -31,4 +31,4 @@ bin
 
 # relay server
 relay-server/targetrustdesk/
-rustdesk
+rustdesk/

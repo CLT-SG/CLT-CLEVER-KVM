@@ -2,6 +2,38 @@
 
 ## Version History
 
+## [5.0.11] - 2026-02-11
+
+### Remove H.264 Legacy Codec from Web Client
+
+### Bug Fixes
+- **Dead H.264 Code**: Web client contained ~300 lines of H.264 decoder initialization, frame handling, and YUV fallback rendering code that was never executed since RDEngine uses VP9/VP8 exclusively
+- **Wrong Codec Configuration**: normalizeCodec() returned 'h264' and getCodecConfigurations() returned AVC codec strings despite VP9 being the only supported codec
+- **Misleading Comments**: Code comments and log messages referenced H.264 decoder and frame handling paths that no longer exist in the architecture
+
+### Improvements
+- **VP9-Only Codebase**: Removed all H.264 decoder properties, initialization methods, frame handlers, and YUV fallback renderers from kvm-client.js
+- **Correct Codec Strings**: normalizeCodec() now returns 'vp9' or 'vp8', getCodecConfigurations() returns VP9/VP8 WebCodecs codec strings
+- **Cleaner Video Pipeline**: handleBinaryVideoFrame() no longer checks for "H264" magic header, handleRdEngineVideoFrame() no longer has H.264 fallback branch
+
+### Technical Changes
+- **src-tauri/web-client/kvm-client.js**: Removed h264Decoder/h264SPS/h264PPS properties, removed initializeH264Decoder()/handleH264Frame()/handleH264VideoFrame()/renderH264Fallback()/renderH264FallbackLegacy()/renderH264FallbackGrayscale()/bilinearSample() methods, removed H.264 reset from resetDecoderState(), removed H.264 magic header detection, updated processVideoQueue()/normalizeCodec()/getCodecConfigurations() for VP9, updated comments and logs
+
+### Replace System Emojis with SVG Icons in Web Client
+
+### Bug Fixes
+- **Inconsistent Emoji Rendering**: Web client UI buttons and settings sections used system emojis that rendered differently across operating systems and browsers
+- **Non-Standard Console Prefixes**: Console log messages used emoji prefixes that can cause encoding issues and are non-standard for debugging output
+
+### Improvements
+- **SVG Icon System**: Replaced all UI emojis with inline SVG icons using Feather icon style (stroke-based, 16px) for consistent cross-platform rendering
+- **Standardized Log Prefixes**: Console log emojis replaced with text prefixes [ERROR], [WARNING], [INFO], [DEBUG] for consistent debugging output
+
+### Technical Changes
+- **src-tauri/web-client/kvm-client.js**: Replaced emoji prefixes in console.log/warn/error with [ERROR]/[WARNING]/[INFO]/[DEBUG], removed emoji from canvas text display
+- **src-tauri/web-client/kvm-template.html**: Replaced button emojis (fullscreen, settings, disconnect) with inline SVG icons, replaced settings section title emojis (Display, Audio, Performance) with inline SVG icons
+- **src-tauri/web-client/kvm-client.css**: Added .icon CSS class for SVG sizing (16px), .osd-button .icon and .section-title .icon styles for stroke and fill properties
+
 ## [5.0.10] - 2026-02-11
 
 ### Matrix Dark Theme UI Redesign with Interactive Server Controls
