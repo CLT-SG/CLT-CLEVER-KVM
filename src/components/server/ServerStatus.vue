@@ -2,7 +2,7 @@
   <div class="server-status">
     <div class="status-section">
       <div class="status-indicator" :class="{ active: serverStatus }"></div>
-      <p class="status-text">{{ serverStatus ? 'Running' : 'Stopped' }}</p>
+      <p class="status-text">{{ serverStatus ? 'VNC Server Running' : 'VNC Server Stopped' }}</p>
     </div>
     
     <div v-if="serverStatus" class="server-info">
@@ -27,7 +27,7 @@
         :disabled="loading"
         class="primary-button"
       >
-        {{ loading ? 'Starting...' : 'Start Server' }}
+        {{ loading ? 'Starting...' : 'Start VNC Server' }}
       </button>
       <button 
         v-else 
@@ -35,7 +35,7 @@
         :disabled="loading"
         class="danger-button"
       >
-        {{ loading ? 'Stopping...' : 'Stop Server' }}
+        {{ loading ? 'Stopping...' : 'Stop VNC Server' }}
       </button>
     </div>
 
@@ -44,16 +44,14 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
-
 const props = defineProps({
   serverStatus: Boolean,
   serverUrl: String,
+  vncInfo: Object,
   loading: Boolean,
   errorMessage: String,
   startServer: Function,
   stopServer: Function,
-  openUrl: Function,
   copyUrl: Function
 });
 
@@ -67,7 +65,7 @@ const displayUrl = computed(() => {
 
 <style scoped>
 .server-status {
-  max-width: 600px;
+  max-width: 700px;
   margin: 0 auto;
 }
 
@@ -171,33 +169,35 @@ const displayUrl = computed(() => {
 }
 
 .primary-button {
-  background-color: #3498db;
+  background-color: #28a745;
   color: white;
   border: none;
   padding: 0.75rem 2rem;
   border-radius: 4px;
   cursor: pointer;
   font-size: 1rem;
-  min-width: 140px;
+  min-width: 180px;
+  font-weight: 600;
 }
 
-.primary-button:hover {
-  background-color: #2980b9;
+.primary-button:hover:not(:disabled) {
+  background-color: #218838;
 }
 
 .danger-button {
-  background-color: #e74c3c;
+  background-color: #dc3545;
   color: white;
   border: none;
   padding: 0.75rem 2rem;
   border-radius: 4px;
   cursor: pointer;
   font-size: 1rem;
-  min-width: 140px;
+  min-width: 180px;
+  font-weight: 600;
 }
 
-.danger-button:hover {
-  background-color: #c0392b;
+.danger-button:hover:not(:disabled) {
+  background-color: #c82333;
 }
 
 button:disabled {
@@ -206,8 +206,12 @@ button:disabled {
 }
 
 .error {
-  color: #e74c3c;
+  color: #dc3545;
   text-align: center;
-  margin: 0;
+  margin: 1rem 0;
+  padding: 1rem;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
 }
 </style>

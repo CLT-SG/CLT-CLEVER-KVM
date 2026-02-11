@@ -2,10 +2,10 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use log::{info, warn, debug, error};
 use local_ip_address::local_ip;
+use serde::{Deserialize, Serialize};
 
-use crate::app::{ServerState, ServerOptions, MonitorInfo};
+use crate::app::{ServerState, MonitorInfo};
 use crate::core::ScreenCapture;
-use crate::network::WebSocketServer;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -73,11 +73,11 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
     }
 }
 
-#[tauri::command]
-pub fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option<ServerOptions>) -> Result<String, String> {
-    let port = port.unwrap_or(crate::lib::DEFAULT_SERVER_PORT);
-    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
-    let mut state = state.lock().unwrap();
+// Old WebSocket/WebRTC server commands have been removed.
+// Use VNC commands instead:
+// - start_vnc_server() for starting VNC servers
+// - stop_vnc_server() for stopping VNC servers  
+// - get_vnc_status() for checking VNC server status
 
     if state.running {
         warn!("Attempted to start server when already running");
@@ -90,30 +90,6 @@ pub fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Op
         state.options = opts;
     }
 
-    info!("Starting KVM server on port {}", port);
-    
-    // Apply system optimizations for ultra-low latency performance
-    info!("🔧 Applying system optimizations for ultra-low latency...");
-    if let Err(e) = crate::system::apply_ultra_performance_optimizations() {
-        warn!("Failed to apply some system optimizations: {}", e);
-        info!("Server will still work but may not achieve optimal performance");
-    } else {
-        info!("✅ System optimizations applied successfully");
-    }
-    
-    let app_handle_clone = app_handle.clone();
-    let server = state.runtime.block_on(async move {
-        match WebSocketServer::new(port, app_handle_clone).await {
-            Ok(server) => {
-                info!("Server started successfully");
-                Ok(server)
-            },
-            Err(e) => {
-                error!("Failed to start server: {}", e);
-                Err(format!("Failed to start server: {}", e))
-            },
-        }
-    })?;
 
     state.server_handle = Some(server);
     state.port = port;
@@ -211,18 +187,22 @@ pub fn get_server_url(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_logs() -> Result<(String, String), String> {
-    // Simplified log reading - get from default locations
-    let debug_content = match std::fs::read_to_string("/tmp/clever-kvm-debug.log") {
+    let log_dir = get_log_directory();
+    
+    let access_log_path = log_dir.join("access.log");
+    let error_log_path = log_dir.join("error.log");
+    
+    let access_content = match std::fs::read_to_string(&access_log_path) {
         Ok(content) => content,
-        Err(_) => "Debug log not found or accessible".to_string(),
+        Err(_) => format!("Access log not found at {:?}", access_log_path),
     };
     
-    let error_content = match std::fs::read_to_string("/tmp/clever-kvm-error.log") {
+    let error_content = match std::fs::read_to_string(&error_log_path) {
         Ok(content) => content,
-        Err(_) => "Error log not found or accessible".to_string(),
+        Err(_) => format!("Error log not found at {:?}", error_log_path),
     };
     
-    Ok((debug_content, error_content))
+    Ok((access_content, error_content))
 }
 
 #[tauri::command]

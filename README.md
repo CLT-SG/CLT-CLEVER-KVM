@@ -1,4 +1,4 @@
-# Clever KVM
+# Clever KVM - Display Server for Video Walls
 
 A high-performance remote desktop system built with Tauri, featuring VP9 video encoding via libvpx and ultra-low latency streaming over WebSocket.
 
@@ -187,7 +187,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-[UPDATER.md](docs/UPDATER.md)
+See [UPDATER.md](docs/UPDATER.md) for more details.
 
 This will automatically:
 - Build for Windows, macOS, and Linux
@@ -249,7 +249,8 @@ mimalloc = "0.1"       # Microsoft's optimized allocator
 ```
 
 ## Releases
-[CHANGELOG.md](docs/CHANGELOG.md)
+
+See [CHANGELOG.md](docs/CHANGELOG.md) for release history and updates.
 
 ## License
 
