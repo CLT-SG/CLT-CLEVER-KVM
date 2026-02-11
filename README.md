@@ -32,14 +32,14 @@ npm run tauri dev
 
 ## Features
 
-🎥 **VP9 Video Streaming (RDEngine)**
+**VP9 Video Streaming (RDEngine)**
 - **VP8/VP9 encoding** via libvpx (cross-platform, no hardware-specific dependencies)
 - Frame deduplication — skips encoding when screen is unchanged
 - Adaptive QoS — FPS and bitrate adjust based on network RTT
 - WebCodecs-based browser decoding with hardware acceleration
 - Configurable quality presets: Gaming (60fps/12Mbps), Desktop (30fps/6Mbps), Low Bandwidth (15fps/2Mbps)
 
-🖥️ **Native Screen Capture**
+**Native Screen Capture**
 - **Cross-Platform Native APIs**: Direct platform API integration for maximum stability
 - **Windows**: GDI capture (GetDC, BitBlt, GetDIBits) for universal Windows compatibility
 - **Linux X11**: Native X11 library with RandR extension for multi-monitor support
@@ -47,23 +47,31 @@ npm run tauri dev
 - **Multi-Format Frame Support**: Handles BGRA, RGB, and YUV formats with automatic conversion
 - **Monitor Detection**: Automatic display enumeration with fallback for headless systems
 
-🎵 **Audio Streaming**
+**Audio Streaming**
 - Opus codec (48kHz stereo) via cpal + opus crate
 - 10ms frame size for minimal latency
 - Streamed alongside video over the same WebSocket connection
 
-🚀 **Performance**
+**Performance**
 - Dedicated OS threads for capture/encode (not async — avoids jitter)
 - Pre-allocated YUV buffer reuse across frames
 - `parking_lot` high-performance locks
 - `mimalloc` allocator for optimized memory allocation
 - Sub-40ms latency on local network
 
-🖥️ **Desktop Control**
+**Desktop Control**
 - Multi-monitor support
 - Full keyboard/mouse/scroll control
 - Real-time cursor capture with desktop portal integration
 - Screen scaling options
+
+**Matrix Dark Theme UI**
+- **Modern Dark Interface**: Matrix-inspired dark theme with green accent colors (#00ff41)
+- **Interactive Server Controls**: Clickable status ring to toggle server start/stop
+- **SVG Icon System**: Professional Feather/Material Design style icons throughout
+- **Responsive Layout**: Optimized content density with 660px window height
+- **Tabbed Navigation**: Status, Configuration, Options, Logs, and Settings tabs with icons
+- See [THEME.md](docs/THEME.md) for detailed theme documentation
 
 ## System Requirements
 
@@ -151,6 +159,7 @@ sudo apt install -y build-essential curl wget file libssl-dev \
 - Binary frame parser with minimal header overhead
 - JSON-based control/input protocol
 - Vue 3.5 + Vite 6 management UI
+- Matrix dark theme with CSS custom properties
 
 ### Communication Protocol
 - **Video/Audio**: Binary WebSocket frames (length-prefixed)
@@ -208,6 +217,14 @@ On modern hardware, Clever KVM achieves:
 For detailed build instructions, troubleshooting, and platform-specific setup, see [BUILD.md](docs/BUILD.md).
 
 ## Recent Enhancements
+
+### Matrix Dark Theme UI (v5.0.10)
+- **Global Dark Theme**: CSS custom properties for colors, spacing, shadows, and effects
+- **Interactive Status Ring**: Clickable control to toggle server start/stop with visual feedback
+- **SVG Icon System**: Replaced emoji icons with professional inline SVG icons
+- **Improved Content Density**: 10% height increase, 10% font reduction for better UX
+- **Reorganized Settings**: UpdateChecker moved to Settings tab, removed unused Appearance section
+- See [THEME.md](docs/THEME.md) for detailed theme documentation
 
 ### RDEngine VP9 Streaming (v4.1.0)
 - **VP8/VP9 Encoding**: Cross-platform software encoding via libvpx

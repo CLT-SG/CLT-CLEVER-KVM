@@ -1,199 +1,292 @@
 <template>
   <div class="connection-options">
-    <h2>VNC Connection Guide</h2>
+    <h2 class="section-title">Connection Parameters</h2>
+    <p class="section-description">Add these query parameters to customize your connection</p>
     
-    <div class="guide-section">
-      <h3>Desktop VNC Clients</h3>
-      <p>Connect to the VNC server using any standard VNC client:</p>
-      
-      <div class="client-examples">
-        <div class="client-example">
-          <h4>TigerVNC</h4>
-          <code>vncviewer &lt;hostname&gt;:&lt;port&gt;</code>
-          <p class="description">Lightweight and fast VNC client for Linux, macOS, and Windows</p>
+    <div class="options-grid">
+      <div class="option-card" v-for="option in options" :key="option.param">
+        <div class="option-header">
+          <code class="option-param">{{ option.param }}</code>
+          <span v-if="option.badge" class="option-badge" :class="option.badge.type">
+            {{ option.badge.text }}
+          </span>
         </div>
-        
-        <div class="client-example">
-          <h4>RealVNC</h4>
-          <code>vnc://&lt;hostname&gt;:&lt;port&gt;</code>
-          <p class="description">Popular cross-platform VNC solution with extra features</p>
-        </div>
-        
-        <div class="client-example">
-          <h4>VNC Viewer</h4>
-          <p class="description">Enter <code>&lt;hostname&gt;:&lt;port&gt;</code> in the connection dialog</p>
-        </div>
+        <p class="option-desc">{{ option.description }}</p>
       </div>
     </div>
     
-    <div class="guide-section highlight-section">
-      <h3>🌐 NoVNC (Browser-Based Client)</h3>
-      <p>Connect using NoVNC for browser-based access via WebSocket:</p>
-      <p><strong>WebSocket URL format:</strong> <code>ws://&lt;hostname&gt;:&lt;websockify_port&gt;/</code></p>
-      <p><em>Example:</em> <code>ws://workstation-1:6080/</code></p>
-      <div class="info-box">
-        <p><strong>Note:</strong> NoVNC requires a WebSocket proxy (websockify) between the browser and VNC server.</p>
-        <p>The websockify runs on port 6080+ (not the VNC port). The exact URL is shown in the server status after starting.</p>
+    <div class="example-section">
+      <h3>Example URL</h3>
+      <div class="example-url">
+        <code>http://hostname:9921/kvm?stretch=true;monitor=1</code>
+        <button class="copy-btn" @click="copyExample" title="Copy example">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        </button>
       </div>
-    </div>
-    
-    <div class="guide-section">
-      <h3>🔊 Audio Streaming</h3>
-      <p>Audio streams via <strong>WebSocket</strong> using Opus encoding for low latency:</p>
-      <p><strong>Audio URL format:</strong> <code>ws://&lt;hostname&gt;:6900/audio</code></p>
-      <p><em>Example:</em> <code>ws://workstation-1:6900/audio</code></p>
-      <div class="info-box">
-        <p><strong>Shared Audio:</strong> All monitors share a single audio stream on port 6900 since system audio is identical across all displays.</p>
-        <p><strong>Encoding:</strong> 48kHz stereo Opus with low-latency mode (5-30ms latency)</p>
-        <p><strong>Note:</strong> VNC clients don't include audio. Use a separate WebSocket audio client or integrate with your video wall software.</p>
-      </div>
-    </div>
-    
-    <div class="guide-section">
-      <h3>Multi-Monitor Support</h3>
-      <p>Each monitor gets its own VNC server with automatic port assignment:</p>
-      <ul>
-        <li><strong>Monitor 0 (Primary):</strong> VNC port 5900, WebSocket ws://hostname:6080/</li>
-        <li><strong>Monitor 1:</strong> VNC port 5901, WebSocket ws://hostname:6081/</li>
-        <li><strong>Monitor 2:</strong> VNC port 5902, WebSocket ws://hostname:6082/</li>
-        <li><strong>Audio (Shared):</strong> WebSocket ws://hostname:6900/audio</li>
-      </ul>
-      <p class="description">Note: Use the websockify port (608x) for NoVNC, not the VNC port (590x)</p>
     </div>
     
     <div class="features-section">
-      <h3>Features</h3>
-      <ul>
-        <li><strong>Standard VNC Protocol:</strong> RFB 3.8 compatible with all VNC clients</li>
-        <li><strong>WebSocket Support:</strong> NoVNC browser-based access with websockify URLs</li>
-        <li><strong>Low-Latency Audio:</strong> WebSocket audio streaming with Opus codec (5-30ms)</li>
-        <li><strong>Multi-Client Support:</strong> Up to 10 simultaneous connections per monitor</li>
-        <li><strong>Hardware Acceleration:</strong> GPU-accelerated screen capture when available</li>
-        <li><strong>Full Control:</strong> Complete keyboard and mouse control</li>
-        <li><strong>Exact Positioning:</strong> Preserves monitor layout and positioning</li>
-      </ul>
+      <h3>Advanced Features</h3>
+      <div class="features-grid">
+        <div class="feature-card" v-for="feature in features" :key="feature.name">
+          <span class="feature-icon" v-html="feature.icon"></span>
+          <div class="feature-content">
+            <strong>{{ feature.name }}</strong>
+            <p>{{ feature.description }}</p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
+<script setup>
+const options = [
+  { param: 'stretch=true', description: 'Stretch screen to fit window', badge: null },
+  { param: 'mute=true', description: 'Mute audio on connect', badge: null },
+  { param: 'audio=true', description: 'Enable audio streaming', badge: { text: 'WebRTC', type: 'info' } },
+  { param: 'remoteOnly=true', description: 'Only show remote screen (no toolbar)', badge: null },
+  { param: 'encryption=true', description: 'Enable encrypted connection', badge: { text: 'Secure', type: 'success' } },
+  { param: 'monitor=1', description: 'Select specific monitor to display', badge: null }
+];
+
+const features = [
+  { 
+    name: 'Delta Encoding', 
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>', 
+    description: 'Only sends changed parts of the screen' 
+  },
+  { 
+    name: 'Adaptive Quality', 
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>', 
+    description: 'Adjusts quality based on network conditions' 
+  },
+  { 
+    name: 'Encryption', 
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>', 
+    description: 'Secures connections between client and server' 
+  },
+  { 
+    name: 'WebRTC Audio', 
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>', 
+    description: 'Low-latency audio streaming' 
+  },
+  { 
+    name: 'H.264 Codec', 
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>', 
+    description: 'Optimized WebRTC H.264 encoding' 
+  },
+  { 
+    name: 'Hardware Accel', 
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', 
+    description: 'GPU encoding for reduced CPU usage' 
+  },
+  { 
+    name: 'Multi-Monitor', 
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>', 
+    description: 'Choose which monitor to share' 
+  }
+];
+
+function copyExample() {
+  navigator.clipboard.writeText('http://hostname:9921/kvm?stretch=true;monitor=1');
+}
+</script>
+
 <style scoped>
 .connection-options {
-  max-width: 800px;
-  margin: 0 auto;
+  max-width: 100%;
 }
 
-h2 {
-  color: #2c3e50;
-  margin-top: 0;
-  font-size: 1.5rem;
+.section-title {
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: 1.35rem;
+  color: var(--text-primary);
 }
 
-h3 {
-  color: #2c3e50;
-  font-size: 1.2rem;
-  margin-top: 1.5rem;
-  margin-bottom: 0.75rem;
+.section-description {
+  margin: 0 0 var(--spacing-xl) 0;
+  color: var(--text-muted);
 }
 
-h4 {
-  color: #495057;
-  font-size: 1rem;
-  margin: 0.5rem 0 0.25rem 0;
-}
-
-.guide-section {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #dee2e6;
-}
-
-.guide-section.highlight-section {
-  background-color: #e7f3ff;
-  border: 2px solid #0066cc;
-}
-
-.guide-section p {
-  margin: 0.5rem 0;
-  line-height: 1.6;
-}
-
-.info-box {
-  margin-top: 1rem;
-  padding: 1rem;
-  background-color: rgba(255, 255, 255, 0.6);
-  border-left: 3px solid #0066cc;
-  border-radius: 4px;
-}
-
-.info-box p {
-  margin: 0.5rem 0;
-  font-size: 0.9rem;
-}
-
-.client-examples {
+/* Options Grid */
+.options-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-xl);
 }
 
-.client-example {
-  padding: 1rem;
-  background-color: #ffffff;
-  border-radius: 6px;
-  border: 1px solid #dee2e6;
+.option-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  transition: border-color var(--transition-fast);
 }
 
-.description {
+.option-card:hover {
+  border-color: var(--border-light);
+}
+
+.option-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.option-param {
+  font-family: var(--font-mono);
   font-size: 0.85rem;
-  color: #6c757d;
-  margin-top: 0.5rem;
-}
-
-code {
-  background-color: #e9ecef;
+  color: var(--color-primary);
+  background: var(--bg-primary);
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
+  border-radius: var(--radius-sm);
+}
+
+.option-badge {
+  font-size: 0.65rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.option-badge.info {
+  background: rgba(0, 180, 255, 0.15);
+  color: var(--color-info);
+}
+
+.option-badge.success {
+  background: rgba(0, 255, 65, 0.15);
+  color: var(--color-success);
+}
+
+.option-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* Example Section */
+.example-section {
+  margin-bottom: var(--spacing-xl);
+}
+
+.example-section h3 {
+  margin: 0 0 var(--spacing-md) 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.example-url {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.example-url code {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--color-primary);
+  background: transparent;
+  padding: 0;
+  word-break: break-all;
+}
+
+.copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-sm);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.copy-btn:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* Features Section */
+.features-section h3 {
+  margin: 0 0 var(--spacing-lg) 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.feature-card {
+  display: flex;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast);
+}
+
+.feature-card:hover {
+  border-color: var(--border-light);
+}
+
+.feature-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-primary);
+  background: rgba(0, 255, 65, 0.1);
+  border-radius: var(--radius-md);
+  padding: 6px;
+}
+
+.feature-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
+}
+
+.feature-content strong {
+  display: block;
+  color: var(--text-primary);
   font-size: 0.9rem;
-  color: #c7254e;
+  margin-bottom: var(--spacing-xs);
 }
 
-.features-section {
-  margin-top: 2rem;
+.feature-content p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
-.features-section ul {
-  padding-left: 1.5rem;
-  line-height: 1.8;
-}
-
-.features-section li {
-  margin-bottom: 0.5rem;
-}
-
-.features-section strong {
-  color: #0066cc;
-}
-
-.guide-section ul {
-  padding-left: 1.5rem;
-  line-height: 1.8;
-}
-
-.guide-section li {
-  margin-bottom: 0.5rem;
-}
-
-@media (max-width: 768px) {
-  .client-examples {
+/* Responsive */
+@media (max-width: 600px) {
+  .options-grid,
+  .features-grid {
     grid-template-columns: 1fr;
-  }
-  
-  .guide-section {
-    padding: 1rem;
   }
 }
 </style>

@@ -9,6 +9,7 @@ This document describes the professional modular structure of the Tauri Rust bac
 | **Tauri App** | `src-tauri/` | Desktop application with screen capture, encoding, and local server |
 | **Relay Server** | `relay-server/` | Centralized device management with Actix Web (see [relay-server/README.md](../../relay-server/README.md)) |
 | **Web Client** | `src-tauri/web-client/` | Browser-based KVM viewer with H.264 WebCodecs decoder |
+| **Vue Frontend** | `src/` | Management UI with Matrix dark theme (see [THEME.md](../../docs/THEME.md)) |
 
 ## Directory Structure
 
@@ -141,48 +142,48 @@ src-tauri/src/
 
 ## Key Improvements
 
-### ✅ **Modular Architecture**
+### [X] **Modular Architecture**
 - Each module has a clear, single responsibility
 - Easy to maintain and extend
 - Better code organization
 
-### ✅ **Clean Entry Point**
+### [X] **Clean Entry Point**
 - `main.rs` reduced from 653 lines to ~70 lines
 - Clear application initialization
 - Better separation of concerns
 
-### ✅ **Professional Structure**
+### [X] **Professional Structure**
 - Industry-standard Rust project organization
 - Proper module hierarchy
 - Consistent naming conventions
 
-### ✅ **Maintainability**
+### [X] **Maintainability**
 - Related functionality grouped together
 - Easy to locate specific features
 - Clear module boundaries
 
-### ✅ **Scalability**
+### [X] **Scalability**
 - Easy to add new features in appropriate modules
 - Room for expansion in each category
 - Modular design supports growth
 
-### ✅ **Error Handling**
+### [X] **Error Handling**
 - Centralized error types
 - Consistent error handling patterns
 - Better debugging capabilities
 
-### ✅ **Constants Management**
+### [X] **Constants Management**
 - Centralized application constants
 - Easy configuration management
 - Consistent default values
 
 ## Backward Compatibility
 
-✅ **All functionality preserved** - The restructuring maintains 100% of the original functionality while organizing it better.
+[X] **All functionality preserved** - The restructuring maintains 100% of the original functionality while organizing it better.
 
-✅ **Same public API** - All Tauri commands and public interfaces remain the same.
+[X] **Same public API** - All Tauri commands and public interfaces remain the same.
 
-✅ **Build compatibility** - The project builds successfully with the new structure.
+[X] **Build compatibility** - The project builds successfully with the new structure.
 
 ## Cross-Platform Screen Capture
 
@@ -221,9 +222,9 @@ let (data, width, height) = capture_screen_native(0)?;
 
 ## Build Status
 
-✅ **Compilation**: Success with 109 warnings (mostly unused code warnings, which is normal during refactoring)
-✅ **Module resolution**: All modules resolve correctly
-✅ **Dependencies**: All dependencies satisfied
+[X] **Compilation**: Success with 109 warnings (mostly unused code warnings, which is normal during refactoring)
+[X] **Module resolution**: All modules resolve correctly
+[X] **Dependencies**: All dependencies satisfied
 
 ## Next Steps
 

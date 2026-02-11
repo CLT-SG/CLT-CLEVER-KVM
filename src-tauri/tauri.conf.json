@@ -49,13 +49,21 @@
       },
       "os": {
         "all": true
+      },
+      "path": {
+        "all": true
       }
+    },
+    "systemTray": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "menuOnLeftClick": false
     },
     "windows": [
       {
         "title": "Clever KVM",
         "width": 800,
-        "height": 600,
+        "height": 660,
         "resizable": true,
         "fullscreen": false
       }

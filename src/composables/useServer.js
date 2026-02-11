@@ -22,6 +22,9 @@ export function useServer() {
   });
   const discoveredRelays = ref([]);
   const relayLoading = ref(false);
+  
+  // Track if relay status command is available
+  let relayCommandAvailable = true;
 
   // Status check interval
   let statusCheckInterval = null;
@@ -69,6 +72,11 @@ export function useServer() {
   }
 
   async function checkRelayStatus() {
+    // Skip if we already know the command is not available
+    if (!relayCommandAvailable) {
+      return;
+    }
+    
     try {
       const status = await invoke("get_relay_status");
       relayStatus.connected = status.connected;
@@ -78,9 +86,15 @@ export function useServer() {
       relayStatus.autoReconnect = status.auto_reconnect ?? true;
       relayStatus.reconnectAttempts = status.reconnect_attempts ?? 0;
     } catch (error) {
-      console.warn("Failed to check relay status:", error);
+      // If command is not found, disable future checks to avoid spamming console
+      if (error && String(error).includes("not found")) {
+        relayCommandAvailable = false;
+        relayStatus.state = "unavailable";
+      } else {
+        console.warn("Failed to check relay status:", error);
+        relayStatus.state = "error";
+      }
       relayStatus.connected = false;
-      relayStatus.state = "error";
     }
   }
 
@@ -346,7 +360,10 @@ export function useServer() {
     settings,
     monitors,
     loadingMonitors,
-    vncInfo,
+    // Aliases for backwards compatibility
+    displays: monitors,
+    loadingDisplays: loadingMonitors,
+    selectedCodec,
     checkServerStatus,
     startServer,
     stopServer,
