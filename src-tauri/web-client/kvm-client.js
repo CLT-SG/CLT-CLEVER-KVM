@@ -18,11 +18,6 @@ class KVMClient {
         this.currentCodec = config.codec || "vp9"; // VP9 via WebRTC DataChannel (RDEngine primary codec)
         this.videoQueue = [];
         this.showStats = false;
-        
-        // H.264 decoder (legacy fallback)
-        this.h264Decoder = null;
-        this.h264SPS = null;
-        this.h264PPS = null;
 
         // VP8/VP9 decoder (RustDesk-inspired, primary codec)
         this.vpxDecoder = null;
@@ -109,7 +104,6 @@ class KVMClient {
 
         this.initializeElements();
         this.initializeVpxDecoder();
-        this.initializeH264Decoder(); // Legacy fallback
         this.initializeFrameTracking();
         this.setupEventListeners();
         this.connect();
@@ -181,61 +175,6 @@ class KVMClient {
                     }
                 });
             }
-        }
-        
-        this.updateFrameStats();
-    }
-
-    // Initialize H.264 decoder
-    initializeH264Decoder() {
-        console.log('Initializing H.264 decoder...');
-        
-        // Check if H264Decoder class is available
-        if (typeof H264Decoder !== 'undefined') {
-            this.h264Decoder = new H264Decoder({
-                width: this.screenWidth,
-                height: this.screenHeight,
-                onFrame: (frame, metadata) => this.handleH264Frame(frame, metadata),
-                onError: (error) => {
-                    // Only log actual decode errors, not initialization warnings
-                    if (error && error.message) {
-                        console.warn('H.264 decode warning:', error.message);
-                    }
-                },
-                onReady: () => {
-                    console.log('✅ H.264 decoder ready');
-                    this.supportsHardwareDecoding = this.h264Decoder?.useWebCodecs || false;
-                }
-            });
-        } else {
-            console.warn('⚠️ H264Decoder not loaded, will use fallback');
-        }
-    }
-    
-    // Handle decoded H.264 frame
-    handleH264Frame(frame, metadata) {
-        // When using native <video> element rendering, skip canvas path
-        if (this.usingVideoElement) {
-            if (frame instanceof VideoFrame) frame.close();
-            if (frame instanceof ImageBitmap) frame.close();
-            return;
-        }
-
-        if (!this.realCanvas || !this.realCtx) {
-            this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
-        }
-        
-        if (frame instanceof VideoFrame) {
-            // WebCodecs VideoFrame - render directly
-            this.realCtx.drawImage(frame, 0, 0);
-            frame.close(); // Important: close to free resources
-        } else if (frame instanceof ImageBitmap) {
-            // Software-decoded ImageBitmap
-            this.realCtx.drawImage(frame, 0, 0);
-            frame.close();
-        } else if (frame instanceof ImageData) {
-            // Raw ImageData
-            this.realCtx.putImageData(frame, 0, 0);
         }
         
         this.updateFrameStats();
@@ -1057,13 +996,6 @@ class KVMClient {
         }
         this.initializeVpxDecoder();
 
-        // Reset H.264 decoder if present
-        if (this.h264Decoder) {
-            try { this.h264Decoder.destroy?.(); } catch (e) {}
-            this.h264Decoder = null;
-        }
-        this.initializeH264Decoder();
-
         console.log('Decoder state reset for reconnection');
     }
 
@@ -1521,9 +1453,8 @@ class KVMClient {
         // Pre-initialize the optimized canvas with server dimensions
         this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
         
-        // Initialize correct decoder based on codec
+        // Initialize VPX decoder for VP8/VP9 (the only supported codecs)
         if (serverCodec === 'vp8' || serverCodec === 'vp9') {
-            // rdengine VP8/VP9 path
             if (this.vpxDecoder) {
                 this.vpxDecoder.setCodec(serverCodec);
                 this.vpxDecoder.setDimensions(this.screenWidth, this.screenHeight);
@@ -1533,8 +1464,15 @@ class KVMClient {
                 this.initializeVpxDecoder();
             }
         } else {
-            // Legacy H.264 path
-            this.initializeVideoStreaming();
+            // Unsupported codec - fall back to VP9
+            console.warn(`Unsupported codec '${serverCodec}', falling back to VP9`);
+            this.serverCodec = 'vp9';
+            if (this.vpxDecoder) {
+                this.vpxDecoder.setCodec('vp9');
+                this.vpxDecoder.setDimensions(this.screenWidth, this.screenHeight);
+            } else {
+                this.initializeVpxDecoder();
+            }
         }
         
         // Audio: rdengine sends Opus directly over WebSocket, no WebRTC needed
@@ -1620,9 +1558,9 @@ class KVMClient {
             return;
         }
         
-        console.log('🎬 Initializing H.264 video streaming');
+        console.log('🎬 Initializing VP9 video streaming');
         
-        // H.264 uses canvas-based rendering with WebCodecs decoder
+        // VP9 uses canvas-based rendering with WebCodecs decoder
         // Set video element dimensions for fallback
         this.videoScreen.width = this.screenWidth;
         this.videoScreen.height = this.screenHeight;
@@ -1638,23 +1576,20 @@ class KVMClient {
             this.videoScreen.style.objectFit = 'contain';
         }
         
-        // Initialize optimized canvas for H.264 frame rendering
+        // Initialize optimized canvas for VP9 frame rendering
         this.initializeOptimizedCanvas(this.screenWidth, this.screenHeight);
     }
 
-    // H.264 streaming uses WebCodecs VideoDecoder - no MediaSource needed
-    // The h264-decoder.js handles all H.264 decoding with hardware acceleration
-
     processVideoQueue() {
-        // Process queued H.264 frames if any
+        // Process queued video frames if any
         if (this.videoQueue.length === 0) {
             return;
         }
         
-        // H.264 frames are processed directly by the decoder
+        // VP9 frames are processed directly by the VPX decoder
         const frame = this.videoQueue.shift();
-        if (frame && this.h264Decoder && this.h264Decoder.isReady) {
-            this.h264Decoder.decode(frame.data, frame.metadata);
+        if (frame && this.vpxDecoder && this.vpxDecoder.isReady) {
+            this.vpxDecoder.decode(frame.data, frame.metadata);
         }
     }
 
@@ -1710,19 +1645,8 @@ class KVMClient {
                 return;
             }
             
-            // Legacy format detection by 4-byte header
-            const header = String.fromCharCode(
-                view.getUint8(0), view.getUint8(1), 
-                view.getUint8(2), view.getUint8(3)
-            );
-            
-            if (header === 'H264') {
-                // Legacy H.264 frame from old pipeline
-                this.handleH264VideoFrame(binaryData);
-            } else {
-                // Fall back to RGBA/RLE frame parsing
-                this.parseAndRenderFrame(binaryData);
-            }
+            // Fall back to RGBA/RLE frame parsing for legacy formats
+            this.parseAndRenderFrame(binaryData);
             
             this.updateFrameStats();
             
@@ -1972,8 +1896,8 @@ class KVMClient {
         const isKeyframe = (flags & 0x01) !== 0;
         const encodedData = new Uint8Array(binaryData, offset, payloadLen - 18);
         
-        // Codec IDs: 0x01=VP8, 0x02=VP9, 0x03=H264
-        const codecName = codec === 0x01 ? 'vp8' : codec === 0x02 ? 'vp9' : 'h264';
+        // Codec IDs: 0x01=VP8, 0x02=VP9
+        const codecName = codec === 0x01 ? 'vp8' : 'vp9';
         
         // Update dimensions if changed
         if (this.screenWidth !== width || this.screenHeight !== height) {
@@ -1994,20 +1918,11 @@ class KVMClient {
             console.log(`Keyframe: ${codecName} ${width}x${height}, size=${encodedData.byteLength}`);
         }
         
-        // Decode with VP8/VP9 decoder (preferred)
-        if ((codecName === 'vp8' || codecName === 'vp9') && this.vpxDecoder && this.vpxDecoder.isReady) {
+        // Decode with VP8/VP9 decoder
+        if (this.vpxDecoder && this.vpxDecoder.isReady) {
             this.vpxDecoder.decode(encodedData, {
                 isKeyframe,
                 timestamp: timestampMs * 1000, // Convert ms to us for WebCodecs
-            });
-            return;
-        }
-        
-        // Fallback to H.264 decoder for H.264 codec
-        if (codecName === 'h264' && this.h264Decoder && this.h264Decoder.isReady) {
-            this.h264Decoder.decode(encodedData, {
-                isKeyframe,
-                timestamp: timestampMs * 1000,
             });
             return;
         }
@@ -2017,289 +1932,6 @@ class KVMClient {
             console.warn(`No decoder for codec: ${codecName}`);
         }
     }
-    
-    /**
-     * Handle H.264 video frame from low-latency pipeline
-     * Frame format:
-     * [4 bytes] Magic: "H264"
-     * [4 bytes] Width (little-endian)
-     * [4 bytes] Height (little-endian)
-     * [8 bytes] Timestamp (little-endian, microseconds)
-     * [4 bytes] Frame size (little-endian)
-     * [1 byte]  Flags (bit 0: keyframe)
-     * [N bytes] H.264 NAL units
-     */
-    handleH264VideoFrame(binaryData) {
-        const view = new DataView(binaryData);
-        let offset = 4; // Skip "H264" header
-        
-        // Parse frame header
-        const width = view.getUint32(offset, true); offset += 4;
-        const height = view.getUint32(offset, true); offset += 4;
-        const timestamp = Number(view.getBigUint64(offset, true)); offset += 8;
-        const frameSize = view.getUint32(offset, true); offset += 4;
-        const flags = view.getUint8(offset); offset += 1;
-        const isKeyframe = (flags & 0x01) !== 0;
-        
-        // Update dimensions if changed
-        if (this.screenWidth !== width || this.screenHeight !== height) {
-            console.log(`📐 H.264 dimensions: ${width}x${height}`);
-            this.screenWidth = width;
-            this.screenHeight = height;
-            
-            if (this.h264Decoder) {
-                this.h264Decoder.setDimensions(width, height);
-            }
-            
-            this.initializeOptimizedCanvas(width, height);
-        }
-        
-        // Extract H.264 data
-        const h264Data = new Uint8Array(binaryData, offset, frameSize);
-        
-        // Log keyframes
-        if (isKeyframe && this.frameLogCounter < 20) {
-            console.log(`🔑 H.264 keyframe: ${width}x${height}, size=${frameSize}`);
-        }
-        
-        // Decode with H.264 decoder if available
-        if (this.h264Decoder && this.h264Decoder.isReady) {
-            this.h264Decoder.decode(h264Data, {
-                isKeyframe,
-                timestamp,
-                width,
-                height
-            });
-        } else {
-            // Fallback: try to render simplified H.264 data directly
-            this.renderH264Fallback(h264Data, width, height, isKeyframe);
-        }
-    }
-    
-    /**
-     * Fallback H.264 rendering when WebCodecs is not available
-     * Handles high-quality subsampled YUV420 data with bilinear upscaling
-     */
-    renderH264Fallback(h264Data, width, height, isKeyframe) {
-        // Initialize canvas if needed
-        if (!this.realCanvas || !this.realCtx) {
-            this.initializeOptimizedCanvas(width, height);
-        }
-        
-        // Skip NAL headers to find YUV data
-        let offset = 0;
-        
-        // Look for slice NAL unit (start code + NAL type 5 for IDR or 1 for slice)
-        while (offset < h264Data.length - 4) {
-            if (h264Data[offset] === 0 && h264Data[offset + 1] === 0 && 
-                h264Data[offset + 2] === 0 && h264Data[offset + 3] === 1) {
-                const nalType = h264Data[offset + 4] & 0x1F;
-                if (nalType === 5 || nalType === 1) { // IDR or Slice
-                    offset += 9; // Skip NAL header and slice header
-                    break;
-                }
-            }
-            offset++;
-        }
-        
-        // Read subsampled dimensions from header
-        if (offset + 8 > h264Data.length) {
-            console.warn('Not enough data for YUV header');
-            return;
-        }
-        
-        const yOutWidth = h264Data[offset] | (h264Data[offset + 1] << 8);
-        const yOutHeight = h264Data[offset + 2] | (h264Data[offset + 3] << 8);
-        const uvOutWidth = h264Data[offset + 4] | (h264Data[offset + 5] << 8);
-        const uvOutHeight = h264Data[offset + 6] | (h264Data[offset + 7] << 8);
-        offset += 8;
-        
-        const yDataSize = yOutWidth * yOutHeight;
-        const uvDataSize = uvOutWidth * uvOutHeight;
-        
-        if (offset + yDataSize + uvDataSize * 2 > h264Data.length) {
-            console.warn('Not enough YUV data:', offset + yDataSize + uvDataSize * 2, '>', h264Data.length);
-            // Try legacy format
-            this.renderH264FallbackLegacy(h264Data, width, height);
-            return;
-        }
-        
-        // Extract YUV planes
-        const yPlane = h264Data.subarray(offset, offset + yDataSize);
-        offset += yDataSize;
-        const uPlane = h264Data.subarray(offset, offset + uvDataSize);
-        offset += uvDataSize;
-        const vPlane = h264Data.subarray(offset, offset + uvDataSize);
-        
-        // Create image data with bilinear upscaling
-        const imageData = this.realCtx.createImageData(width, height);
-        const pixels = imageData.data;
-        
-        // Calculate scaling factors
-        const yScaleX = yOutWidth / width;
-        const yScaleY = yOutHeight / height;
-        const uvScaleX = uvOutWidth / width;
-        const uvScaleY = uvOutHeight / height;
-        
-        // Bilinear interpolation for high-quality upscaling
-        for (let py = 0; py < height; py++) {
-            for (let px = 0; px < width; px++) {
-                // Y plane interpolation
-                const ySrcX = px * yScaleX;
-                const ySrcY = py * yScaleY;
-                const y = this.bilinearSample(yPlane, yOutWidth, yOutHeight, ySrcX, ySrcY);
-                
-                // UV plane interpolation
-                const uvSrcX = px * uvScaleX;
-                const uvSrcY = py * uvScaleY;
-                const u = this.bilinearSample(uPlane, uvOutWidth, uvOutHeight, uvSrcX, uvSrcY);
-                const v = this.bilinearSample(vPlane, uvOutWidth, uvOutHeight, uvSrcX, uvSrcY);
-                
-                // Convert YUV to RGB (BT.601 full range)
-                // Y is already in 0-255 range, U/V centered at 128
-                const yVal = y;
-                const uVal = u - 128;
-                const vVal = v - 128;
-                
-                // Full range BT.601 conversion (no clamping needed for Y)
-                const r = Math.max(0, Math.min(255, Math.round(yVal + 1.402 * vVal)));
-                const g = Math.max(0, Math.min(255, Math.round(yVal - 0.344 * uVal - 0.714 * vVal)));
-                const b = Math.max(0, Math.min(255, Math.round(yVal + 1.772 * uVal)));
-                
-                const pixelIndex = (py * width + px) * 4;
-                pixels[pixelIndex] = r;
-                pixels[pixelIndex + 1] = g;
-                pixels[pixelIndex + 2] = b;
-                pixels[pixelIndex + 3] = 255;
-            }
-        }
-        
-        this.realCtx.putImageData(imageData, 0, 0);
-    }
-    
-    /**
-     * Bilinear sampling for smooth upscaling
-     */
-    bilinearSample(plane, planeWidth, planeHeight, x, y) {
-        const x0 = Math.floor(x);
-        const y0 = Math.floor(y);
-        const x1 = Math.min(x0 + 1, planeWidth - 1);
-        const y1 = Math.min(y0 + 1, planeHeight - 1);
-        
-        const fx = x - x0;
-        const fy = y - y0;
-        
-        const p00 = plane[y0 * planeWidth + x0] || 128;
-        const p10 = plane[y0 * planeWidth + x1] || 128;
-        const p01 = plane[y1 * planeWidth + x0] || 128;
-        const p11 = plane[y1 * planeWidth + x1] || 128;
-        
-        // Bilinear interpolation
-        const top = p00 * (1 - fx) + p10 * fx;
-        const bottom = p01 * (1 - fx) + p11 * fx;
-        return top * (1 - fy) + bottom * fy;
-    }
-    
-    /**
-     * Legacy fallback for old macroblock format
-     */
-    renderH264FallbackLegacy(h264Data, width, height) {
-        const mbWidth = Math.ceil(width / 16);
-        const mbHeight = Math.ceil(height / 16);
-        
-        let offset = 0;
-        while (offset < h264Data.length - 4) {
-            if (h264Data[offset] === 0 && h264Data[offset + 1] === 0 && 
-                h264Data[offset + 2] === 0 && h264Data[offset + 3] === 1) {
-                const nalType = h264Data[offset + 4] & 0x1F;
-                if (nalType === 5 || nalType === 1) {
-                    offset += 9;
-                    break;
-                }
-            }
-            offset++;
-        }
-        
-        const mbDataSize = mbWidth * mbHeight * 3;
-        if (offset + mbDataSize > h264Data.length) {
-            this.renderH264FallbackGrayscale(h264Data, width, height, offset, mbWidth, mbHeight);
-            return;
-        }
-        
-        const imageData = this.realCtx.createImageData(width, height);
-        const pixels = imageData.data;
-        
-        for (let mbY = 0; mbY < mbHeight; mbY++) {
-            for (let mbX = 0; mbX < mbWidth; mbX++) {
-                const mbIndex = (mbY * mbWidth + mbX) * 3;
-                const y = h264Data[offset + mbIndex] || 128;
-                const u = h264Data[offset + mbIndex + 1] || 128;
-                const v = h264Data[offset + mbIndex + 2] || 128;
-                
-                // BT.601 full range conversion
-                const yVal = y;
-                const uVal = u - 128;
-                const vVal = v - 128;
-                
-                const r = Math.max(0, Math.min(255, Math.round(yVal + 1.402 * vVal)));
-                const g = Math.max(0, Math.min(255, Math.round(yVal - 0.344 * uVal - 0.714 * vVal)));
-                const b = Math.max(0, Math.min(255, Math.round(yVal + 1.772 * uVal)));
-                
-                for (let dy = 0; dy < 16; dy++) {
-                    const py = mbY * 16 + dy;
-                    if (py >= height) continue;
-                    
-                    for (let dx = 0; dx < 16; dx++) {
-                        const px = mbX * 16 + dx;
-                        if (px >= width) continue;
-                        
-                        const pixelIndex = (py * width + px) * 4;
-                        pixels[pixelIndex] = r;
-                        pixels[pixelIndex + 1] = g;
-                        pixels[pixelIndex + 2] = b;
-                        pixels[pixelIndex + 3] = 255;
-                    }
-                }
-            }
-        }
-        
-        this.realCtx.putImageData(imageData, 0, 0);
-    }
-    
-    /**
-     * Grayscale fallback for legacy Y-only format
-     */
-    renderH264FallbackGrayscale(h264Data, width, height, offset, mbWidth, mbHeight) {
-        const imageData = this.realCtx.createImageData(width, height);
-        const pixels = imageData.data;
-        
-        for (let mbY = 0; mbY < mbHeight; mbY++) {
-            for (let mbX = 0; mbX < mbWidth; mbX++) {
-                const mbIndex = mbY * mbWidth + mbX;
-                const yValue = h264Data[offset + mbIndex] || 128;
-                
-                for (let dy = 0; dy < 16; dy++) {
-                    const py = mbY * 16 + dy;
-                    if (py >= height) continue;
-                    
-                    for (let dx = 0; dx < 16; dx++) {
-                        const px = mbX * 16 + dx;
-                        if (px >= width) continue;
-                        
-                        const pixelIndex = (py * width + px) * 4;
-                        pixels[pixelIndex] = yValue;
-                        pixels[pixelIndex + 1] = yValue;
-                        pixels[pixelIndex + 2] = yValue;
-                        pixels[pixelIndex + 3] = 255;
-                    }
-                }
-            }
-        }
-        
-        this.realCtx.putImageData(imageData, 0, 0);
-    }
-
-    // VP9 is the primary codec via RDEngine — H.264 legacy fallback retained
 
     parseAndRenderFrame(arrayBuffer) {
         const now = performance.now();
@@ -2947,12 +2579,12 @@ class KVMClient {
 
     // Legacy method - no longer used since we decode actual frames
     renderBinaryFrame(videoData) {
-        console.warn('renderBinaryFrame called - this should not happen with H.264 frame decoding');
+        console.warn('renderBinaryFrame called - this should not happen with VP9 frame decoding');
     }
 
-    // Legacy video frame handler - H.264 frames are handled via handleH264VideoFrame
+    // Legacy video frame handler - VP9 frames are handled via handleRdEngineVideoFrame
     handleVideoFrame(data) {
-        // H.264 binary frames are handled directly by handleBinaryVideoFrame
+        // VP9 binary frames are handled directly by handleBinaryVideoFrame
         // This method exists for JSON-based frame messages (legacy)
         if (!this.frameLogCounter) this.frameLogCounter = 0;
         if (this.frameLogCounter % 30 === 0) {
@@ -2995,7 +2627,7 @@ class KVMClient {
         ctx.textAlign = 'left';
         const fps = this.frameStats?.currentFps || 0;
         
-        ctx.fillText('🖥️ H.264 Remote Desktop', 20, 30);
+        ctx.fillText('🖥️ VP9 Remote Desktop', 20, 30);
         ctx.font = '12px monospace';
         ctx.fillStyle = '#00ff88';
         ctx.fillText(`Frame: #${frameNumber}`, 20, 50);
@@ -3020,7 +2652,7 @@ class KVMClient {
     }
 
     isValidVideoData(data) {
-        // Basic validation for H.264 data
+        // Basic validation for VP9 data
         const view = new Uint8Array(data);
         
         // Check if it looks like valid data
@@ -3287,18 +2919,19 @@ class KVMClient {
     }
 
     normalizeCodec(codec) {
-        // Always return H.264 since it's our only supported codec
-        return 'h264';
+        // VP9 is the primary codec, VP8 also supported
+        if (codec === 'vp8') return 'vp8';
+        return 'vp9';
     }
 
     getCodecConfigurations(codec) {
-        // H.264 codec configurations for WebCodecs
-        console.log('Getting H.264 codec configurations');
+        // VP8/VP9 codec configurations for WebCodecs
+        console.log('Getting VP9 codec configurations');
         
         return [
-            'avc1.42E01F',  // H.264 Baseline Level 3.1
-            'avc1.4D401F',  // H.264 Main Level 3.1
-            'avc1.640028',  // H.264 High Level 4.0
+            'vp09.00.31.08',  // VP9 Profile 0, Level 3.1, 8-bit
+            'vp09.00.41.08',  // VP9 Profile 0, Level 4.1, 8-bit
+            'vp8',            // VP8 fallback
         ];
     }
 
