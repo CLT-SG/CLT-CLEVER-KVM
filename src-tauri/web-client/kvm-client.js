@@ -215,7 +215,7 @@ class KVMClient {
         // Use OffscreenCanvas if available for background processing
         this.useOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
         if (this.useOffscreenCanvas) {
-            console.log('🚀 Using OffscreenCanvas for background rendering');
+            console.log('Using OffscreenCanvas for background rendering');
         }
     }
 
@@ -1558,7 +1558,7 @@ class KVMClient {
             return;
         }
         
-        console.log('🎬 Initializing VP9 video streaming');
+        console.log('[INFO] Initializing VP9 video streaming');
         
         // VP9 uses canvas-based rendering with WebCodecs decoder
         // Set video element dimensions for fallback
@@ -1964,7 +1964,7 @@ class KVMClient {
                 this.screenWidth !== width || this.screenHeight !== height) {
                 this.screenWidth = width;
                 this.screenHeight = height;
-                console.log(`📐 Screen dimensions updated from frame: ${width}x${height}`);
+                console.log(`[INFO] Screen dimensions updated from frame: ${width}x${height}`);
                 
                 // Update canvas sizes
                 if (this.realCanvas) {
@@ -1979,11 +1979,11 @@ class KVMClient {
             
             // Only log occasionally to reduce console spam
             if (frameNumber % 60 === 0n || frameNumber < 5n) {
-                console.log(`📺 RGBA frame: ${width}x${height}, frame #${frameNumber}, data: ${dataLength} bytes`);
+                console.log(`[INFO] RGBA frame: ${width}x${height}, frame #${frameNumber}, data: ${dataLength} bytes`);
             }
             
             if (dataView.byteLength < offset + dataLength) {
-                console.error(`❌ RGBA frame truncated: need ${offset + dataLength} bytes, got ${dataView.byteLength} bytes`);
+                console.error(`[ERROR] RGBA frame truncated: need ${offset + dataLength} bytes, got ${dataView.byteLength} bytes`);
                 return;
             }
             
@@ -1993,7 +1993,7 @@ class KVMClient {
             
             // Log first frame for debugging
             if (frameNumber < 3n) {
-                console.log(`🎨 Frame ${frameNumber} RGBA data: first bytes = [${rgbaData[0]}, ${rgbaData[1]}, ${rgbaData[2]}, ${rgbaData[3]}]`);
+                console.log(`[DEBUG] Frame ${frameNumber} RGBA data: first bytes = [${rgbaData[0]}, ${rgbaData[1]}, ${rgbaData[2]}, ${rgbaData[3]}]`);
             }
             
             this.frameQueue.push({
@@ -2186,30 +2186,30 @@ class KVMClient {
         
         // Validate input data
         if (!rgbaData || rgbaData.length === 0) {
-            console.error('❌ fastRenderFrame: No RGBA data provided');
+            console.error('[ERROR] fastRenderFrame: No RGBA data provided');
             return;
         }
         
         const expectedSize = width * height * 4;
         if (rgbaData.length !== expectedSize) {
-            console.warn(`⚠️ RGBA data size mismatch: got ${rgbaData.length}, expected ${expectedSize}`);
+            console.warn(`[WARNING] RGBA data size mismatch: got ${rgbaData.length}, expected ${expectedSize}`);
         }
         
         // Initialize canvas with optimal settings
         if (!this.realCanvas || !this.realCtx) {
-            console.log('🎨 Initializing canvas for first frame render:', width, 'x', height);
+            console.log('[INFO] Initializing canvas for first frame render:', width, 'x', height);
             this.initializeOptimizedCanvas(width, height);
         }
         
         // Ensure canvas and context are available
         if (!this.realCanvas || !this.realCtx) {
-            console.error('❌ Failed to initialize canvas for rendering');
+            console.error('[ERROR] Failed to initialize canvas for rendering');
             return;
         }
         
         // Resize canvas if needed (rare case)
         if (this.realCanvas.width !== width || this.realCanvas.height !== height) {
-            console.log('📐 Resizing canvas:', this.realCanvas.width, 'x', this.realCanvas.height, '->', width, 'x', height);
+            console.log('[INFO] Resizing canvas:', this.realCanvas.width, 'x', this.realCanvas.height, '->', width, 'x', height);
             this.realCanvas.width = width;
             this.realCanvas.height = height;
         }
@@ -2233,7 +2233,7 @@ class KVMClient {
     }
 
     initializeOptimizedCanvas(width, height) {
-        console.log('🚀 Initializing high-performance canvas renderer...');
+        console.log('[INFO] Initializing high-performance canvas renderer...');
         
         // Don't recreate if already exists with same dimensions
         if (this.realCanvas && this.realCanvas.width === width && this.realCanvas.height === height) {
@@ -2302,7 +2302,7 @@ class KVMClient {
         });
         this.realCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
         
-        console.log(`✅ Optimized canvas initialized: ${width}x${height}`);
+        console.log(`[INFO] Optimized canvas initialized: ${width}x${height}`);
     }
 
     /**
@@ -2418,7 +2418,7 @@ class KVMClient {
             };
         }
 
-        console.log('✅ Native <video> element rendering activated (WebRTC media track)');
+        console.log('[INFO] Native <video> element rendering activated (WebRTC media track)');
     }
 
     /**
@@ -2460,7 +2460,7 @@ class KVMClient {
         
         // Only log performance issues (not every update)
         if (decompressTime > 10 || renderTime > 5 || dropRate > 5) {
-            console.warn(`⚡ Performance: decompress=${decompressTime.toFixed(1)}ms, render=${renderTime.toFixed(1)}ms, drops=${dropRate.toFixed(1)}%`);
+            console.warn(`[WARNING] Performance: decompress=${decompressTime.toFixed(1)}ms, render=${renderTime.toFixed(1)}ms, drops=${dropRate.toFixed(1)}%`);
         }
         
         // Reset counters
@@ -2515,7 +2515,7 @@ class KVMClient {
             this.adaptiveQuality.currentLevel = newLevel;
             this.adaptiveQuality.lastAdjustment = now;
             
-            console.log(`🎯 Adaptive quality: ${this.adaptiveQuality.currentLevel} (processing: ${processingTime.toFixed(1)}ms, drops: ${dropRate.toFixed(1)}%)`);
+            console.log(`[INFO] Adaptive quality: ${this.adaptiveQuality.currentLevel} (processing: ${processingTime.toFixed(1)}ms, drops: ${dropRate.toFixed(1)}%)`);
         }
     }
 
@@ -2627,7 +2627,7 @@ class KVMClient {
         ctx.textAlign = 'left';
         const fps = this.frameStats?.currentFps || 0;
         
-        ctx.fillText('🖥️ VP9 Remote Desktop', 20, 30);
+        ctx.fillText('VP9 Remote Desktop', 20, 30);
         ctx.font = '12px monospace';
         ctx.fillStyle = '#00ff88';
         ctx.fillText(`Frame: #${frameNumber}`, 20, 50);
@@ -2849,17 +2849,17 @@ class KVMClient {
             
             // If no frames received for more than 10 seconds, consider connection stale
             if (timeSinceLastFrame > 10000 && this.connected) {
-                console.warn(`⚠️ No frames received for ${(timeSinceLastFrame / 1000).toFixed(1)}s - connection may be stale`);
+                console.warn(`[WARNING] No frames received for ${(timeSinceLastFrame / 1000).toFixed(1)}s - connection may be stale`);
                 
                 // Try to request a keyframe to refresh the stream
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify({ type: 'request_keyframe' }));
-                    console.log('🔄 Requested keyframe to refresh stream');
+                    console.log('[INFO] Requested keyframe to refresh stream');
                 }
                 
                 // If still no frames after 20 seconds, attempt reconnection
                 if (timeSinceLastFrame > 20000) {
-                    console.error('❌ Stream appears frozen - attempting reconnection');
+                    console.error('[ERROR] Stream appears frozen - attempting reconnection');
                     this.attemptReconnection();
                 }
             }

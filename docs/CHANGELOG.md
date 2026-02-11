@@ -19,6 +19,21 @@
 ### Technical Changes
 - **src-tauri/web-client/kvm-client.js**: Removed h264Decoder/h264SPS/h264PPS properties, removed initializeH264Decoder()/handleH264Frame()/handleH264VideoFrame()/renderH264Fallback()/renderH264FallbackLegacy()/renderH264FallbackGrayscale()/bilinearSample() methods, removed H.264 reset from resetDecoderState(), removed H.264 magic header detection, updated processVideoQueue()/normalizeCodec()/getCodecConfigurations() for VP9, updated comments and logs
 
+### Replace System Emojis with SVG Icons in Web Client
+
+### Bug Fixes
+- **Inconsistent Emoji Rendering**: Web client UI buttons and settings sections used system emojis that rendered differently across operating systems and browsers
+- **Non-Standard Console Prefixes**: Console log messages used emoji prefixes that can cause encoding issues and are non-standard for debugging output
+
+### Improvements
+- **SVG Icon System**: Replaced all UI emojis with inline SVG icons using Feather icon style (stroke-based, 16px) for consistent cross-platform rendering
+- **Standardized Log Prefixes**: Console log emojis replaced with text prefixes [ERROR], [WARNING], [INFO], [DEBUG] for consistent debugging output
+
+### Technical Changes
+- **src-tauri/web-client/kvm-client.js**: Replaced emoji prefixes in console.log/warn/error with [ERROR]/[WARNING]/[INFO]/[DEBUG], removed emoji from canvas text display
+- **src-tauri/web-client/kvm-template.html**: Replaced button emojis (fullscreen, settings, disconnect) with inline SVG icons, replaced settings section title emojis (Display, Audio, Performance) with inline SVG icons
+- **src-tauri/web-client/kvm-client.css**: Added .icon CSS class for SVG sizing (16px), .osd-button .icon and .section-title .icon styles for stroke and fill properties
+
 ## [5.0.10] - 2026-02-11
 
 ### Matrix Dark Theme UI Redesign with Interactive Server Controls
