@@ -31,5 +31,4 @@ bin
 
 # relay server
 relay-server/targetrustdesk/
-rustdesk/
-ruskdesk-bak/
+rustdesk

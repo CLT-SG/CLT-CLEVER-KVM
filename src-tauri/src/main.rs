@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! CLEVER KVM - Ultra-Low Latency Remote Desktop
+//! CLEVER KVM - VNC Server for Multi-Monitor Video Wall
 //! 
 //! A high-performance remote desktop system using VP8/VP9 encoding via libvpx,
 //! following RustDesk's architecture for low-latency local network streaming.
@@ -21,6 +21,8 @@ mod lib;
 mod network;
 mod rdengine;
 mod system;
+mod tls;
+mod vnc;
 
 use app::{commands::*, ServerState, APP_NAME};
 use auto_launch::AutoLaunchBuilder;
@@ -265,14 +267,6 @@ fn main() {
             record_test_audio,
             get_monitors,
             get_available_monitors,
-            start_server,
-            stop_server,
-            start_kvm_server,
-            stop_kvm_server,
-            check_server_status,
-            get_server_config,
-            get_server_status,
-            get_server_url,
             get_logs,
             get_network_interfaces,
             test_network_connectivity,
@@ -324,4 +318,8 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+    
+    // Explicitly drop log guards after Tauri exits to ensure all logs are flushed
+    drop(access_guard);
+    drop(error_guard);
 }

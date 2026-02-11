@@ -1,8 +1,8 @@
 @echo off
 REM Build script for Clever KVM (Windows)
-REM This script builds the WebM-native remote desktop application
+REM This script builds the VNC server application
 
-echo 🚀 Building Clever KVM with native WebM support...
+echo 🚀 Building Clever KVM VNC server...
 
 REM Check if Node.js is installed
 node --version >nul 2>&1
