@@ -1,3 +1,10 @@
+//! WebSocket handlers for VP9 video streaming
+//!
+//! This module provides WebSocket connection handlers for the VP9 streaming
+//! service using the RustDesk-inspired rdengine with WebRTC transport.
+
+#![allow(dead_code)]
+
 use crate::rdengine::{ConnectionHandler, ConnectionConfig};
 use crate::rdengine::codec::VpxCodec;
 use axum::extract::ws::WebSocket;
@@ -24,8 +31,8 @@ pub enum ControlMessage {
     #[serde(rename = "bitrate_setting")]
     BitrateSetting { bitrate: u32 },
     
-    #[serde(rename = "h264_config")]
-    H264Config { 
+    #[serde(rename = "streaming_config")]
+    StreamingConfig { 
         enable_hw_accel: bool,
         enable_opus: bool,
         target_bitrate: Option<u32>
@@ -39,17 +46,17 @@ pub enum ControlMessage {
     },
 }
 
-// Helper function to make the future Send - uses H.264 streaming
+// Helper function to make the future Send - uses VP9 streaming via rdengine
 pub async fn handle_socket_wrapper(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
-    info!("🎬 New H.264 streaming WebSocket connection - Monitor: {}, Codec: {}, Audio: {}", 
+    info!("[INFO] New VP9 streaming WebSocket connection - Monitor: {}, Codec: {}, Audio: {}", 
           monitor, codec, enable_audio);
     
-    handle_h264_socket(socket, monitor, enable_audio, None).await;
+    handle_streaming_socket(socket, monitor, enable_audio, None).await;
     
-    info!("✅ H.264 streaming WebSocket connection closed - Monitor: {}", monitor);
+    info!("[INFO] VP9 streaming WebSocket connection closed - Monitor: {}", monitor);
 }
 
-// Helper function with stop signal - uses H.264 streaming
+// Helper function with stop signal - uses VP9 streaming via rdengine
 pub async fn handle_socket_wrapper_with_stop(
     socket: WebSocket, 
     monitor: usize, 
@@ -57,12 +64,12 @@ pub async fn handle_socket_wrapper_with_stop(
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
-    info!("🎬 New H.264 streaming WebSocket connection with stop signal - Monitor: {}, Codec: {}, Audio: {}", 
+    info!("[INFO] New VP9 streaming WebSocket connection with stop signal - Monitor: {}, Codec: {}, Audio: {}", 
           monitor, codec, enable_audio);
     
-    handle_h264_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
+    handle_streaming_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
     
-    info!("✅ H.264 streaming WebSocket connection with stop signal closed - Monitor: {}", monitor);
+    info!("[INFO] VP9 streaming WebSocket connection with stop signal closed - Monitor: {}", monitor);
 }
 
 pub async fn handle_socket_with_stop(
@@ -72,24 +79,24 @@ pub async fn handle_socket_with_stop(
     enable_audio: bool, 
     stop_rx: broadcast::Receiver<()>
 ) {
-    info!("🎬 New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
+    info!("[INFO] New WebSocket connection with stop signal: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Use H.264 streaming for connections with stop signal
-    handle_h264_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
+    // Use VP9 streaming for connections with stop signal
+    handle_streaming_socket(socket, monitor, enable_audio, Some(stop_rx)).await;
 }
 
 pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, enable_audio: bool) {
-    info!("🎬 New WebSocket connection: monitor={}, codec={}, audio={}", 
+    info!("[INFO] New WebSocket connection: monitor={}, codec={}, audio={}", 
           monitor, codec, enable_audio);
     
-    // Use H.264 streaming for direct connections
-    handle_h264_socket(socket, monitor, enable_audio, None).await;
+    // Use VP9 streaming for direct connections
+    handle_streaming_socket(socket, monitor, enable_audio, None).await;
 }
 
-// H.264 streaming socket handler — now uses RustDesk-inspired rdengine as primary
+// VP9 streaming socket handler — uses RustDesk-inspired rdengine
 // with WebRTC DataChannel transport for low-latency peer-to-peer streaming
-async fn handle_h264_socket(
+async fn handle_streaming_socket(
     socket: WebSocket, 
     monitor: usize, 
     enable_audio: bool,
@@ -119,11 +126,11 @@ pub async fn handle_socket_ultra(
         .and_then(|m| m.parse::<usize>().ok())
         .unwrap_or(0);
 
-    info!("🔌 Ultra WebSocket connection request for monitor {}", monitor);
+    info!("[INFO] Ultra WebSocket connection request for monitor {}", monitor);
 
     ws.on_upgrade(move |socket| async move {
         if let Err(e) = handle_ultra_connection(socket, monitor).await {
-            error!("❌ Ultra WebSocket connection failed: {}", e);
+            error!("[ERROR] Ultra WebSocket connection failed: {}", e);
         }
     })
 }

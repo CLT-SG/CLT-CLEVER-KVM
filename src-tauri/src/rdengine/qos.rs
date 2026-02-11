@@ -6,6 +6,8 @@
 //! - Adaptive bitrate based on congestion
 //! - Frame ACK-based flow control
 
+#![allow(dead_code)]
+
 use log::{debug, info};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -116,11 +118,13 @@ impl QualityControl {
     }
 
     /// Record that a frame was sent
+    #[allow(dead_code)]
     pub fn frame_sent(&self) {
         self.frames_sent.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record that a frame ACK was received
+    #[allow(dead_code)]
     pub fn frame_acked(&self) {
         self.frames_acked.fetch_add(1, Ordering::Relaxed);
     }

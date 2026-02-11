@@ -93,12 +93,12 @@ pub fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Op
     info!("Starting KVM server on port {}", port);
     
     // Apply system optimizations for ultra-low latency performance
-    info!("🔧 Applying system optimizations for ultra-low latency...");
+    info!("[INFO] Applying system optimizations for ultra-low latency...");
     if let Err(e) = crate::system::apply_ultra_performance_optimizations() {
         warn!("Failed to apply some system optimizations: {}", e);
         info!("Server will still work but may not achieve optimal performance");
     } else {
-        info!("✅ System optimizations applied successfully");
+        info!("[OK] System optimizations applied successfully");
     }
     
     let app_handle_clone = app_handle.clone();
@@ -128,7 +128,7 @@ pub fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Op
     let url = format!("https://{}:{}/kvm", ip, port);
     info!("Server URL: {}", url);
     info!("Server is now accessible from network at: {}", url);
-    info!("⚠️  Browser will show a certificate warning (self-signed cert) — click 'Advanced' → 'Proceed' to continue");
+    info!("[WARNING] Browser will show a certificate warning (self-signed cert) - click 'Advanced' then 'Proceed' to continue");
     Ok(url)
 }
 

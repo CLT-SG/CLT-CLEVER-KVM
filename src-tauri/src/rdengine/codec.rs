@@ -13,6 +13,8 @@
 //! (376 bytes) was too small for libvpx 1.14.0 (504 bytes), causing stack
 //! corruption in vpx_codec_enc_config_default().
 
+#![allow(dead_code)]
+
 use anyhow::{Result, Context, bail};
 use log::{debug, info, warn};
 use std::ptr;

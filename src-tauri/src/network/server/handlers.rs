@@ -1,3 +1,9 @@
+//! HTTP and WebSocket request handlers for the KVM server
+//!
+//! Handles static file serving, KVM client page generation, and WebSocket upgrades.
+
+#![allow(dead_code)]
+
 use axum::{
     extract::{ws::WebSocketUpgrade, Query},
     response::{Html, IntoResponse},

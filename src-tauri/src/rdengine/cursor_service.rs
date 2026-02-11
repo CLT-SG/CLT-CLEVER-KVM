@@ -12,6 +12,8 @@
 //! Cursor shape detection uses X11 (XFixes) on Linux to read the actual
 //! system cursor shape and map it to a named CSS cursor type.
 
+#![allow(dead_code)]
+
 use anyhow::{Result, Context};
 use crossbeam_channel::{Sender, Receiver, bounded};
 use log::{debug, error, info};

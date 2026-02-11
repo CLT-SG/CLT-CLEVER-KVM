@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Apply ultra-performance optimizations for low-latency streaming
 pub fn apply_ultra_performance_optimizations() -> Result<()> {
-    info!("🔧 Applying user-level system optimizations for ultra-low latency performance");
+    info!("[INFO] Applying user-level system optimizations for ultra-low latency performance");
     
     // Set process priority (only try non-privileged operations)
     if let Err(e) = set_high_priority() {
@@ -16,7 +16,7 @@ pub fn apply_ultra_performance_optimizations() -> Result<()> {
         debug!("Could not check system performance: {}", e);
     }
     
-    info!("✅ User-level optimizations applied (no elevated privileges required)");
+    info!("[OK] User-level optimizations applied (no elevated privileges required)");
     Ok(())
 }
 
@@ -60,8 +60,8 @@ fn check_system_performance() -> Result<()> {
             if let Ok(governor) = String::from_utf8(output.stdout) {
                 debug!("Current CPU governor: {}", governor.trim());
                 if governor.trim() != "performance" {
-                    info!("💡 For best performance, consider setting CPU governor to 'performance' mode");
-                    info!("   Run: sudo cpupower frequency-set -g performance");
+                    info!("[TIP] For best performance, consider setting CPU governor to 'performance' mode");
+                    info!("    Run: sudo cpupower frequency-set -g performance");
                 }
             }
         }
@@ -85,6 +85,7 @@ fn check_system_performance() -> Result<()> {
 }
 
 /// Check system capabilities for ultra-low latency streaming
+#[allow(dead_code)]
 pub fn check_system_capabilities() -> Result<String> {
     let mut capabilities = Vec::new();
     

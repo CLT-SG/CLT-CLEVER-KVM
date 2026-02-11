@@ -7,6 +7,8 @@
 //! - 10ms frame size for minimal latency
 //! - Broadcast to all connected clients
 
+#![allow(dead_code)]
+
 use anyhow::{Result, Context};
 use crossbeam_channel::{Sender, Receiver, bounded};
 use log::{debug, error, info, warn};

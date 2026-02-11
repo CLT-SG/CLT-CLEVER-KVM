@@ -1,3 +1,9 @@
+//! Data models and constants for the KVM server
+//!
+//! Contains WebSocket message types, configuration constants, and parameter structures.
+
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

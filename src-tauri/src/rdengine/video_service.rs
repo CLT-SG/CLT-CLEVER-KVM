@@ -10,6 +10,8 @@
 //! - Frame pacing with sleep-based timing
 //! - Broadcast to multiple clients via crossbeam channel
 
+#![allow(dead_code)]
+
 use anyhow::{Result, Context};
 use crossbeam_channel::{Sender, Receiver, bounded};
 use log::{debug, error, info, warn};

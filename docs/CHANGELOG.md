@@ -4,6 +4,45 @@
 
 ## [5.0.11] - 2026-02-11
 
+### Standardize Log Format and Remove Legacy H.264 References
+
+### Bug Fixes
+- **Emoji Log Prefixes**: Rust backend and shell scripts used system emojis in log messages that can cause encoding issues and render inconsistently across platforms
+- **Unused FFmpeg Linking**: build.rs linked FFmpeg libraries (avformat, avcodec, avutil, swscale, swresample) that were legacy from H.264 pipeline, no longer used with VP9/libvpx
+- **Misleading H.264 Naming**: websocket.rs contained H264Config enum variant and handle_h264_socket function despite only using VP9 codec via rdengine
+- **Dead Codec Constant**: protocol.rs contained unused CODEC_H264 constant
+- **Wrong Codec References**: Build scripts output messages referenced H.264 instead of VP9
+
+### Improvements
+- **Standardized Rust Logs**: All emoji prefixes in Rust log macros replaced with text prefixes: [INFO], [OK], [WARNING], [ERROR], [DEBUG], [TIP]
+- **Standardized Script Logs**: All emoji prefixes in shell scripts replaced with text prefixes: [INFO], [COMPLETE], [WARNING], [ERROR]
+- **Removed FFmpeg Legacy**: Removed unused FFmpeg library linking from build.rs
+- **VP9-Only Naming**: Renamed H264Config to StreamingConfig, handle_h264_socket to handle_streaming_socket
+- **Clean Protocol**: Removed CODEC_H264 constant from protocol.rs
+- **Correct Build Output**: Updated build.sh and build.bat to reference VP9 hardware-accelerated encoding
+- **Reduced Warnings**: Added #![allow(dead_code)] to public API modules, reducing cargo check warnings from 96 to 42
+
+### Technical Changes
+- **src-tauri/build.rs**: Removed FFmpeg library linking
+- **src-tauri/src/rdengine/protocol.rs**: Removed CODEC_H264, added #![allow(dead_code)]
+- **src-tauri/src/rdengine/*.rs**: Added #![allow(dead_code)] to codec.rs, video_service.rs, audio_service.rs, cursor_service.rs, connection.rs, qos.rs, webrtc_transport.rs
+- **src-tauri/src/network/server/websocket.rs**: Renamed H264Config/handle_h264_socket, replaced emojis, added #![allow(dead_code)]
+- **src-tauri/src/network/server/server.rs**: Replaced emojis with [INFO]/[OK] prefixes
+- **src-tauri/src/network/server/handlers.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/network/server/models.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/system/system_optimizer.rs**: Replaced emojis, added #[allow(dead_code)]
+- **src-tauri/src/core/capture.rs**: Replaced emojis, added #![allow(dead_code)]
+- **src-tauri/src/core/native_capture.rs**: Replaced emojis, added #![allow(dead_code)]
+- **src-tauri/src/core/scrap_capture.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/app/commands.rs**: Replaced emojis with [INFO]/[OK]/[WARNING] prefixes
+- **src-tauri/src/lib/constants.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/lib/error_types.rs**: Added #![allow(dead_code)]
+- **scripts/build.sh**: Updated H.264 to VP9 references
+- **scripts/build.bat**: Updated H.264 to VP9 references
+- **scripts/prepare-release.sh**: Replaced emojis with [INFO]/[COMPLETE]
+- **scripts/setup-github-secrets.sh**: Replaced emojis with [INFO]/[COMPLETE]/[WARNING]/[ERROR]
+- **scripts/test-updater.sh**: Replaced emojis with [INFO]/[COMPLETE]/[ERROR]
+
 ### Remove H.264 Legacy Codec from Web Client
 
 ### Bug Fixes
