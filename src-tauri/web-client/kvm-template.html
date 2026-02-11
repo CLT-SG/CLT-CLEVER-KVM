@@ -9,8 +9,12 @@
 <body>
     <!-- Main screen container -->
     <div id="screen">
-        <!-- Video element for H.264 streaming -->
-        <video id="video-screen" autoplay playsinline muted></video>
+        <!-- Video element for native WebRTC media track rendering (primary path).
+             When the server sends a VP9/VP8 media track via WebRTC, the browser
+             decodes and renders it natively here — no WebCodecs or canvas needed.
+             Falls back to canvas rendering when WebRTC media track is unavailable. -->
+        <video id="video-screen" autoplay playsinline muted
+               style="width: 100%; height: 100%; max-width: 100vw; max-height: 100vh; object-fit: contain; background-color: #000;"></video>
         
         <!-- Canvas layer for input handling only (transparent overlay) -->
         <canvas id="canvas-layer" style="position: absolute; top: 0; left: 0; pointer-events: auto; opacity: 0; z-index: 1;"></canvas>
@@ -42,8 +46,9 @@
                         <option value="0">Primary Monitor</option>
                     </select>
                     
-                    <select id="codec-dropdown" class="osd-select" disabled>
-                        <option value="h264" selected>H.264 (Hardware)</option>
+                    <select id="codec-dropdown" class="osd-select">
+                        <option value="vp9" selected>VP9 (Native Video)</option>
+                        <option value="vp8">VP8 (Native Video)</option>
                     </select>
                     
                     <select id="quality-dropdown" class="osd-select">
@@ -180,12 +185,12 @@
             remoteOnly: {{remote_only}},
             encryption: {{encryption}},
             monitor: {{monitor}},
-            codec: "h264"
+            codec: "{{codec}}"
         };
     </script>
     <script src="/static/kvm-template-parts.js"></script>
-    <script src="/static/h264-decoder.js"></script>
     <script src="/static/vpx-decoder.js"></script>
+    <script src="/static/webrtc-transport.js"></script>
     <script src="/static/kvm-client.js"></script>
 </body>
 </html>

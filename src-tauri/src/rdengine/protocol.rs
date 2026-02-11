@@ -348,4 +348,6 @@ pub struct ServerInfo {
     pub bitrate_kbps: u32,
     pub audio_enabled: bool,
     pub protocol_version: u32,
+    /// Whether the server supports WebRTC DataChannel transport for video/audio
+    pub webrtc_enabled: bool,
 }

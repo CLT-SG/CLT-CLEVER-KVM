@@ -88,24 +88,26 @@ pub async fn handle_socket(socket: WebSocket, monitor: usize, codec: String, ena
 }
 
 // H.264 streaming socket handler — now uses RustDesk-inspired rdengine as primary
+// with WebRTC DataChannel transport for low-latency peer-to-peer streaming
 async fn handle_h264_socket(
     socket: WebSocket, 
     monitor: usize, 
     enable_audio: bool,
     stop_rx: Option<broadcast::Receiver<()>>
 ) {
-    info!("Initializing RustDesk-inspired VP9 streaming for monitor {}", monitor);
+    info!("Initializing RustDesk-inspired VP9 streaming with WebRTC transport for monitor {}", monitor);
     
-    // PRIMARY: Use the new rdengine (RustDesk-style VP9 encoding)
+    // PRIMARY: Use rdengine with WebRTC DataChannel transport
     let rd_config = ConnectionConfig {
         monitor_id: monitor,
         codec: VpxCodec::VP9,
         framerate: 24,
         bitrate_kbps: 1500,
         enable_audio,
+        enable_webrtc: true, // Use WebRTC for video/audio transport
+        webrtc_config: Some(crate::rdengine::WebRtcConfig::lan()), // LAN-optimized: no STUN delay
     };
 
-    // Try rdengine first — this is the low-latency path
     ConnectionHandler::handle(socket, rd_config, stop_rx).await;
 }
 
@@ -127,15 +129,17 @@ pub async fn handle_socket_ultra(
 }
 
 async fn handle_ultra_connection(socket: WebSocket, monitor: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("Starting RustDesk-inspired ultra streaming for monitor {}", monitor);
+    info!("Starting RustDesk-inspired ultra streaming with WebRTC for monitor {}", monitor);
     
-    // Use rdengine with LAN-optimized config
+    // Use rdengine with LAN-optimized WebRTC config
     let config = ConnectionConfig {
         monitor_id: monitor,
         codec: VpxCodec::VP9,
         framerate: 30,
         bitrate_kbps: 2000,
         enable_audio: false,
+        enable_webrtc: true,
+        webrtc_config: Some(crate::rdengine::WebRtcConfig::lan()), // LAN-optimized: no STUN
     };
 
     ConnectionHandler::handle(socket, config, None).await;

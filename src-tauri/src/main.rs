@@ -34,13 +34,17 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 
 fn main() {
-    // Create log directory
-    let log_dir = get_log_directory();
-    if let Err(e) = fs::create_dir_all(&log_dir) {
-        eprintln!("Warning: Failed to create log directory {:?}: {}", log_dir, e);
-    }
+    // Initialize logging first
+    env_logger::init();
+
+    // Install rustls CryptoProvider before any TLS usage.
+    // Required because both 'ring' (via webrtc/dtls) and 'aws-lc-rs' (via axum-server)
+    // features are enabled, so rustls cannot auto-detect the provider.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls CryptoProvider");
     
-    info!("Starting {} - Ultra-Low Latency Remote Desktop", APP_NAME);
+    info!("Starting {} - Video Wall & Console", APP_NAME);
     
     // Run Tauri application
     tauri::Builder::default()

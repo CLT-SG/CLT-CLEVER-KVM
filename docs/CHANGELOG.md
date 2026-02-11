@@ -2,6 +2,89 @@
 
 ## Version History
 
+## [5.0.9] - 2026-02-09
+
+### WebRTC Media Track for Native Video Rendering with Keyframe Gating
+
+### Bug Fixes
+- **Rainbow/Overlay Video Artifacts**: Browser VP9 decoder received P-frames before any keyframe via the media track, producing rainbow colors and ghost overlay artifacts because P-frames cannot be decoded without a reference keyframe
+- **No RTCP PLI Handling**: Browser had no way to request a keyframe from the server when its decoder lost sync after packet loss, because RTCP PLI packets were not parsed
+- **Delayed Video Appearance**: Keyframe was requested immediately after `create_offer()` before ICE negotiation completed, so the keyframe was sent to a media track the browser was not connected to yet -- video only appeared after the encoder's periodic keyframe interval
+
+### Improvements
+- **Native Video Rendering**: Video delivered via WebRTC media track (`TrackLocalStaticSample`) for native `<video>` element rendering with hardware-accelerated VP9/VP8 decoding -- no WebCodecs or canvas needed
+- **Keyframe-First Gating**: P-frames blocked on the media track until a keyframe has been sent, preventing decoder artifacts; pre-keyframe P-frames routed to DataChannel/WebSocket fallback
+- **RTCP PLI Keyframe Requests**: Server parses RTCP PLI packets from the browser and immediately forces the encoder to produce a keyframe
+- **ICE-Connected Keyframe Timing**: Keyframe requested when `ConnectionStateChanged(Connected)` fires instead of at `create_offer()` time, with `connection_ready_signal` to reset the keyframe gate so the browser receives a fresh keyframe through the connected transport
+- **Dual Rendering Paths**: Primary path uses `<video>.srcObject` from WebRTC media track; fallback path uses WebCodecs `VideoDecoder` + canvas via DataChannel
+- **Video Element FPS Tracking**: `requestVideoFrameCallback` tracks FPS and updates `lastFrameTime` for connection health monitoring
+- **Connection Health for Video Element**: Health monitor checks `<video>` playback state when using native rendering, preventing false stale-stream detection
+
+### Technical Changes
+- **src-tauri/src/rdengine/webrtc_transport.rs**: Added `TrackLocalStaticSample` media track in `create_offer(codec)`, `send_video_sample()`, `is_video_track_ready()`, RTCP PLI reader task, `VideoTrackReady` and `KeyframeRequested` events, media track cleanup in `close()`
+- **src-tauri/src/rdengine/connection.rs**: Added `connection_ready_signal` (`AtomicBool`) for ICE gate reset, `keyframe_signal` shared with event task, `media_track_sent_keyframe` gate with keyframe-first routing, media track primary path with DataChannel/WebSocket fallback chain, keyframe request on `ConnectionStateChanged(Connected)`
+- **src-tauri/src/rdengine/video_service.rs**: Added `keyframe_signal()` method returning `Arc<AtomicBool>` for async task keyframe triggering
+- **src-tauri/web-client/webrtc-transport.js**: Added `onMediaStream` callback, `pc.ontrack` handler, `videoStream`/`hasMediaTrack` state, `hasVideoMediaTrack()`/`getVideoStream()` methods, media track cleanup
+- **src-tauri/web-client/kvm-client.js**: Added `activateVideoElementRendering(stream)` with `requestVideoFrameCallback` FPS tracking, `deactivateVideoElementRendering()` canvas fallback, `usingVideoElement` state, video element coordinate mapping for mouse/touch/cursor, health monitor video playback state check
+- **src-tauri/web-client/kvm-template.html**: Updated `<video>` element styling for native media track rendering, codec dropdown labels to "Native Video"
+- **docs/RDENGINE_STREAMING_IMPLEMENTATION.md**: Updated transport table, architecture diagrams, browser client docs, dependency tables, and comparison table for media track architecture
+
+## [5.0.8] - 2026-02-09
+
+### Replace H.264 Codec Defaults with VP9 Across UI and Server
+
+### Bug Fixes
+- **Hardcoded H.264 Default Codec**: Web client template, KVM_CONFIG, and all server handlers defaulted to H.264 despite the RDEngine architecture using VP9/WebRTC for streaming
+- **Disabled Codec Dropdown**: The codec dropdown in the OSD was hardcoded to a single disabled "H.264 (Hardware)" option, preventing codec selection
+- **Ignored Server Codec Template Variable**: `KVM_CONFIG.codec` was hardcoded to `"h264"` instead of using the server-provided `{{codec}}` template variable
+- **No Codec Switching**: The codec dropdown had no change event listener, making runtime codec switching impossible
+- **Wrong Decoder Priority**: H.264 decoder was initialized before VPX decoder despite VP9 being the primary codec
+
+### Improvements
+- **VP9 Default Codec**: All default codec values changed from `"h264"` to `"vp9"` across server handlers, client config, and fallback defaults
+- **VP9/VP8 Codec Dropdown**: Replaced disabled H.264 dropdown with enabled VP9 (WebRTC) and VP8 (WebRTC) options in the OSD
+- **Dynamic Codec Config**: `KVM_CONFIG.codec` now uses the server template variable `"{{codec}}"` instead of a hardcoded value
+- **Runtime Codec Switching**: Added codec dropdown change event listener that updates codec state and triggers WebSocket reconnect to apply the new codec
+- **VPX Decoder Priority**: VPX decoder initialized before H.264 decoder; H.264 retained as legacy fallback
+
+### Technical Changes
+- **src-tauri/src/network/server/handlers.rs**: Default codec changed from `"h264"` to `"vp9"` in `kvm_client_handler`, `ws_handler`, and `ws_handler_with_stop`
+- **src-tauri/web-client/kvm-template.html**: Video element comment updated, codec dropdown replaced with VP9/VP8 options, `KVM_CONFIG.codec` changed to `"{{codec}}"`, script load order changed (vpx-decoder.js first, h264-decoder.js as legacy fallback)
+- **src-tauri/web-client/kvm-client.js**: `currentCodec` default changed to `config.codec || "vp9"`, decoder init order swapped, codec dropdown change listener added, `handleServerInfo`/`handleStreamInfo`/`handleWebRTCFrame` defaults changed to `"vp9"`, fallback config default changed to `"vp9"`, stale H.264 comments updated
+- **src-tauri/web-client/kvm-template-parts.js**: Codec dropdown initialization changed from `"h264"` to `config.codec || "vp9"`
+
+## [5.0.7] - 2026-02-09
+
+### WebRTC DataChannel Transport for Low-Latency Streaming
+
+### Bug Fixes
+- **TCP Head-of-Line Blocking**: Video/audio/cursor data sent over WebSocket TCP caused head-of-line blocking -- a single lost packet stalled all subsequent frames until retransmitted
+- **rustls CryptoProvider Panic**: Both `ring` (via webrtc/dtls) and `aws-lc-rs` (via axum-server) features were enabled on rustls, causing a runtime panic "no process-level CryptoProvider" because rustls could not auto-detect which provider to use
+- **STUN Server Delay**: External STUN servers (`stun.l.google.com:19302`) added 5-30 second ICE gathering delays on LAN connections where NAT traversal is not needed
+- **30-Second Video Startup Delay**: Video frames were silently dropped when the WebRTC DataChannel was not yet ready during negotiation, causing no video to appear until the channel opened
+
+### Improvements
+- **WebRTC DataChannel Transport**: Added three DataChannels for media delivery -- video (unreliable/unordered UDP, fire-and-forget), audio (reliable), cursor (reliable) -- eliminating TCP head-of-line blocking for real-time streaming
+- **Hybrid Transport Architecture**: WebSocket retained for SDP/ICE signaling, keyboard/mouse input, and control messages; WebRTC used for all media data
+- **WebSocket Fallback During Negotiation**: Video/audio/cursor frames fall back to WebSocket binary when the DataChannel is not ready or encounters errors, ensuring immediate video display during WebRTC setup
+- **LAN-Optimized ICE**: No external STUN servers configured -- host candidates are sufficient for same-network peers, enabling sub-second ICE connection
+- **Explicit CryptoProvider**: `rustls::crypto::ring::default_provider().install_default()` called at startup to resolve the ring/aws-lc-rs conflict
+- **Protocol Version 3**: Binary protocol bumped from v2 to v3 with `webrtc_enabled` field in `ServerInfo` so clients can detect WebRTC support
+- **Backpressure Control**: Video DataChannel checks `buffered_amount()` before sending; frames are dropped if buffer exceeds configured threshold to prevent unbounded memory growth
+
+### Technical Changes
+- **src-tauri/Cargo.toml**: Added `webrtc = "0.17"` (pure Rust WebRTC) and `bytes = "1"` dependencies
+- **src-tauri/src/main.rs**: Added `rustls::crypto::ring::default_provider().install_default()` after `env_logger::init()`
+- **src-tauri/src/rdengine/webrtc_transport.rs** (new): `WebRtcTransport` struct, `WebRtcConfig` (default/lan), `WebRtcEvent` enum, three DataChannels, SDP offer/answer, ICE candidate handling, backpressure control, `close()` cleanup
+- **src-tauri/src/rdengine/connection.rs**: Added `enable_webrtc`/`webrtc_config` to `ConnectionConfig`, WebRTC transport setup with SDP offer, ICE event forwarding, video/audio/cursor routing through DataChannel with WebSocket fallback, signaling message handling (`webrtc_answer`, `webrtc_ice_candidate`)
+- **src-tauri/src/rdengine/protocol.rs**: Added `webrtc_enabled: bool` to `ServerInfo`, protocol_version 3
+- **src-tauri/src/rdengine/mod.rs**: Added `pub mod webrtc_transport` and re-exports
+- **src-tauri/src/network/server/websocket.rs**: Both handlers use `enable_webrtc: true` with `WebRtcConfig::lan()`
+- **src-tauri/web-client/webrtc-transport.js** (new): Client-side `WebRtcTransport` class, RTCPeerConnection management, DataChannel handlers, ICE candidate forwarding, connection state monitoring
+- **src-tauri/web-client/kvm-client.js**: Added `webrtcTransport`/`webrtcEnabled`/`webrtcConnected` state, `handleWebRTCOffer()` creates transport and routes frames to existing handlers, signaling message handling, cleanup on disconnect
+- **src-tauri/web-client/kvm-template.html**: Added `<script src="/static/webrtc-transport.js"></script>`
+- **docs/RDENGINE_STREAMING_IMPLEMENTATION.md**: Updated architecture overview, transport table, signaling flow, module structure, performance comparison, three-column comparison table
+
 ## [5.0.6] - 2026-02-09
 
 ### Persistent TLS Certificates and Infinite WebSocket Reconnection

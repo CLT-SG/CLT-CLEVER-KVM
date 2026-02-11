@@ -20,6 +20,7 @@ pub mod cursor_service;
 pub mod connection;
 pub mod qos;
 pub mod protocol;
+pub mod webrtc_transport;
 
 pub use codec::{VpxEncoder, VpxConfig, EncoderApi, EncodeInput};
 pub use video_service::VideoService;
@@ -29,3 +30,4 @@ pub use cursor_service::CursorService;
 pub use connection::{ConnectionHandler, ConnectionConfig};
 pub use qos::QualityControl;
 pub use protocol::{FrameMessage, ControlMsg, InputMsg};
+pub use webrtc_transport::{WebRtcTransport, WebRtcConfig};
