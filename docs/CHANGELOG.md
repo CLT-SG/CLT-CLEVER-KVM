@@ -2,6 +2,44 @@
 
 ## Version History
 
+## [5.0.10] - 2026-02-11
+
+### Matrix Dark Theme UI Redesign with Interactive Server Controls
+
+### Bug Fixes
+- **Outdated Light Theme Styling**: Application UI used default light theme that was inconsistent across components
+- **Redundant Server Control Buttons**: Separate Start and Stop buttons took unnecessary vertical space in Status tab
+- **Emoji Icons Instead of SVG**: Components used emoji icons that rendered inconsistently across platforms
+- **Suboptimal Content Density**: Font sizes and application height caused unnecessary scrolling in some views
+- **Misplaced UpdateChecker**: UpdateChecker was in Status tab instead of Settings tab where it belongs
+- **Unused Appearance Section**: Appearance Settings section existed with only one theme option
+
+### Improvements
+- **Matrix Dark Theme**: Global dark theme with CSS variables for colors (primary green #00ff41), backgrounds (#0a0a0a), spacing, shadows, and effects
+- **Clickable Status Ring**: Status indicator converted to interactive button that toggles server start/stop on click with visual hover feedback
+- **SVG Icon System**: All emoji icons replaced with inline SVG icons using Feather/Material Design style (stroke-based, 18-20px)
+- **Increased Window Height**: Application window height increased 10% from 600px to 660px for better content visibility
+- **Reduced Font Size**: Base font size reduced 10% from 16px to 14px for improved content density
+- **Relocated UpdateChecker**: UpdateChecker moved to Settings tab above Application Settings section
+- **Removed Appearance Section**: Appearance Settings removed since only Matrix Dark theme exists
+
+### Technical Changes
+- **src/assets/styles/theme.css** (new): Global Matrix dark theme CSS with variables for colors, backgrounds, text, borders, shadows, transitions, radius, spacing, and fonts
+- **src/components/ui/SettingsPanel.vue** (new): Settings panel with UpdateChecker, Startup Settings (auto-start, start minimized, auto-start server), System Tray Settings (show icon, minimize to tray, notifications)
+- **src/main.js**: Added theme.css import
+- **src/App.vue**: Updated tabs with icon identifiers, moved UpdateChecker to Settings tab via SettingsPanel
+- **src/components/ui/TabContainer.vue**: Added inline SVG icons for tabs (status, config, options, logs, settings), Matrix theme styling with glow effects
+- **src/components/ui/index.js**: Added SettingsPanel export
+- **src/components/server/ServerStatus.vue**: Status ring button with toggleServer function, hover states show action icons, loading spinner
+- **src/components/server/ConnectionOptions.vue**: SVG icons in features array, grid layout for options/features, copy button for example URL
+- **src/components/server/ServerConfiguration.vue**: Card-based layout with config-card styling, label hints
+- **src/components/server/PresetSelector.vue**: Card-based presets with SVG icons, spec display, active state indicator
+- **src/components/server/LogViewer.vue**: Matrix theme with section icons, line counts, refresh/clear buttons, empty states
+- **src/components/update/UpdateChecker.vue**: Card layout with icons, last checked timestamp, status messages
+- **src/components/update/UpdaterDialog.vue**: Modal transitions, status icons, gradient progress bar
+- **src/composables/useServer.js**: Relay command tracking, displays/loadingDisplays aliases
+- **src-tauri/tauri.conf.json**: Window height changed from 600 to 660
+
 ## [5.0.9] - 2026-02-09
 
 ### WebRTC Media Track for Native Video Rendering with Keyframe Gating

@@ -9,9 +9,10 @@ import {
   ServerConfiguration,
   ConnectionOptions,
   LogViewer,
-  UpdaterDialog,
-  UpdateChecker
+  UpdaterDialog
 } from "./components";
+
+import SettingsPanel from "./components/ui/SettingsPanel.vue";
 
 const {
   serverStatus,
@@ -48,46 +49,63 @@ function updateSelectedDisplay(value) {
   settings.selectedWebrtcDisplay = value;
 }
 
-// Define tabs
+// Define tabs with SVG icon names (Material Design style)
 const tabs = computed(() => [
-  { id: 'status', label: 'Server Status' },
-  { id: 'config', label: 'Configuration' },
-  { id: 'options', label: 'Connection Options' },
-  { id: 'logs', label: 'Logs' }
+  { id: 'status', label: 'Status', icon: 'status' },
+  { id: 'config', label: 'Configuration', icon: 'config' },
+  { id: 'options', label: 'Options', icon: 'options' },
+  { id: 'logs', label: 'Logs', icon: 'logs' },
+  { id: 'settings', label: 'Settings', icon: 'settings' }
 ]);
 </script>
 
 <template>
-  <main class="container">
-    <div class="header">
-      <h1>Clever KVM</h1>
-    </div>
+  <main class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-section">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+        </div>
+        <div class="logo-text">
+          <h1>Clever KVM</h1>
+          <span class="version">v5.0.0</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-indicator" :class="{ active: serverStatus }"></span>
+        <span class="status-label">{{ serverStatus ? 'Online' : 'Offline' }}</span>
+      </div>
+    </header>
 
+    <!-- Main Content -->
     <TabContainer :tabs="tabs" default-tab="status">
       <template #status>
-        <ServerStatus 
-          :server-status="serverStatus"
-          :server-url="serverUrl"
-          :loading="loading"
-          :error-message="errorMessage"
-          :start-server="startServer"
-          :stop-server="stopServer"
-          :open-url="openUrl"
-          :copy-url="copyUrl"
-        />
-        
-        <!-- Update checker section -->
-        <div class="update-section">
-          <h3>Application Updates</h3>
-          <UpdateChecker />
+        <div class="panel-content">
+          <ServerStatus 
+            :server-status="serverStatus"
+            :server-url="serverUrl"
+            :loading="loading"
+            :error-message="errorMessage"
+            :start-server="startServer"
+            :stop-server="stopServer"
+            :open-url="openUrl"
+            :copy-url="copyUrl"
+          />
         </div>
       </template>
 
       <template #config>
-        <div class="config-content">
-          <h2>Server Configuration</h2>
-          <div v-if="serverStatus" class="config-warning">
-            <p>Server is currently running. Stop the server to modify these settings.</p>
+        <div class="panel-content">
+          <div class="panel-header">
+            <h2>Server Configuration</h2>
+            <span v-if="serverStatus" class="config-badge warning">
+              Server running - stop to modify
+            </span>
           </div>
           <ServerConfiguration 
             :server-port="serverPort"
@@ -102,11 +120,21 @@ const tabs = computed(() => [
       </template>
 
       <template #options>
-        <ConnectionOptions />
+        <div class="panel-content">
+          <ConnectionOptions />
+        </div>
       </template>
 
       <template #logs>
-        <LogViewer />
+        <div class="panel-content">
+          <LogViewer />
+        </div>
+      </template>
+
+      <template #settings>
+        <div class="panel-content">
+          <SettingsPanel />
+        </div>
       </template>
     </TabContainer>
 
@@ -116,74 +144,181 @@ const tabs = computed(() => [
 </template>
 
 <style scoped>
-.container {
+.app-container {
   max-width: 1000px;
   margin: 0 auto;
-  padding: 1rem;
-  min-height: 100vh;
+  padding: var(--spacing-lg);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.header {
-  text-align: center;
-  margin-bottom: 2rem;
+/* Header Styles */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
-h1 {
-  font-size: 2.5rem;
-  margin-bottom: 0.5rem;
-  color: #2c3e50;
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
 }
 
-.description {
-  font-size: 1.2rem;
-  color: #7f8c8d;
-  margin-bottom: 0;
+.logo-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+  border-radius: var(--radius-lg);
+  color: var(--bg-primary);
+  box-shadow: var(--shadow-glow);
 }
 
-.config-content h2 {
-  margin-top: 0;
-  color: #2c3e50;
-  font-size: 1.5rem;
-  margin-bottom: 1.5rem;
+.logo-icon svg {
+  width: 28px;
+  height: 28px;
 }
 
-.config-warning {
-  background-color: #fff3cd;
-  border: 1px solid #ffeaa7;
-  border-radius: 4px;
-  padding: 1rem;
-  margin-bottom: 1.5rem;
-  color: #856404;
-}
-
-.config-warning p {
+.logo-text h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
   margin: 0;
-  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
+.version {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-error);
+  transition: all var(--transition-normal);
+}
+
+.status-indicator.active {
+  background: var(--color-success);
+  box-shadow: 0 0 12px var(--color-success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.status-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Panel Content */
+.panel-content {
+  animation: fadeIn 0.3s ease;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-lg);
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  color: var(--text-primary);
+}
+
+.config-badge {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.config-badge.warning {
+  background: rgba(255, 174, 0, 0.15);
+  color: var(--color-warning);
+  border: 1px solid rgba(255, 174, 0, 0.3);
+}
+
+/* Update Section */
 .update-section {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 1px solid #e9ecef;
+  margin-top: var(--spacing-xl);
+  padding-top: var(--spacing-xl);
+  border-top: 1px solid var(--border-color);
 }
 
 .update-section h3 {
-  margin: 0 0 1rem 0;
-  color: #2c3e50;
-  font-size: 1.25rem;
+  margin: 0 0 var(--spacing-md) 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
 }
 
+/* Responsive */
 @media (max-width: 768px) {
-  .container {
-    padding: 0.5rem;
+  .app-container {
+    padding: var(--spacing-md);
   }
   
-  h1 {
-    font-size: 2rem;
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-md);
   }
   
-  .description {
-    font-size: 1rem;
+  .logo-text h1 {
+    font-size: 1.5rem;
+  }
+  
+  .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-sm);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.15);
   }
 }
 </style>

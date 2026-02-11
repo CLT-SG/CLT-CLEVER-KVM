@@ -18,7 +18,9 @@ tauri-build = { version = "1.5", features = [] }
 bindgen = "0.70"  # Generate VPX FFI bindings from system libvpx headers
 
 [dependencies]
-tauri = { version = "1.5", features = [ "window-all", "fs-all", "dialog-all", "notification-all", "process-all", "os-all", "global-shortcut-all", "shell-open", "updater"] }
+tauri = { version = "1.5", features = [ "window-all", "fs-all", "dialog-all", "notification-all", "process-all", "os-all", "global-shortcut-all", "shell-open", "updater", "system-tray", "path-all"] }
+auto-launch = "0.5"
+dirs = "5.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.32.0", features = ["full"] }
