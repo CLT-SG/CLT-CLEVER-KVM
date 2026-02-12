@@ -211,18 +211,28 @@ pub fn get_server_url(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_logs() -> Result<(String, String), String> {
-    // Simplified log reading - get from default locations
-    let debug_content = match std::fs::read_to_string("/tmp/clever-kvm-debug.log") {
-        Ok(content) => content,
-        Err(_) => "Debug log not found or accessible".to_string(),
-    };
+    // Read logs from cross-platform log directory using the logger module
+    // Works on Windows, macOS, and Linux
+    let debug_content = crate::lib::read_debug_log();
+    let error_content = crate::lib::read_error_log();
     
-    let error_content = match std::fs::read_to_string("/tmp/clever-kvm-error.log") {
-        Ok(content) => content,
-        Err(_) => "Error log not found or accessible".to_string(),
-    };
+    debug!("Logs requested - debug: {} chars, error: {} chars", 
+           debug_content.len(), error_content.len());
     
     Ok((debug_content, error_content))
+}
+
+#[tauri::command]
+pub fn clear_app_logs() -> Result<(), String> {
+    // Clear all log files and memory buffers
+    crate::lib::clear_logs()
+        .map_err(|e| format!("Failed to clear logs: {}", e))
+}
+
+#[tauri::command]
+pub fn get_log_file_paths() -> Result<(String, String), String> {
+    // Return the actual log file paths for user reference
+    Ok(crate::lib::get_log_paths())
 }
 
 #[tauri::command]

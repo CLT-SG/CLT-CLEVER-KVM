@@ -73,6 +73,29 @@
 - **src-tauri/web-client/kvm-template.html**: Replaced button emojis (fullscreen, settings, disconnect) with inline SVG icons, replaced settings section title emojis (Display, Audio, Performance) with inline SVG icons
 - **src-tauri/web-client/kvm-client.css**: Added .icon CSS class for SVG sizing (16px), .osd-button .icon and .section-title .icon styles for stroke and fill properties
 
+### Cross-Platform File-Based Logging for Logs Tab
+
+### Bug Fixes
+- **Logs Tab Not Working**: Logs tab displayed "Error log not found or accessible" on all platforms because get_logs() used hardcoded Linux paths (/tmp/clever-kvm-debug.log) that were never created
+- **No File Logging**: env_logger::init() only outputs to console (stderr), log files were never written to disk
+- **Clear Button Non-Functional**: Clear button only cleared UI state, did not clear actual log files
+
+### Improvements
+- **Cross-Platform Log Directory**: Logs stored in platform-appropriate directories using dirs crate (Windows: %LOCALAPPDATA%, macOS: ~/Library/Application Support, Linux: ~/.local/share)
+- **File-Based Logging**: Added fern logger with dual output to clever-kvm.log (all levels) and clever-kvm-error.log (WARN and above)
+- **In-Memory Buffers**: Recent logs kept in memory for instant UI access without file I/O
+- **Timestamped Entries**: All log entries include timestamp, level, and target module
+- **Log File Paths Display**: UI shows actual log file locations for user reference
+- **Backend Clear Function**: Clear button now removes logs from both memory buffers and disk files
+
+### Technical Changes
+- **src-tauri/Cargo.toml**: Added fern = "0.7" and chrono = "0.4" dependencies
+- **src-tauri/src/lib/logger.rs** (new): Cross-platform logging module with get_log_directory(), init_logging(), read_debug_log(), read_error_log(), clear_logs(), get_log_paths()
+- **src-tauri/src/lib/mod.rs**: Export logger module and public functions
+- **src-tauri/src/main.rs**: Replaced env_logger::init() with init_logging(), registered clear_app_logs and get_log_file_paths commands
+- **src-tauri/src/app/commands.rs**: Updated get_logs() to use read_debug_log()/read_error_log(), added clear_app_logs() and get_log_file_paths() commands
+- **src/components/server/LogViewer.vue**: Added logPaths state, clearLogs() calls clear_app_logs backend, added log file paths info section with .log-paths styling
+
 ## [5.0.10] - 2026-02-11
 
 ### Matrix Dark Theme UI Redesign with Interactive Server Controls
