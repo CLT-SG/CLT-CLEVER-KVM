@@ -11,7 +11,6 @@ on:
         options:
           - ubuntu-22.04
           - windows-latest
-          - macos-13
           - macos-latest
       debug:
         description: 'Build in debug mode'
@@ -33,12 +32,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
-          cache: 'npm'
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || inputs.platform == 'macos-13' && 'x86_64-apple-darwin' || '' }}
+          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -69,7 +67,7 @@ jobs:
           echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build the app (Release)
         if: ${{ !inputs.debug }}
@@ -80,8 +78,6 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build -- --target aarch64-apple-darwin
-          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
-            npm run tauri:build -- --target x86_64-apple-darwin
           else
             npm run tauri:build
           fi
@@ -96,8 +92,6 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build:debug -- --target aarch64-apple-darwin
-          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
-            npm run tauri:build:debug -- --target x86_64-apple-darwin
           else
             npm run tauri:build:debug
           fi
@@ -123,16 +117,6 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/clever-kvm.exe
-          if-no-files-found: warn
-
-      - name: Upload artifacts (macOS Intel)
-        if: inputs.platform == 'macos-13'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clever-kvm-macos-x64
-          path: |
-            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
           if-no-files-found: warn
 
       - name: Upload artifacts (macOS Apple Silicon)

@@ -76,10 +76,6 @@ jobs:
           - platform: 'windows-latest'
             args: ''
             rust-targets: ''
-          # macOS Intel
-          - platform: 'macos-13'
-            args: '--target x86_64-apple-darwin'
-            rust-targets: 'x86_64-apple-darwin'
           # macOS Apple Silicon
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
@@ -93,7 +89,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
-          cache: 'npm'
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -130,7 +125,7 @@ jobs:
           echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0.5
