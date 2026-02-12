@@ -18,7 +18,7 @@
 //!
 //! ```text
 //! VideoService (VP9 encode) ──► WebRTC DataChannel (unreliable) ──► Browser
-//! AudioService (Opus encode) ──► WebRTC DataChannel (reliable)  ──► Browser
+#![allow(dead_code)]//! AudioService (Opus encode) ──► WebRTC DataChannel (reliable)  ──► Browser
 //! CursorService              ──► WebRTC DataChannel (reliable)  ──► Browser
 //! Browser input events       ──► WebSocket (JSON text messages)  ──► Server
 //! SDP/ICE signaling          ──► WebSocket (JSON text messages)  ──► Both

@@ -1,13 +1,4 @@
 fn main() {
-    // Set FFmpeg environment variables for compilation
-    if cfg!(target_os = "linux") {
-        println!("cargo:rustc-link-lib=avformat");
-        println!("cargo:rustc-link-lib=avcodec");
-        println!("cargo:rustc-link-lib=avutil");
-        println!("cargo:rustc-link-lib=swscale");
-        println!("cargo:rustc-link-lib=swresample");
-    }
-
     // Generate VPX FFI bindings from system headers using bindgen.
     // This ensures struct layouts (vpx_codec_enc_cfg_t etc.) match the installed
     // libvpx version exactly. The old libvpx-sys 1.4.2 crate had a 376-byte
@@ -25,33 +16,33 @@ fn main() {
         
         // Create a basic index.html file as a placeholder
         let index_html = r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clever KVM</title>
-    <style>
-        body {
-            font-family: sans-serif;
-            margin: 0;
-            padding: 20px;
-            text-align: center;
-        }
-        h1 {
-            color: #2c3e50;
-        }
-        p {
-            color: #7f8c8d;
-        }
-    </style>
-</head>
-<body>
-    <h1>Clever KVM</h1>
-    <p>To access the KVM functionality, use the /kvm endpoint.</p>
-    <p>Example: <a href="/kvm">Open KVM Client</a></p>
-</body>
-</html>
-"#;
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Clever KVM</title>
+                    <style>
+                        body {
+                            font-family: sans-serif;
+                            margin: 0;
+                            padding: 20px;
+                            text-align: center;
+                        }
+                        h1 {
+                            color: #2c3e50;
+                        }
+                        p {
+                            color: #7f8c8d;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>Clever KVM</h1>
+                    <p>To access the KVM functionality, use the /kvm endpoint.</p>
+                    <p>Example: <a href="/kvm">Open KVM Client</a></p>
+                </body>
+                </html>
+            "#;
         
         std::fs::write(web_client_dir.join("index.html"), index_html)
             .expect("Failed to create index.html");

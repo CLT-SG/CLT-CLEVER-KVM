@@ -64,6 +64,26 @@
           </div>
         </div>
       </div>
+      
+      <!-- Log File Paths Info -->
+      <div class="log-paths" v-if="logPaths.debug || logPaths.error">
+        <div class="log-paths-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+          <span>Log Files Location</span>
+        </div>
+        <div class="log-path-item" v-if="logPaths.debug">
+          <span class="path-label">Debug:</span>
+          <code class="path-value">{{ logPaths.debug }}</code>
+        </div>
+        <div class="log-path-item" v-if="logPaths.error">
+          <span class="path-label">Error:</span>
+          <code class="path-value">{{ logPaths.error }}</code>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -75,6 +95,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 const debugLog = ref("");
 const errorLog = ref("");
 const loading = ref(false);
+const logPaths = ref({ debug: "", error: "" });
 
 const debugLines = computed(() => debugLog.value ? debugLog.value.split('\n').filter(l => l.trim()).length : 0);
 const errorLines = computed(() => errorLog.value ? errorLog.value.split('\n').filter(l => l.trim()).length : 0);
@@ -85,16 +106,36 @@ async function refreshLogs() {
     const [debug, error] = await invoke("get_logs");
     debugLog.value = debug;
     errorLog.value = error;
+    
+    // Fetch log file paths for debugging
+    try {
+      const [debugPath, errorPath] = await invoke("get_log_file_paths");
+      logPaths.value = { debug: debugPath, error: errorPath };
+    } catch (pathError) {
+      console.warn("Could not get log file paths:", pathError);
+    }
   } catch (error) {
     console.error(`Failed to load logs: ${error}`);
+    debugLog.value = `Failed to load logs: ${error}`;
+    errorLog.value = "";
   } finally {
     loading.value = false;
   }
 }
 
-function clearLogs() {
-  debugLog.value = "";
-  errorLog.value = "";
+async function clearLogs() {
+  try {
+    // Clear logs on the backend (files and memory buffers)
+    await invoke("clear_app_logs");
+    // Clear the UI immediately
+    debugLog.value = "Logs cleared successfully. New logs will appear here.";
+    errorLog.value = "";
+  } catch (error) {
+    console.error(`Failed to clear logs: ${error}`);
+    // Still clear UI even if backend clear fails
+    debugLog.value = `Failed to clear logs on disk: ${error}`;
+    errorLog.value = "";
+  }
 }
 
 onMounted(() => {
@@ -265,5 +306,50 @@ onMounted(() => {
     flex: 1;
     justify-content: center;
   }
+}
+
+/* Log file paths info section */
+.log-paths {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.75rem;
+}
+
+.log-paths-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--spacing-sm);
+  font-weight: 500;
+}
+
+.log-path-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+}
+
+.log-path-item:last-child {
+  margin-bottom: 0;
+}
+
+.path-label {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.path-value {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  word-break: break-all;
 }
 </style>

@@ -18,6 +18,8 @@
 //! - Separate channels for video vs control
 //! - Input handler on its own path
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket};
 use crossbeam_channel::Receiver;

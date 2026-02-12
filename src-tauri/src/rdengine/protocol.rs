@@ -14,6 +14,10 @@
 //! [1B codec] [1B flags] [4B width] [4B height] [8B timestamp_ms] [data...]
 //! ```
 
+// Allow dead code for protocol constants and message types that are part of the
+// public API but may not be used internally yet (e.g., clipboard, ping, decode helpers)
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 /// Message type identifiers (first byte of binary message)
@@ -27,7 +31,6 @@ pub const MSG_PONG: u8 = 0x06;
 /// Codec identifiers
 pub const CODEC_VP8: u8 = 0x01;
 pub const CODEC_VP9: u8 = 0x02;
-pub const CODEC_H264: u8 = 0x03;
 pub const CODEC_OPUS: u8 = 0x10;
 
 /// Frame flags

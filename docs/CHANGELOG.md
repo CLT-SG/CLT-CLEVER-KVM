@@ -4,6 +4,67 @@
 
 ## [5.0.11] - 2026-02-11
 
+### Cross-Platform GitHub Actions Workflows for Tauri v1 Releases
+
+### Bug Fixes
+- **Missing macOS Builds**: GitHub Actions workflows only supported Ubuntu and Windows, missing macOS Intel and Apple Silicon builds
+- **Outdated Action Versions**: release.yml used github-script@v6 and tauri-action@v0 instead of latest stable versions
+- **Expensive PR Builds**: pr_build.yml ran builds on all platforms for every PR, wasting CI resources and time
+- **Version Mismatch**: tauri.conf.json had version 3.0.0 instead of 5.0.10 matching package.json and Cargo.toml
+- **Wrong Updater Endpoint**: Updater endpoint URL used CLTSG instead of CLT-SG organization name
+
+### Improvements
+- **Full Platform Support**: release.yml and build.yml now build for Ubuntu, Windows, macOS Intel (x86_64), and macOS Apple Silicon (aarch64)
+- **Updated Actions**: github-script updated to v7, tauri-action updated to v0.5 with proper Rust target configuration
+- **Faster PR Feedback**: pr_build.yml simplified to Windows-only builds for quicker CI feedback
+- **Improved Release Notes**: Release descriptions include platform download table with file type indicators
+- **Pre-release Option**: workflow_dispatch supports marking releases as pre-release
+
+### Technical Changes
+- **.github/workflows/release.yml**: Added macOS build matrix (macos-13, macos-latest), updated action versions, added prerelease input, improved release body
+- **.github/workflows/build.yml**: Added macOS platform options with Rust targets, macOS dependency installation via brew, macOS artifact uploads
+- **.github/workflows/pr_build.yml**: Simplified to single Windows-only job
+- **src-tauri/tauri.conf.json**: Fixed version to 5.0.10, fixed updater endpoint URL to CLT-SG
+
+### Standardize Log Format and Remove Legacy H.264 References
+
+### Bug Fixes
+- **Emoji Log Prefixes**: Rust backend and shell scripts used system emojis in log messages that can cause encoding issues and render inconsistently across platforms
+- **Unused FFmpeg Linking**: build.rs linked FFmpeg libraries (avformat, avcodec, avutil, swscale, swresample) that were legacy from H.264 pipeline, no longer used with VP9/libvpx
+- **Misleading H.264 Naming**: websocket.rs contained H264Config enum variant and handle_h264_socket function despite only using VP9 codec via rdengine
+- **Dead Codec Constant**: protocol.rs contained unused CODEC_H264 constant
+- **Wrong Codec References**: Build scripts output messages referenced H.264 instead of VP9
+
+### Improvements
+- **Standardized Rust Logs**: All emoji prefixes in Rust log macros replaced with text prefixes: [INFO], [OK], [WARNING], [ERROR], [DEBUG], [TIP]
+- **Standardized Script Logs**: All emoji prefixes in shell scripts replaced with text prefixes: [INFO], [COMPLETE], [WARNING], [ERROR]
+- **Removed FFmpeg Legacy**: Removed unused FFmpeg library linking from build.rs
+- **VP9-Only Naming**: Renamed H264Config to StreamingConfig, handle_h264_socket to handle_streaming_socket
+- **Clean Protocol**: Removed CODEC_H264 constant from protocol.rs
+- **Correct Build Output**: Updated build.sh and build.bat to reference VP9 hardware-accelerated encoding
+- **Reduced Warnings**: Added #![allow(dead_code)] to public API modules, reducing cargo check warnings from 96 to 42
+
+### Technical Changes
+- **src-tauri/build.rs**: Removed FFmpeg library linking
+- **src-tauri/src/rdengine/protocol.rs**: Removed CODEC_H264, added #![allow(dead_code)]
+- **src-tauri/src/rdengine/*.rs**: Added #![allow(dead_code)] to codec.rs, video_service.rs, audio_service.rs, cursor_service.rs, connection.rs, qos.rs, webrtc_transport.rs
+- **src-tauri/src/network/server/websocket.rs**: Renamed H264Config/handle_h264_socket, replaced emojis, added #![allow(dead_code)]
+- **src-tauri/src/network/server/server.rs**: Replaced emojis with [INFO]/[OK] prefixes
+- **src-tauri/src/network/server/handlers.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/network/server/models.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/system/system_optimizer.rs**: Replaced emojis, added #[allow(dead_code)]
+- **src-tauri/src/core/capture.rs**: Replaced emojis, added #![allow(dead_code)]
+- **src-tauri/src/core/native_capture.rs**: Replaced emojis, added #![allow(dead_code)]
+- **src-tauri/src/core/scrap_capture.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/app/commands.rs**: Replaced emojis with [INFO]/[OK]/[WARNING] prefixes
+- **src-tauri/src/lib/constants.rs**: Added #![allow(dead_code)]
+- **src-tauri/src/lib/error_types.rs**: Added #![allow(dead_code)]
+- **scripts/build.sh**: Updated H.264 to VP9 references
+- **scripts/build.bat**: Updated H.264 to VP9 references
+- **scripts/prepare-release.sh**: Replaced emojis with [INFO]/[COMPLETE]
+- **scripts/setup-github-secrets.sh**: Replaced emojis with [INFO]/[COMPLETE]/[WARNING]/[ERROR]
+- **scripts/test-updater.sh**: Replaced emojis with [INFO]/[COMPLETE]/[ERROR]
+
 ### Remove H.264 Legacy Codec from Web Client
 
 ### Bug Fixes
@@ -33,6 +94,29 @@
 - **src-tauri/web-client/kvm-client.js**: Replaced emoji prefixes in console.log/warn/error with [ERROR]/[WARNING]/[INFO]/[DEBUG], removed emoji from canvas text display
 - **src-tauri/web-client/kvm-template.html**: Replaced button emojis (fullscreen, settings, disconnect) with inline SVG icons, replaced settings section title emojis (Display, Audio, Performance) with inline SVG icons
 - **src-tauri/web-client/kvm-client.css**: Added .icon CSS class for SVG sizing (16px), .osd-button .icon and .section-title .icon styles for stroke and fill properties
+
+### Cross-Platform File-Based Logging for Logs Tab
+
+### Bug Fixes
+- **Logs Tab Not Working**: Logs tab displayed "Error log not found or accessible" on all platforms because get_logs() used hardcoded Linux paths (/tmp/clever-kvm-debug.log) that were never created
+- **No File Logging**: env_logger::init() only outputs to console (stderr), log files were never written to disk
+- **Clear Button Non-Functional**: Clear button only cleared UI state, did not clear actual log files
+
+### Improvements
+- **Cross-Platform Log Directory**: Logs stored in platform-appropriate directories using dirs crate (Windows: %LOCALAPPDATA%, macOS: ~/Library/Application Support, Linux: ~/.local/share)
+- **File-Based Logging**: Added fern logger with dual output to clever-kvm.log (all levels) and clever-kvm-error.log (WARN and above)
+- **In-Memory Buffers**: Recent logs kept in memory for instant UI access without file I/O
+- **Timestamped Entries**: All log entries include timestamp, level, and target module
+- **Log File Paths Display**: UI shows actual log file locations for user reference
+- **Backend Clear Function**: Clear button now removes logs from both memory buffers and disk files
+
+### Technical Changes
+- **src-tauri/Cargo.toml**: Added fern = "0.7" and chrono = "0.4" dependencies
+- **src-tauri/src/lib/logger.rs** (new): Cross-platform logging module with get_log_directory(), init_logging(), read_debug_log(), read_error_log(), clear_logs(), get_log_paths()
+- **src-tauri/src/lib/mod.rs**: Export logger module and public functions
+- **src-tauri/src/main.rs**: Replaced env_logger::init() with init_logging(), registered clear_app_logs and get_log_file_paths commands
+- **src-tauri/src/app/commands.rs**: Updated get_logs() to use read_debug_log()/read_error_log(), added clear_app_logs() and get_log_file_paths() commands
+- **src/components/server/LogViewer.vue**: Added logPaths state, clearLogs() calls clear_app_logs backend, added log file paths info section with .log-paths styling
 
 ## [5.0.10] - 2026-02-11
 

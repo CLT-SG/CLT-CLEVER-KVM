@@ -14,6 +14,8 @@
 //! - **Windows**: Falls back to native GDI capture (future: DXGI like scrap)
 //! - **macOS**: Falls back to native Core Graphics capture
 
+#![allow(dead_code)]
+
 use log::{debug, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 

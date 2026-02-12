@@ -1,3 +1,9 @@
+//! Custom error types for Clever KVM
+//!
+//! Provides structured error types for better error handling throughout the application.
+
+#![allow(dead_code)]
+
 use std::fmt;
 
 /// Custom error types for better error handling

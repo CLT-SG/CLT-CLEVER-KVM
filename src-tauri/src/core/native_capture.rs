@@ -11,6 +11,11 @@
 //! This replaces external dependencies with direct platform API implementations
 //! for better stability and reliability across all platforms.
 
+// Allow dead code for platform-specific capture utilities that may not be used
+// on all platforms (conditional compilation means functions compiled on one
+// platform may not be called on others)
+#![allow(dead_code)]
+
 use log::{debug, error, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -113,30 +118,30 @@ impl NativeScreenCapture {
         let idx = monitor_index.unwrap_or(0);
         
         #[cfg(target_os = "windows")]
-        info!("🖥️  Initializing native Windows screen capture for monitor {}", idx);
+        info!("[INFO] Initializing native Windows screen capture for monitor {}", idx);
         
         #[cfg(target_os = "linux")]
-        info!("🖥️  Initializing native Linux X11 screen capture for monitor {}", idx);
+        info!("[INFO] Initializing native Linux X11 screen capture for monitor {}", idx);
         
         #[cfg(target_os = "macos")]
-        info!("🖥️  Initializing native macOS screen capture for monitor {}", idx);
+        info!("[INFO] Initializing native macOS screen capture for monitor {}", idx);
         
         // Get monitor info to determine dimensions
         let monitors = Self::enumerate_monitors()?;
         
         if monitors.is_empty() {
-            error!("❌ No monitors found");
+            error!("[ERROR] No monitors found");
             return Err(NativeCaptureError::NoMonitorFound);
         }
         
         let target_monitor = if idx < monitors.len() {
             &monitors[idx]
         } else {
-            warn!("⚠️  Monitor {} not found, using primary", idx);
+            warn!("[WARNING] Monitor {} not found, using primary", idx);
             monitors.iter().find(|m| m.is_primary).unwrap_or(&monitors[0])
         };
         
-        info!("✅ Using monitor: {} ({}x{})", target_monitor.name, target_monitor.width, target_monitor.height);
+        info!("[OK] Using monitor: {} ({}x{})", target_monitor.name, target_monitor.width, target_monitor.height);
         
         // Platform-specific initialization
         #[cfg(target_os = "linux")]
@@ -284,7 +289,7 @@ impl NativeScreenCapture {
             });
         }
         
-        info!("🖥️  Found {} monitors on Linux X11", result.len());
+        info!("[INFO] Found {} monitors on Linux X11", result.len());
         Ok(result)
     }
     
@@ -338,7 +343,7 @@ impl NativeScreenCapture {
             });
         }
         
-        info!("🖥️  Found {} monitors on macOS", result.len());
+        info!("[INFO] Found {} monitors on macOS", result.len());
         Ok(result)
     }
     
@@ -526,7 +531,7 @@ impl NativeScreenCapture {
                 buffer.swap(i, i + 2); // Swap B and R
             }
             
-            debug!("📸 GDI capture complete: {}x{} ({} bytes)", width, height, buffer.len());
+            debug!("[DEBUG] GDI capture complete: {}x{} ({} bytes)", width, height, buffer.len());
             
             Ok(buffer)
         }
@@ -574,7 +579,7 @@ impl NativeScreenCapture {
         // Convert to RGBA based on depth and visual
         let rgba_buffer = self.convert_x11_to_rgba(&data, width, height, depth, screen)?;
         
-        debug!("📸 X11 capture complete: {}x{} ({} bytes)", width, height, rgba_buffer.len());
+        debug!("[DEBUG] X11 capture complete: {}x{} ({} bytes)", width, height, rgba_buffer.len());
         
         Ok(rgba_buffer)
     }
@@ -636,7 +641,7 @@ impl NativeScreenCapture {
             }
             _ => {
                 // Unsupported depth, create black image
-                warn!("⚠️  Unsupported X11 depth: {}, creating fallback", depth);
+                warn!("[WARNING] Unsupported X11 depth: {}, creating fallback", depth);
                 rgba_buffer.resize(pixel_count * 4, 0);
                 for i in (3..rgba_buffer.len()).step_by(4) {
                     rgba_buffer[i] = 255; // Alpha
@@ -693,7 +698,7 @@ impl NativeScreenCapture {
         // Convert to RGBA (macOS typically uses BGRA)
         let rgba_buffer = self.convert_macos_to_rgba(raw_data, width, height, bytes_per_row, bits_per_pixel)?;
         
-        debug!("📸 macOS capture complete: {}x{} ({} bytes)", width, height, rgba_buffer.len());
+        debug!("[DEBUG] macOS capture complete: {}x{} ({} bytes)", width, height, rgba_buffer.len());
         
         Ok(rgba_buffer)
     }

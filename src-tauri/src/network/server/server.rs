@@ -98,7 +98,7 @@ fn load_or_generate_cert() -> Result<(Vec<u8>, Vec<u8>), String> {
         match (std::fs::read(&cert_path), std::fs::read(&key_path)) {
             (Ok(cert_pem), Ok(key_pem)) if !cert_pem.is_empty() && !key_pem.is_empty() => {
                 log::info!(
-                    "✅ Loaded persisted TLS certificate from {}",
+                    "[OK] Loaded persisted TLS certificate from {}",
                     cert_dir.display()
                 );
                 return Ok((cert_pem, key_pem));
@@ -124,7 +124,7 @@ fn load_or_generate_cert() -> Result<(Vec<u8>, Vec<u8>), String> {
 
     if cert_path.exists() && key_path.exists() {
         log::info!(
-            "✅ TLS certificate persisted to {} (reused across restarts)",
+            "[OK] TLS certificate persisted to {} (reused across restarts)",
             cert_dir.display()
         );
     }
@@ -165,7 +165,7 @@ fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>), String> {
     let cert_pem = cert.serialize_pem().map_err(|e| format!("Failed to serialize cert PEM: {}", e))?.into_bytes();
     let key_pem = cert.serialize_private_key_pem().into_bytes();
     
-    log::info!("✅ Self-signed TLS certificate generated for HTTPS (WebCodecs secure context)");
+    log::info!("[OK] Self-signed TLS certificate generated for HTTPS (WebCodecs secure context)");
     
     Ok((cert_pem, key_pem))
 }
@@ -210,8 +210,8 @@ impl WebSocketServer {
         let tls_config = RustlsConfig::from_pem(cert_pem, key_pem).await
             .map_err(|e| format!("Failed to configure TLS: {}", e))?;
         
-        log::info!("🔒 HTTPS/WSS server listening on {}", addr);
-        log::info!("   WebCodecs API will be available (secure context)");
+        log::info!("[INFO] HTTPS/WSS server listening on {}", addr);
+        log::info!("    WebCodecs API will be available (secure context)");
 
         // Create HTTPS server with axum-server
         let handle = axum_server::Handle::new();

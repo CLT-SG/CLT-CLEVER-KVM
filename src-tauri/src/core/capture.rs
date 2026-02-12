@@ -11,6 +11,8 @@
 //! This module provides a unified interface for screen capture that works consistently
 //! across Windows, Linux (X11), and macOS platforms.
 
+#![allow(dead_code)]
+
 use log::{debug, error, info, warn};
 use std::sync::Mutex;
 use anyhow::Result;
@@ -160,7 +162,7 @@ impl ScreenCapture {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let idx = monitor_index.unwrap_or(0);
         
-        info!("🖥️  Initializing native screen capture for monitor {}", idx);
+        info!("[INFO] Initializing native screen capture for monitor {}", idx);
 
         // Create native capture instance
         let native_capture = NativeScreenCapture::new_with_options(Some(idx), show_cursor)
@@ -171,7 +173,7 @@ impl ScreenCapture {
         let height = height as usize;
 
         info!(
-            "✅ Native screen capture initialized: {}x{}, cursor: {}, format: {:?}",
+            "[OK] Native screen capture initialized: {}x{}, cursor: {}, format: {:?}",
             width, height, show_cursor, output_format
         );
 
@@ -307,7 +309,7 @@ impl ScreenCapture {
         // Log occasionally for debugging
         if self.frame_count % 60 == 0 {
             debug!(
-                "📸 Frame #{}: {}x{} ({:.1} KB)",
+                "[DEBUG] Frame #{}: {}x{} ({:.1} KB)",
                 self.frame_count,
                 self.width,
                 self.height,

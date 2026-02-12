@@ -194,8 +194,16 @@ fn create_tray_menu() -> SystemTrayMenu {
 }
 
 fn main() {
-    // Initialize logging first
-    env_logger::init();
+    // Initialize cross-platform file-based logging
+    // Logs are written to platform-specific directories:
+    // - Windows: %LOCALAPPDATA%\clever-kvm\logs
+    // - macOS: ~/Library/Application Support/clever-kvm/logs
+    // - Linux: ~/.local/share/clever-kvm/logs
+    if let Err(e) = crate::lib::init_logging() {
+        eprintln!("Failed to initialize logging: {}", e);
+        // Fall back to basic env_logger if our custom logger fails
+        env_logger::init();
+    }
 
     // Install rustls CryptoProvider before any TLS usage.
     // Required because both 'ring' (via webrtc/dtls) and 'aws-lc-rs' (via axum-server)
@@ -268,6 +276,8 @@ fn main() {
             get_monitors,
             get_available_monitors,
             get_logs,
+            clear_app_logs,
+            get_log_file_paths,
             get_network_interfaces,
             test_network_connectivity,
             get_system_info,

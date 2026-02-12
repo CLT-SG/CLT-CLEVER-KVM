@@ -90,6 +90,30 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
         state.options = opts;
     }
 
+    info!("Starting KVM server on port {}", port);
+    
+    // Apply system optimizations for ultra-low latency performance
+    info!("[INFO] Applying system optimizations for ultra-low latency...");
+    if let Err(e) = crate::system::apply_ultra_performance_optimizations() {
+        warn!("Failed to apply some system optimizations: {}", e);
+        info!("Server will still work but may not achieve optimal performance");
+    } else {
+        info!("[OK] System optimizations applied successfully");
+    }
+    
+    let app_handle_clone = app_handle.clone();
+    let server = state.runtime.block_on(async move {
+        match WebSocketServer::new(port, app_handle_clone).await {
+            Ok(server) => {
+                info!("Server started successfully");
+                Ok(server)
+            },
+            Err(e) => {
+                error!("Failed to start server: {}", e);
+                Err(format!("Failed to start server: {}", e))
+            },
+        }
+    })?;
 
     state.server_handle = Some(server);
     state.port = port;
@@ -104,7 +128,7 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
     let url = format!("https://{}:{}/kvm", ip, port);
     info!("Server URL: {}", url);
     info!("Server is now accessible from network at: {}", url);
-    info!("⚠️  Browser will show a certificate warning (self-signed cert) — click 'Advanced' → 'Proceed' to continue");
+    info!("[WARNING] Browser will show a certificate warning (self-signed cert) - click 'Advanced' then 'Proceed' to continue");
     Ok(url)
 }
 
@@ -187,6 +211,7 @@ pub fn get_server_url(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_logs() -> Result<(String, String), String> {
+<<<<<<< HEAD
     let log_dir = get_log_directory();
     
     let access_log_path = log_dir.join("access.log");
@@ -201,8 +226,30 @@ pub fn get_logs() -> Result<(String, String), String> {
         Ok(content) => content,
         Err(_) => format!("Error log not found at {:?}", error_log_path),
     };
+=======
+    // Read logs from cross-platform log directory using the logger module
+    // Works on Windows, macOS, and Linux
+    let debug_content = crate::lib::read_debug_log();
+    let error_content = crate::lib::read_error_log();
+    
+    debug!("Logs requested - debug: {} chars, error: {} chars", 
+           debug_content.len(), error_content.len());
+>>>>>>> refactor/standardize-logging-remove-legacy
     
     Ok((access_content, error_content))
+}
+
+#[tauri::command]
+pub fn clear_app_logs() -> Result<(), String> {
+    // Clear all log files and memory buffers
+    crate::lib::clear_logs()
+        .map_err(|e| format!("Failed to clear logs: {}", e))
+}
+
+#[tauri::command]
+pub fn get_log_file_paths() -> Result<(String, String), String> {
+    // Return the actual log file paths for user reference
+    Ok(crate::lib::get_log_paths())
 }
 
 #[tauri::command]

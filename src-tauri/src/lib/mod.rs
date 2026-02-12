@@ -5,7 +5,7 @@
 
 pub mod constants;
 pub mod error_types;
-pub mod logging;
+pub mod logger;
 
 pub use constants::*;
-pub use logging::*;
+pub use logger::{init_logging, read_debug_log, read_error_log, clear_logs, get_log_paths};
