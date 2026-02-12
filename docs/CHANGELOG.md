@@ -4,6 +4,28 @@
 
 ## [5.0.11] - 2026-02-11
 
+### Cross-Platform GitHub Actions Workflows for Tauri v1 Releases
+
+### Bug Fixes
+- **Missing macOS Builds**: GitHub Actions workflows only supported Ubuntu and Windows, missing macOS Intel and Apple Silicon builds
+- **Outdated Action Versions**: release.yml used github-script@v6 and tauri-action@v0 instead of latest stable versions
+- **Expensive PR Builds**: pr_build.yml ran builds on all platforms for every PR, wasting CI resources and time
+- **Version Mismatch**: tauri.conf.json had version 3.0.0 instead of 5.0.10 matching package.json and Cargo.toml
+- **Wrong Updater Endpoint**: Updater endpoint URL used CLTSG instead of CLT-SG organization name
+
+### Improvements
+- **Full Platform Support**: release.yml and build.yml now build for Ubuntu, Windows, macOS Intel (x86_64), and macOS Apple Silicon (aarch64)
+- **Updated Actions**: github-script updated to v7, tauri-action updated to v0.5 with proper Rust target configuration
+- **Faster PR Feedback**: pr_build.yml simplified to Windows-only builds for quicker CI feedback
+- **Improved Release Notes**: Release descriptions include platform download table with file type indicators
+- **Pre-release Option**: workflow_dispatch supports marking releases as pre-release
+
+### Technical Changes
+- **.github/workflows/release.yml**: Added macOS build matrix (macos-13, macos-latest), updated action versions, added prerelease input, improved release body
+- **.github/workflows/build.yml**: Added macOS platform options with Rust targets, macOS dependency installation via brew, macOS artifact uploads
+- **.github/workflows/pr_build.yml**: Simplified to single Windows-only job
+- **src-tauri/tauri.conf.json**: Fixed version to 5.0.10, fixed updater endpoint URL to CLT-SG
+
 ### Standardize Log Format and Remove Legacy H.264 References
 
 ### Bug Fixes

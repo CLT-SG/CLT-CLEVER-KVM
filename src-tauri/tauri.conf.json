@@ -8,13 +8,13 @@
   },
   "package": {
     "productName": "clever-kvm",
-    "version": "3.0.0"
+    "version": "5.0.10"
   },
   "tauri": {
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/CLTSG/CLT-CLEVER-KVM/releases/latest/download/latest.json"
+        "https://github.com/CLT-SG/CLT-CLEVER-KVM/releases/latest/download/latest.json"
       ],
       "dialog": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzODVEMjJDNDVFMUUyMjQKUldRazR1RkZMTktGMDhuMlFVZVVnYkpQOVVpWUFtaVUrcVZ0aTZmRzQ3RnViTnNSV3RZSzFSN2oK"
