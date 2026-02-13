@@ -12,7 +12,7 @@ on:
           - ubuntu-22.04
           - windows-latest
           - macos-latest
-          - macos-13
+          - macos-latest-x64
       debug:
         description: 'Build in debug mode'
         required: false
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    runs-on: ${{ inputs.platform }}
+    runs-on: ${{ inputs.platform == 'macos-latest-x64' && 'macos-latest' || inputs.platform }}
     
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || (inputs.platform == 'macos-13' && 'x86_64-apple-darwin' || '') }}
+          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || (inputs.platform == 'macos-latest-x64' && 'x86_64-apple-darwin' || '') }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -55,8 +55,8 @@ jobs:
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
             patchelf libxrandr-dev libasound2-dev
 
-      - name: Install dependencies (macOS)
-        if: startsWith(inputs.platform, 'macos')
+      - name: Install dependencies (macOS ARM64 native)
+        if: inputs.platform == 'macos-latest'
         run: |
           brew install libvpx opus ffmpeg llvm
           echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
@@ -64,6 +64,32 @@ jobs:
           echo "CPLUS_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
           echo "LIB_VPX_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
+
+      - name: Install dependencies (macOS x86_64 cross-compile)
+        if: inputs.platform == 'macos-latest-x64'
+        run: |
+          # Install native ARM64 llvm for bindgen (runs on host)
+          brew install llvm
+          
+          # Install Rosetta 2 for x86_64 emulation
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+          
+          # Bootstrap x86_64 Homebrew under /usr/local
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+          
+          # Install x86_64 libraries for linking
+          arch -x86_64 /usr/local/bin/brew install libvpx opus || true
+          
+          # Use native ARM64 libclang for bindgen (host process)
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+          
+          # Point headers and libraries to x86_64 versions for cross-linking
+          echo "C_INCLUDE_PATH=/usr/local/opt/libvpx/include:/usr/local/opt/opus/include" >> $GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=/usr/local/opt/libvpx/include:/usr/local/opt/opus/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=/usr/local/opt/libvpx/lib:/usr/local/opt/opus/lib" >> $GITHUB_ENV
+          echo "LIB_VPX_PATH=/usr/local/opt/libvpx/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/usr/local/opt/libvpx/lib/pkgconfig:/usr/local/opt/opus/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: inputs.platform == 'windows-latest'
@@ -92,7 +118,7 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build -- --target aarch64-apple-darwin
-          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
+          elif [[ "${{ inputs.platform }}" == "macos-latest-x64" ]]; then
             npm run tauri:build -- --target x86_64-apple-darwin
           else
             npm run tauri:build
@@ -108,7 +134,7 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build:debug -- --target aarch64-apple-darwin
-          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
+          elif [[ "${{ inputs.platform }}" == "macos-latest-x64" ]]; then
             npm run tauri:build:debug -- --target x86_64-apple-darwin
           else
             npm run tauri:build:debug
@@ -148,7 +174,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload artifacts (macOS Intel)
-        if: inputs.platform == 'macos-13'
+        if: inputs.platform == 'macos-latest-x64'
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-macos-x64

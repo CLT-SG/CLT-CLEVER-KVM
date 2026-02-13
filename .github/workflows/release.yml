@@ -80,10 +80,12 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             rust-targets: 'aarch64-apple-darwin'
-          # macOS Intel (native x86_64 runner)
-          - platform: 'macos-13'
+            cross: false
+          # macOS Intel (cross-compiled from ARM64)
+          - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             rust-targets: 'x86_64-apple-darwin'
+            cross: true
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -115,8 +117,8 @@ jobs:
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
             patchelf libxrandr-dev libasound2-dev
 
-      - name: Install dependencies (macOS)
-        if: startsWith(matrix.platform, 'macos')
+      - name: Install dependencies (macOS ARM64 native)
+        if: matrix.platform == 'macos-latest' && !matrix.cross
         run: |
           brew install libvpx opus ffmpeg llvm
           echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
@@ -124,6 +126,32 @@ jobs:
           echo "CPLUS_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
           echo "LIB_VPX_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
+
+      - name: Install dependencies (macOS x86_64 cross-compile)
+        if: matrix.platform == 'macos-latest' && matrix.cross
+        run: |
+          # Install native ARM64 llvm for bindgen (runs on host)
+          brew install llvm
+          
+          # Install Rosetta 2 for x86_64 emulation
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+          
+          # Bootstrap x86_64 Homebrew under /usr/local
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+          
+          # Install x86_64 libraries for linking
+          arch -x86_64 /usr/local/bin/brew install libvpx opus || true
+          
+          # Use native ARM64 libclang for bindgen (host process)
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+          
+          # Point headers and libraries to x86_64 versions for cross-linking
+          echo "C_INCLUDE_PATH=/usr/local/opt/libvpx/include:/usr/local/opt/opus/include" >> $GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=/usr/local/opt/libvpx/include:/usr/local/opt/opus/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=/usr/local/opt/libvpx/lib:/usr/local/opt/opus/lib" >> $GITHUB_ENV
+          echo "LIB_VPX_PATH=/usr/local/opt/libvpx/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/usr/local/opt/libvpx/lib/pkgconfig:/usr/local/opt/opus/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: matrix.platform == 'windows-latest'

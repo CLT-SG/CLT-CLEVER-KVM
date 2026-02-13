@@ -8,17 +8,16 @@
 
 ### Bug Fixes
 - **libclang Architecture Mismatch**: macOS Intel (x86_64) builds failed with coreaudio-sys build error because bindgen (ARM64 process) could not load x86_64 libclang.dylib when cross-compiling from macos-latest (ARM64 runner)
-- **Failed Cross-Compilation**: release.yml used macos-latest for x86_64 target, requiring Rosetta 2 and x86_64 Homebrew installation that produced architecture-incompatible libraries
-- **Duplicate macOS Steps**: Two separate dependency steps (ARM and x86_64 cross-compile) duplicated logic with fragile arch -x86_64 brew commands
+- **Deprecated macos-13 Runner**: macos-13 (Intel) runner is deprecated by GitHub Actions, so native x86_64 runner approach was not viable
 
 ### Improvements
-- **Native Intel Runner**: Changed macOS Intel builds from macos-latest (ARM64 cross-compile) to macos-13 (native x86_64 runner), eliminating all cross-compilation issues
-- **Unified macOS Step**: Consolidated two macOS dependency steps into single step using startsWith condition for both platforms
-- **Simplified Build Config**: Removed Rosetta 2 installation, x86_64 Homebrew bootstrap, and PKG_CONFIG_ALLOW_CROSS workarounds
+- **Native ARM64 libclang for Bindgen**: Use ARM64 llvm from native brew for bindgen host process, install x86_64 libraries separately via arch -x86_64 brew for cross-linking only
+- **Cross-Compile Matrix Flag**: Added cross flag to release.yml matrix to distinguish ARM64 native vs x86_64 cross-compile dependency steps
+- **Split Dependency Steps**: Separate macOS ARM64 native and x86_64 cross-compile steps with clear environment variable separation
 
 ### Technical Changes
-- **.github/workflows/release.yml**: Changed macOS Intel matrix entry from macos-latest to macos-13, replaced two macOS dependency steps with single unified step using startsWith(matrix.platform, 'macos')
-- **.github/workflows/build.yml**: Changed macos-latest-x64 platform option to macos-13, removed runner remapping expression, replaced two macOS dependency steps with single unified step, updated platform conditionals
+- **.github/workflows/release.yml**: Added cross matrix flag, split macOS dependency steps into ARM64 native and x86_64 cross-compile with native ARM64 libclang for bindgen
+- **.github/workflows/build.yml**: Restored macos-latest-x64 platform option with runner remapping, split macOS dependency steps into ARM64 native and x86_64 cross-compile
 
 ### Cross-Platform GitHub Actions Workflows for Tauri v1 Releases
 
