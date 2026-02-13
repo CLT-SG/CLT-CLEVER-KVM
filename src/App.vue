@@ -2,6 +2,7 @@
 import { onMounted, computed } from "vue";
 import { useServer } from "./composables";
 import { presets } from "./constants";
+import { version } from "../package.json";
 
 import {
   TabContainer,
@@ -73,7 +74,7 @@ const tabs = computed(() => [
         </div>
         <div class="logo-text">
           <h1>Clever KVM</h1>
-          <span class="version">v5.0.0</span>
+          <span class="version">v{{ version }}</span>
         </div>
       </div>
       <div class="header-status">
