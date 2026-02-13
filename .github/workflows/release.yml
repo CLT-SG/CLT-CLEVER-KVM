@@ -80,8 +80,8 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             rust-targets: 'aarch64-apple-darwin'
-          # macOS Intel
-          - platform: 'macos-13'
+          # macOS Intel (cross-compiled from Apple Silicon)
+          - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             rust-targets: 'x86_64-apple-darwin'
 

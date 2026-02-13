@@ -12,7 +12,7 @@ on:
           - ubuntu-22.04
           - windows-latest
           - macos-latest
-          - macos-13
+          - macos-latest-x64
       debug:
         description: 'Build in debug mode'
         required: false
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    runs-on: ${{ inputs.platform }}
+    runs-on: ${{ inputs.platform == 'macos-latest-x64' && 'macos-latest' || inputs.platform }}
     
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || (inputs.platform == 'macos-13' && 'x86_64-apple-darwin' || '') }}
+          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || (inputs.platform == 'macos-latest-x64' && 'x86_64-apple-darwin' || '') }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -64,6 +64,10 @@ jobs:
           echo "CPLUS_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
           echo "LIB_VPX_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
+
+      - name: Set runner platform for macOS x64 cross-compile
+        if: inputs.platform == 'macos-latest-x64'
+        run: echo "ACTUAL_RUNNER=macos-latest" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: inputs.platform == 'windows-latest'
@@ -92,7 +96,7 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build -- --target aarch64-apple-darwin
-          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
+          elif [[ "${{ inputs.platform }}" == "macos-latest-x64" ]]; then
             npm run tauri:build -- --target x86_64-apple-darwin
           else
             npm run tauri:build
@@ -108,7 +112,7 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build:debug -- --target aarch64-apple-darwin
-          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
+          elif [[ "${{ inputs.platform }}" == "macos-latest-x64" ]]; then
             npm run tauri:build:debug -- --target x86_64-apple-darwin
           else
             npm run tauri:build:debug
@@ -148,7 +152,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload artifacts (macOS Intel)
-        if: inputs.platform == 'macos-13'
+        if: inputs.platform == 'macos-latest-x64'
         uses: actions/upload-artifact@v4
         with:
           name: clever-kvm-macos-x64
