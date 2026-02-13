@@ -115,8 +115,8 @@ jobs:
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
             patchelf libxrandr-dev libasound2-dev
 
-      - name: Install dependencies (macOS)
-        if: startsWith(matrix.platform, 'macos')
+      - name: Install dependencies (macOS ARM)
+        if: matrix.platform == 'macos-latest' && matrix.rust-targets == 'aarch64-apple-darwin'
         run: |
           brew install libvpx opus ffmpeg llvm
           echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
@@ -124,6 +124,25 @@ jobs:
           echo "CPLUS_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
           echo "LIB_VPX_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
+
+      - name: Install dependencies (macOS x86_64 cross-compile)
+        if: matrix.platform == 'macos-latest' && matrix.rust-targets == 'x86_64-apple-darwin'
+        run: |
+          # Install Rosetta 2 for x86_64 emulation
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+          
+          # Install x86_64 Homebrew and dependencies
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+          arch -x86_64 /usr/local/bin/brew install libvpx opus ffmpeg llvm
+          
+          # Set environment for x86_64 libraries
+          echo "LIBCLANG_PATH=/usr/local/opt/llvm/lib" >> $GITHUB_ENV
+          echo "C_INCLUDE_PATH=/usr/local/opt/libvpx/include:/usr/local/opt/opus/include" >> $GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=/usr/local/opt/libvpx/include:/usr/local/opt/opus/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=/usr/local/opt/libvpx/lib:/usr/local/opt/opus/lib" >> $GITHUB_ENV
+          echo "LIB_VPX_PATH=/usr/local/opt/libvpx/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/usr/local/opt/libvpx/lib/pkgconfig:/usr/local/opt/opus/lib/pkgconfig:/usr/local/opt/ffmpeg/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: matrix.platform == 'windows-latest'
