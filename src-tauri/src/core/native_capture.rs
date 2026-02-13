@@ -705,10 +705,6 @@ impl NativeScreenCapture {
             BITMAP_INFO,
         );
         
-        let context = context.ok_or_else(|| {
-            NativeCaptureError::CaptureError("Failed to create bitmap context".to_string())
-        })?;
-        
         // Draw the captured image into our RGBA bitmap context
         let rect = CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(width as f64, height as f64));
         context.draw_image(rect, &image);

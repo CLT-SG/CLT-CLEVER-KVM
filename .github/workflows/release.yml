@@ -80,6 +80,10 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             rust-targets: 'aarch64-apple-darwin'
+          # macOS Intel
+          - platform: 'macos-13'
+            args: '--target x86_64-apple-darwin'
+            rust-targets: 'x86_64-apple-darwin'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -109,7 +113,7 @@ jobs:
             librsvg2-dev libvpx-dev libclang-dev libsoup2.4-dev \
             libxdo-dev libxcb-randr0-dev xdg-desktop-portal libpipewire-0.3-dev libopus-dev \
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
-            patchelf libxrandr-dev 
+            patchelf libxrandr-dev libasound2-dev
 
       - name: Install dependencies (macOS)
         if: startsWith(matrix.platform, 'macos')

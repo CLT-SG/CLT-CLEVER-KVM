@@ -6,12 +6,13 @@ on:
       platform:
         description: 'Platform to build for'
         required: true
-        default: 'ubuntu-latest'
+        default: 'ubuntu-22.04'
         type: choice
         options:
           - ubuntu-22.04
           - windows-latest
           - macos-latest
+          - macos-13
       debug:
         description: 'Build in debug mode'
         required: false
@@ -36,7 +37,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+          targets: ${{ inputs.platform == 'macos-latest' && 'aarch64-apple-darwin' || (inputs.platform == 'macos-13' && 'x86_64-apple-darwin' || '') }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -52,7 +53,7 @@ jobs:
             librsvg2-dev libvpx-dev libclang-dev libsoup2.4-dev \
             libxdo-dev libxcb-randr0-dev xdg-desktop-portal libpipewire-0.3-dev libopus-dev \
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
-            patchelf libxrandr-dev 
+            patchelf libxrandr-dev libasound2-dev
 
       - name: Install dependencies (macOS)
         if: startsWith(inputs.platform, 'macos')
@@ -89,6 +90,8 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build -- --target aarch64-apple-darwin
+          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
+            npm run tauri:build -- --target x86_64-apple-darwin
           else
             npm run tauri:build
           fi
@@ -103,6 +106,8 @@ jobs:
         run: |
           if [[ "${{ inputs.platform }}" == "macos-latest" ]]; then
             npm run tauri:build:debug -- --target aarch64-apple-darwin
+          elif [[ "${{ inputs.platform }}" == "macos-13" ]]; then
+            npm run tauri:build:debug -- --target x86_64-apple-darwin
           else
             npm run tauri:build:debug
           fi
@@ -138,4 +143,14 @@ jobs:
           path: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+          if-no-files-found: warn
+
+      - name: Upload artifacts (macOS Intel)
+        if: inputs.platform == 'macos-13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clever-kvm-macos-x64
+          path: |
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
           if-no-files-found: warn

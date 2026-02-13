@@ -7,7 +7,50 @@ fn main() {
     generate_vpx_bindings();
 
     // Link system libvpx
-    println!("cargo:rustc-link-lib=vpx");
+    // Rerun if environment changes
+    println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
+    println!("cargo:rerun-if-env-changed=LIB_VPX_PATH");
+    println!("cargo:rerun-if-env-changed=VCPKG_INSTALLATION_ROOT");
+
+    // On Windows, we need to tell the linker where to find vpx.lib
+    #[cfg(target_os = "windows")]
+    {
+        let mut lib_path_found = false;
+        
+        // Check for VCPKG_ROOT environment variable (set by GitHub Actions)
+        if let Ok(vcpkg_root) = std::env::var("VCPKG_ROOT") {
+            let lib_path = format!("{}\\installed\\x64-windows-static-md\\lib", vcpkg_root);
+            println!("cargo:warning=Using VCPKG_ROOT lib path: {}", lib_path);
+            println!("cargo:rustc-link-search=native={}", lib_path);
+            lib_path_found = true;
+        }
+        // Also check VCPKG_INSTALLATION_ROOT (default on GitHub runners)
+        else if let Ok(vcpkg_root) = std::env::var("VCPKG_INSTALLATION_ROOT") {
+            let lib_path = format!("{}\\installed\\x64-windows-static-md\\lib", vcpkg_root);
+            println!("cargo:warning=Using VCPKG_INSTALLATION_ROOT lib path: {}", lib_path);
+            println!("cargo:rustc-link-search=native={}", lib_path);
+            lib_path_found = true;
+        }
+        
+        // Also check LIB_VPX_PATH for custom installations
+        if let Ok(lib_path) = std::env::var("LIB_VPX_PATH") {
+            println!("cargo:warning=Using LIB_VPX_PATH: {}", lib_path);
+            println!("cargo:rustc-link-search=native={}", lib_path);
+            lib_path_found = true;
+        }
+        
+        if !lib_path_found {
+            println!("cargo:warning=No VPX library path found. Set VCPKG_ROOT or LIB_VPX_PATH environment variable.");
+        }
+        
+        // Use static linking on Windows
+        println!("cargo:rustc-link-lib=static=vpx");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        println!("cargo:rustc-link-lib=vpx");
+    }
 
     // Create web-client directory if it doesn't exist
     let web_client_dir = std::path::Path::new("web-client");
