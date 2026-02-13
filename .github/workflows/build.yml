@@ -71,9 +71,20 @@ jobs:
           # Install Rosetta 2 for x86_64 emulation
           sudo softwareupdate --install-rosetta --agree-to-license || true
           
-          # Install x86_64 Homebrew and dependencies
+          # Install x86_64 Homebrew
           arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
-          arch -x86_64 /usr/local/bin/brew install libvpx opus ffmpeg llvm
+          
+          # Install dependencies (ignore link errors - packages are still installed)
+          arch -x86_64 /usr/local/bin/brew install libvpx opus llvm || true
+          arch -x86_64 /usr/local/bin/brew install ffmpeg || true
+          
+          # Force link llvm if needed (ignore errors)
+          arch -x86_64 /usr/local/bin/brew link --overwrite llvm || true
+          
+          # Verify installations
+          ls -la /usr/local/opt/libvpx/lib/ || echo "libvpx not found"
+          ls -la /usr/local/opt/opus/lib/ || echo "opus not found"
+          ls -la /usr/local/opt/llvm/lib/ || echo "llvm not found"
           
           # Set environment for x86_64 libraries
           echo "LIBCLANG_PATH=/usr/local/opt/llvm/lib" >> $GITHUB_ENV

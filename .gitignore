@@ -14,6 +14,7 @@ dist-ssr
 package-lock.json
 yarn.lock
 Cargo.lock
+src-tauri/Cargo.lock
 .pnpm-debug.log
 
 # Editor directories and files
