@@ -659,8 +659,9 @@ impl NativeScreenCapture {
     /// Core Graphics-based screen capture for macOS
     #[cfg(target_os = "macos")]
     fn capture_macos(&self) -> Result<Vec<u8>, NativeCaptureError> {
-        use core_foundation::data::CFData;
-        use core_graphics::image::CGImage;
+        use core_graphics::context::CGContext;
+        use core_graphics::color_space::CGColorSpace;
+        use core_graphics::geometry::{CGRect, CGPoint, CGSize};
         
         // Get all displays and find the target one
         let display_ids = CGDisplay::active_displays()
@@ -675,88 +676,46 @@ impl NativeScreenCapture {
         let display = CGDisplay::new(display_id);
         
         // Capture the display image
-        let image: Option<CGImage> = display.image();
-        let image = image.ok_or_else(|| {
+        let image = display.image().ok_or_else(|| {
             NativeCaptureError::CaptureError("Failed to capture display image".to_string())
         })?;
         
-        // Get image properties
+        // Get image dimensions
         let width = image.width();
         let height = image.height();
-        let bytes_per_row = image.bytes_per_row();
-        let bits_per_pixel = image.bits_per_pixel();
         
-        // Get pixel data from the image
-        let data_provider = image.data_provider()
-            .ok_or_else(|| NativeCaptureError::CaptureError("Failed to get data provider".to_string()))?;
+        // Create a bitmap context with RGBA format (8 bits per component, 4 bytes per pixel)
+        let bytes_per_row = width * 4;
+        let mut buffer = vec![0u8; height * bytes_per_row];
         
-        let cf_data: CFData = data_provider.copy_data()
-            .ok_or_else(|| NativeCaptureError::CaptureError("Failed to copy pixel data".to_string()))?;
+        let color_space = CGColorSpace::create_device_rgb();
         
-        let raw_data = cf_data.bytes();
+        // Create bitmap context with RGBA format
+        // kCGImageAlphaPremultipliedLast (1) = RGBA with premultiplied alpha
+        // kCGBitmapByteOrder32Big (4 << 12 = 16384) = big-endian byte order
+        const BITMAP_INFO: u32 = 1 | (4 << 12); // kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
         
-        // Convert to RGBA (macOS typically uses BGRA)
-        let rgba_buffer = self.convert_macos_to_rgba(raw_data, width, height, bytes_per_row, bits_per_pixel)?;
+        let context = CGContext::create_bitmap_context(
+            Some(buffer.as_mut_ptr() as *mut _),
+            width,
+            height,
+            8,                  // bits per component
+            bytes_per_row,      // bytes per row
+            &color_space,
+            BITMAP_INFO,
+        );
         
-        debug!("[DEBUG] macOS capture complete: {}x{} ({} bytes)", width, height, rgba_buffer.len());
+        let context = context.ok_or_else(|| {
+            NativeCaptureError::CaptureError("Failed to create bitmap context".to_string())
+        })?;
         
-        Ok(rgba_buffer)
-    }
-    
-    /// Convert macOS image data to RGBA format
-    #[cfg(target_os = "macos")]
-    fn convert_macos_to_rgba(
-        &self,
-        data: &[u8],
-        width: usize,
-        height: usize,
-        bytes_per_row: usize,
-        bits_per_pixel: usize,
-    ) -> Result<Vec<u8>, NativeCaptureError> {
-        let bytes_per_pixel = bits_per_pixel / 8;
-        let pixel_count = width * height;
-        let mut rgba_buffer = Vec::with_capacity(pixel_count * 4);
+        // Draw the captured image into our RGBA bitmap context
+        let rect = CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(width as f64, height as f64));
+        context.draw_image(rect, &image);
         
-        for y in 0..height {
-            for x in 0..width {
-                let offset = y * bytes_per_row + x * bytes_per_pixel;
-                
-                if offset + bytes_per_pixel <= data.len() {
-                    match bytes_per_pixel {
-                        4 => {
-                            // macOS uses BGRA format (little-endian ARGB)
-                            let b = data[offset];
-                            let g = data[offset + 1];
-                            let r = data[offset + 2];
-                            let a = data[offset + 3];
-                            
-                            rgba_buffer.push(r);
-                            rgba_buffer.push(g);
-                            rgba_buffer.push(b);
-                            rgba_buffer.push(a);
-                        }
-                        3 => {
-                            // BGR format
-                            let b = data[offset];
-                            let g = data[offset + 1];
-                            let r = data[offset + 2];
-                            
-                            rgba_buffer.push(r);
-                            rgba_buffer.push(g);
-                            rgba_buffer.push(b);
-                            rgba_buffer.push(255);
-                        }
-                        _ => {
-                            rgba_buffer.extend_from_slice(&[0, 0, 0, 255]);
-                        }
-                    }
-                } else {
-                    rgba_buffer.extend_from_slice(&[0, 0, 0, 255]);
-                }
-            }
-        }
+        debug!("[DEBUG] macOS capture complete: {}x{} ({} bytes)", width, height, buffer.len());
         
-        Ok(rgba_buffer)
+        Ok(buffer)
     }
     
     // =========================================================================
