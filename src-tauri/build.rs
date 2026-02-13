@@ -11,6 +11,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
     println!("cargo:rerun-if-env-changed=LIB_VPX_PATH");
     println!("cargo:rerun-if-env-changed=VCPKG_INSTALLATION_ROOT");
+    println!("cargo:rerun-if-env-changed=HOMEBREW_PREFIX");
 
     // On Windows, we need to tell the linker where to find vpx.lib
     #[cfg(target_os = "windows")]
@@ -47,8 +48,55 @@ fn main() {
         println!("cargo:rustc-link-lib=static=vpx");
     }
 
-    #[cfg(not(target_os = "windows"))]
+    // On macOS, libvpx is typically installed via Homebrew
+    #[cfg(target_os = "macos")]
     {
+        // Check for custom LIB_VPX_PATH first
+        if let Ok(lib_path) = std::env::var("LIB_VPX_PATH") {
+            println!("cargo:warning=Using LIB_VPX_PATH: {}", lib_path);
+            println!("cargo:rustc-link-search=native={}", lib_path);
+        } else {
+            // Try to find libvpx via pkg-config first
+            if let Ok(output) = std::process::Command::new("pkg-config")
+                .args(["--libs-only-L", "vpx"])
+                .output()
+            {
+                if output.status.success() {
+                    let lib_path = String::from_utf8_lossy(&output.stdout);
+                    let lib_path = lib_path.trim().trim_start_matches("-L");
+                    if !lib_path.is_empty() {
+                        println!("cargo:warning=Using pkg-config vpx lib path: {}", lib_path);
+                        println!("cargo:rustc-link-search=native={}", lib_path);
+                    }
+                }
+            }
+            
+            // Also add common Homebrew paths as fallback
+            // Apple Silicon (arm64) Homebrew prefix
+            let homebrew_arm64 = "/opt/homebrew/lib";
+            // Intel (x86_64) Homebrew prefix
+            let homebrew_intel = "/usr/local/lib";
+            
+            if std::path::Path::new(homebrew_arm64).exists() {
+                println!("cargo:warning=Adding Homebrew ARM64 lib path: {}", homebrew_arm64);
+                println!("cargo:rustc-link-search=native={}", homebrew_arm64);
+            }
+            if std::path::Path::new(homebrew_intel).exists() {
+                println!("cargo:warning=Adding Homebrew Intel lib path: {}", homebrew_intel);
+                println!("cargo:rustc-link-search=native={}", homebrew_intel);
+            }
+        }
+        
+        println!("cargo:rustc-link-lib=vpx");
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, libvpx is typically in standard paths, but check LIB_VPX_PATH
+        if let Ok(lib_path) = std::env::var("LIB_VPX_PATH") {
+            println!("cargo:warning=Using LIB_VPX_PATH: {}", lib_path);
+            println!("cargo:rustc-link-search=native={}", lib_path);
+        }
         println!("cargo:rustc-link-lib=vpx");
     }
 

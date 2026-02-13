@@ -62,6 +62,8 @@ jobs:
           echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
           echo "C_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
           echo "CPLUS_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
+          echo "LIB_VPX_PATH=$(brew --prefix libvpx)/lib" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: inputs.platform == 'windows-latest'
