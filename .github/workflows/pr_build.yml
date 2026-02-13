@@ -40,8 +40,15 @@ jobs:
         shell: pwsh
         run: |
           vcpkg integrate install
-          vcpkg install libvpx:x64-windows opus:x64-windows
-          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          vcpkg install libvpx:x64-windows-static-md opus:x64-windows-static-md
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          $includePath = "$vcpkgRoot\installed\x64-windows-static-md\include"
+          $libPath = "$vcpkgRoot\installed\x64-windows-static-md\lib"
+          echo "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+          echo "C_INCLUDE_PATH=$includePath" >> $env:GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=$includePath" >> $env:GITHUB_ENV
+          echo "LIBRARY_PATH=$libPath" >> $env:GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$includePath" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm install

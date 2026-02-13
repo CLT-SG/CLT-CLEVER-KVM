@@ -69,7 +69,7 @@ jobs:
       matrix:
         include:
           # Linux
-          - platform: 'ubuntu-22.04'
+          - platform: 'ubuntu-latest'
             args: ''
             rust-targets: ''
           # Windows  
@@ -101,28 +101,37 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install dependencies (Ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl wget file libssl-dev \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
             libxdo-dev libxcb-randr0-dev xdg-desktop-portal libpipewire-0.3-dev libopus-dev \
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
-            patchelf libxrandr-dev libvpx-dev
+            patchelf libxrandr-dev libvpx-dev libsoup-2.4-dev libclang-dev
 
       - name: Install dependencies (macOS)
         if: startsWith(matrix.platform, 'macos')
         run: |
-          brew install libvpx opus ffmpeg
+          brew install libvpx opus ffmpeg llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+          echo "C_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=$(brew --prefix libvpx)/include" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          # vcpkg is available on GitHub runners
           vcpkg integrate install
-          vcpkg install libvpx:x64-windows opus:x64-windows
-          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          vcpkg install libvpx:x64-windows-static-md opus:x64-windows-static-md
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          $includePath = "$vcpkgRoot\installed\x64-windows-static-md\include"
+          $libPath = "$vcpkgRoot\installed\x64-windows-static-md\lib"
+          echo "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+          echo "C_INCLUDE_PATH=$includePath" >> $env:GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=$includePath" >> $env:GITHUB_ENV
+          echo "LIBRARY_PATH=$libPath" >> $env:GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$includePath" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm install
