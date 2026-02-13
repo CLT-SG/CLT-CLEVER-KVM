@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Build script for Clever KVM
-# This script builds the VNC server application
+# This script builds the KVM application with rdengine streaming
 
 set -e
 

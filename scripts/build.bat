@@ -1,6 +1,6 @@
 @echo off
 REM Build script for Clever KVM (Windows)
-REM This script builds the VNC server application
+REM This script builds the KVM application with rdengine streaming
 
 echo [INFO] Building Clever KVM with native WebM support...
 
