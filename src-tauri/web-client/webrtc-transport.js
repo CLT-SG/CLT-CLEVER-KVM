@@ -70,7 +70,7 @@ class WebRtcTransport {
         this.onIceCandidate = options.onIceCandidate || (() => {});
 
         // RTCPeerConnection configuration
-        // No STUN servers — Clever KVM operates on LAN where host candidates
+        // No STUN servers — CLEVER KVM operates on LAN where host candidates
         // are sufficient. External STUN adds 5-30s ICE gathering delay.
         this.rtcConfig = options.rtcConfig || {
             iceServers: [],

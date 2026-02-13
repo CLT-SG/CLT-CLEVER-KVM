@@ -53,8 +53,8 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: `v${process.env.PACKAGE_VERSION}`,
-              name: `Clever KVM v${process.env.PACKAGE_VERSION}`,
-              body: `## Clever KVM v${process.env.PACKAGE_VERSION}\n\n### Downloads\n\n| Platform | Download |\n|----------|----------|\n| Windows (installer) | \`.msi\` or \`.exe\` |\n| macOS (Apple Silicon) | \`_aarch64.dmg\` |\n| macOS (Intel) | \`_x64.dmg\` |\n| Linux (Debian/Ubuntu) | \`.deb\` |\n| Linux (AppImage) | \`.AppImage\` |\n\n### Installation\n\nDownload the appropriate file for your platform and run the installer.\n\n### Changelog\n\nSee [CHANGELOG.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/docs/CHANGELOG.md) for details.`,
+              name: `CLEVER KVM v${process.env.PACKAGE_VERSION}`,
+              body: `## CLEVER KVM v${process.env.PACKAGE_VERSION}\n\n### Downloads\n\n| Platform | Download |\n|----------|----------|\n| Windows (installer) | \`.msi\` or \`.exe\` |\n| macOS (Apple Silicon) | \`_aarch64.dmg\` |\n| macOS (Intel) | \`_x64.dmg\` |\n| Linux (Debian/Ubuntu) | \`.deb\` |\n| Linux (AppImage) | \`.AppImage\` |\n\n### Installation\n\nDownload the appropriate file for your platform and run the installer.\n\n### Changelog\n\nSee [CHANGELOG.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/docs/CHANGELOG.md) for details.`,
               draft: true,
               prerelease: ${{ inputs.prerelease || false }}
             })

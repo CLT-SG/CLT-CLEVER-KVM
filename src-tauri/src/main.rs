@@ -105,7 +105,7 @@ fn save_app_settings(settings: AppSettings) -> Result<(), String> {
 /// Set auto-start on login
 #[tauri::command]
 fn set_auto_start(enabled: bool) -> Result<(), String> {
-    let app_name = "Clever KVM";
+    let app_name = "CLEVER KVM";
     
     #[cfg(target_os = "linux")]
     let app_path = std::env::current_exe()
@@ -155,7 +155,7 @@ fn set_auto_start(enabled: bool) -> Result<(), String> {
 /// Check if auto-start is enabled
 #[tauri::command]
 fn get_auto_start() -> bool {
-    let app_name = "Clever KVM";
+    let app_name = "CLEVER KVM";
     
     let app_path = std::env::current_exe()
         .ok()

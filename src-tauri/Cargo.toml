@@ -2,7 +2,7 @@
 name = "clever-kvm"
 version = "5.0.12"
 description = "A KVM solution built with Tauri"
-authors = ["Clever Technologies"]
+authors = ["CLEVER Technologies"]
 license = "MIT"
 repository = "https://github.com/CLTSG/CLT-CLEVER-KVM"
 homepage = "https://github.com/CLTSG/CLT-CLEVER-KVM"

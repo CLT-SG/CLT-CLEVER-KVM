@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Release preparation script for Clever KVM
+# Release preparation script for CLEVER KVM
 # This script helps prepare a new release
 
 set -e

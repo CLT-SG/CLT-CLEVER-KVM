@@ -1,10 +1,10 @@
-# 📦 Building and Releasing Clever KVM
+# 📦 Building and Releasing CLEVER KVM
 
-This guide covers how to build package installers for Clever KVM and deploy them as GitHub releases.
+This guide covers how to build package installers for CLEVER KVM and deploy them as GitHub releases.
 
 ## 🔄 Auto-Updater Setup
 
-Clever KVM includes built-in auto-updater functionality that automatically notifies users of new releases and allows them to update with a single click.
+CLEVER KVM includes built-in auto-updater functionality that automatically notifies users of new releases and allows them to update with a single click.
 
 ### Setting Up Auto-Updates
 

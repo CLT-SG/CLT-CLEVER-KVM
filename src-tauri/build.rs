@@ -20,7 +20,7 @@ fn main() {
                 <head>
                     <meta charset="UTF-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>Clever KVM</title>
+                    <title>CLEVER KVM</title>
                     <style>
                         body {
                             font-family: sans-serif;
@@ -37,7 +37,7 @@ fn main() {
                     </style>
                 </head>
                 <body>
-                    <h1>Clever KVM</h1>
+                    <h1>CLEVER KVM</h1>
                     <p>To access the KVM functionality, use the /kvm endpoint.</p>
                     <p>Example: <a href="/kvm">Open KVM Client</a></p>
                 </body>

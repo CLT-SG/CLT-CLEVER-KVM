@@ -61,7 +61,7 @@
     },
     "windows": [
       {
-        "title": "Clever KVM",
+        "title": "CLEVER KVM",
         "width": 800,
         "height": 660,
         "resizable": true,
@@ -84,9 +84,9 @@
       ],
       "category": "Utility",
       "shortDescription": "A powerful KVM solution for remote desktop control",
-      "longDescription": "Clever KVM is a cross-platform KVM (Keyboard, Video, Mouse) solution that enables remote desktop control with high-quality video streaming using H.264 hardware-accelerated encoding.",
-      "copyright": "© 2025 Clever Technologies",
-      "publisher": "Clever Technologies",
+      "longDescription": "CLEVER KVM is a cross-platform KVM (Keyboard, Video, Mouse) solution that enables remote desktop control with high-quality video streaming using H.264 hardware-accelerated encoding.",
+      "copyright": "© 2025 CLEVER Technologies",
+      "publisher": "CLEVER Technologies",
       "externalBin": [],
       "windows": {
         "certificateThumbprint": null,

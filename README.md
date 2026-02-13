@@ -1,4 +1,4 @@
-# Clever KVM - Display Server for Video Walls
+# CLEVER KVM - Display Server for Video Walls
 
 A high-performance remote desktop system built with Tauri, featuring VP9 video encoding via libvpx and ultra-low latency streaming over WebSocket.
 
@@ -125,7 +125,7 @@ sudo apt install -y build-essential curl wget file libssl-dev \
 
 ## Usage
 
-1. Launch the Clever KVM application
+1. Launch the CLEVER KVM application
 2. Select your preferred quality preset (Gaming / Desktop / Low Bandwidth)
 3. Click "Start Server" to begin the KVM service  
 4. Use the displayed URL to access your computer from any browser
@@ -205,7 +205,7 @@ This will automatically:
 
 ### Performance Benchmarks
 
-On modern hardware, Clever KVM achieves:
+On modern hardware, CLEVER KVM achieves:
 - **Latency**: 20–40ms end-to-end on local network (VP9 pipeline)
 - **Quality**: Near-lossless at 4-6 Mbps for desktop content
 - **CPU Usage**: 5–15% with VP9 software encoding

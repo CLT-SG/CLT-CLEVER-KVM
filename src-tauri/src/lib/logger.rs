@@ -1,4 +1,4 @@
-//! Cross-platform logging module for Clever KVM
+//! Cross-platform logging module for CLEVER KVM
 //!
 //! Provides file-based logging with cross-platform support for Windows, Linux, and macOS.
 //! Logs are stored in the application's data directory and can be accessed via the

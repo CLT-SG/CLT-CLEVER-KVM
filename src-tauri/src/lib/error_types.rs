@@ -1,4 +1,4 @@
-//! Custom error types for Clever KVM
+//! Custom error types for CLEVER KVM
 //!
 //! Provides structured error types for better error handling throughout the application.
 

@@ -2957,7 +2957,7 @@ class KVMClient {
                 const isReconnecting = /reconnect|connection lost|disconnected/i.test(title);
                 if (isReconnecting) {
                     tipsElement.innerHTML = `<ul>
-                        <li>Check that the Clever KVM app is running on the host</li>
+                        <li>Check that the CLEVER KVM app is running on the host</li>
                         <li>Verify the host machine is reachable on the network</li>
                         <li>Ensure port 9921 is not blocked by a firewall</li>
                         <li>Try refreshing the page if the issue persists</li>

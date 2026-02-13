@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the RDEngine streaming system — a low-latency video/audio streaming engine for the Clever KVM application. The architecture is inspired by [RustDesk](https://github.com/rustdesk/rustdesk)'s approach to remote desktop streaming, using VP8/VP9 encoding via libvpx and a **WebRTC Media Track transport** for real-time peer-to-peer delivery.
+This document describes the RDEngine streaming system — a low-latency video/audio streaming engine for the CLEVER KVM application. The architecture is inspired by [RustDesk](https://github.com/rustdesk/rustdesk)'s approach to remote desktop streaming, using VP8/VP9 encoding via libvpx and a **WebRTC Media Track transport** for real-time peer-to-peer delivery.
 
 RDEngine replaces the previous H.264 pipeline and relay server architecture with a simpler, more maintainable system that delivers significantly lower latency. Video is delivered primarily via WebRTC media tracks (RTP/UDP) for native `<video>` element rendering in the browser, with automatic fallback to WebRTC DataChannels or WebSocket binary transport when media tracks are unavailable.
 

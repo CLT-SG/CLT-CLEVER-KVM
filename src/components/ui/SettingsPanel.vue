@@ -43,7 +43,7 @@
         <div class="setting-item">
           <div class="setting-content">
             <label class="setting-label">Launch at system startup</label>
-            <p class="setting-description">Automatically start Clever KVM when you log in</p>
+            <p class="setting-description">Automatically start CLEVER KVM when you log in</p>
           </div>
           <label class="toggle-switch">
             <input 

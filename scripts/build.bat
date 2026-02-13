@@ -1,8 +1,8 @@
 @echo off
-REM Build script for Clever KVM (Windows)
+REM Build script for CLEVER KVM (Windows)
 REM This script builds the KVM application with rdengine streaming
 
-echo [INFO] Building Clever KVM with native WebM support...
+echo [INFO] Building CLEVER KVM with native WebM support...
 
 REM Check if Node.js is installed
 node --version >nul 2>&1

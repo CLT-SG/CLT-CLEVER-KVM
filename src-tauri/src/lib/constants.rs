@@ -1,4 +1,4 @@
-//! Application constants for Clever KVM
+//! Application constants for CLEVER KVM
 //!
 //! These constants define default values and limits used throughout the application.
 

@@ -70,7 +70,7 @@ pub struct WebRtcConfig {
 impl Default for WebRtcConfig {
     fn default() -> Self {
         Self {
-            // No STUN by default — Clever KVM is a LAN application.
+            // No STUN by default — CLEVER KVM is a LAN application.
             // External STUN servers (e.g. Google) add 5-30s ICE gathering delay.
             // Host candidates are sufficient for same-network peers.
             ice_servers: vec![],

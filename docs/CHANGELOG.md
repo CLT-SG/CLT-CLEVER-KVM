@@ -1,4 +1,4 @@
-# Clever KVM Release Changelog
+# CLEVER KVM Release Changelog
 
 ## Version History
 

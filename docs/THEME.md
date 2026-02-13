@@ -1,6 +1,6 @@
-# Clever KVM Theme Documentation
+# CLEVER KVM Theme Documentation
 
-This document describes the Matrix Dark Theme UI implementation for Clever KVM.
+This document describes the Matrix Dark Theme UI implementation for CLEVER KVM.
 
 ## Overview
 

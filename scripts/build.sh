@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Build script for Clever KVM
+# Build script for CLEVER KVM
 # This script builds the KVM application with rdengine streaming
 
 set -e
 
-echo "[INFO] Building Clever KVM with native WebM support..."
+echo "[INFO] Building CLEVER KVM with native WebM support..."
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then

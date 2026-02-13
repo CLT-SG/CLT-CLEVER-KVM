@@ -73,7 +73,7 @@ const tabs = computed(() => [
           </svg>
         </div>
         <div class="logo-text">
-          <h1>Clever KVM</h1>
+          <h1>CLEVER KVM</h1>
           <span class="version">v{{ version }}</span>
         </div>
       </div>

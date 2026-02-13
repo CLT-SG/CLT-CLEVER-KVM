@@ -1,6 +1,6 @@
-# 🔄 Clever KVM Auto-Updater Guide
+# 🔄 CLEVER KVM Auto-Updater Guide
 
-This guide covers the complete setup and usage of the auto-updater functionality in Clever KVM.
+This guide covers the complete setup and usage of the auto-updater functionality in CLEVER KVM.
 
 ## ✨ Features
 
