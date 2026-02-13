@@ -73,12 +73,6 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
     }
 }
 
-// Old WebSocket/WebRTC server commands have been removed.
-// Use VNC commands instead:
-// - start_vnc_server() for starting VNC servers
-// - stop_vnc_server() for stopping VNC servers  
-// - get_vnc_status() for checking VNC server status
-
 #[tauri::command]
 pub fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option<ServerOptions>) -> Result<String, String> {
     let port = port.unwrap_or(crate::lib::DEFAULT_SERVER_PORT);
