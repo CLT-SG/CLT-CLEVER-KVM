@@ -17,6 +17,7 @@ pub mod codec;
 pub mod video_service;
 pub mod audio_service;
 pub mod cursor_service;
+pub mod input_service;
 pub mod connection;
 pub mod qos;
 pub mod protocol;
@@ -27,6 +28,7 @@ pub use video_service::VideoService;
 pub use audio_service::AudioService;
 #[allow(unused_imports)]
 pub use cursor_service::CursorService;
+pub use input_service::{InputService, InputServiceConfig, InputSender};
 pub use connection::{ConnectionHandler, ConnectionConfig};
 pub use qos::QualityControl;
 pub use protocol::{FrameMessage, ControlMsg, InputMsg};

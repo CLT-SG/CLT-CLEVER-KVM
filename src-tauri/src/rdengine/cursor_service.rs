@@ -17,6 +17,8 @@
 use anyhow::{Result, Context};
 use crossbeam_channel::{Sender, Receiver, bounded};
 use log::{debug, error, info};
+#[cfg(not(target_os = "linux"))]
+use log::warn;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;

@@ -22,7 +22,6 @@
 
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket};
-use crossbeam_channel::Receiver;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use serde_json::json;
@@ -31,10 +30,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use crate::core::{InputHandler, InputEvent as CoreInputEvent};
+use crate::core::InputEvent as CoreInputEvent;
 use crate::rdengine::audio_service::{AudioFrame, AudioService, AudioServiceConfig};
 use crate::rdengine::cursor_service::{CursorService, CursorServiceConfig, CursorUpdate};
-use crate::rdengine::protocol::{self, ControlMsg, InputMsg, ServerInfo, CODEC_VP8, CODEC_VP9, FLAG_KEYFRAME};
+use crate::rdengine::input_service::{InputService, InputServiceConfig};
+use crate::rdengine::protocol::{self, ControlMsg, InputMsg, ServerInfo, FLAG_KEYFRAME};
 use crate::rdengine::qos::QualityControl;
 use crate::rdengine::video_service::{VideoFrame, VideoService, VideoServiceConfig};
 use crate::rdengine::codec::VpxCodec;
@@ -130,8 +130,18 @@ impl ConnectionHandler {
             None
         };
 
-        // Initialize input handler
-        let mut input_handler = InputHandler::new();
+        // Initialize input service on dedicated thread (required for macOS Send safety)
+        let mut input_service = match InputService::start(InputServiceConfig::default()) {
+            Ok(svc) => {
+                info!("Input service started on dedicated thread");
+                Some(svc)
+            }
+            Err(e) => {
+                warn!("Failed to start input service: {} — continuing without input", e);
+                None
+            }
+        };
+        let input_tx = input_service.as_ref().map(|s| s.clone_input_tx());
 
         // Get capture dimensions for server info
         let capture = crate::core::ScreenCapture::new(Some(config.monitor_id))
@@ -600,7 +610,7 @@ impl ConnectionHandler {
                         Some(Ok(Message::Text(text))) => {
                             Self::handle_text_message(
                                 &text,
-                                &mut input_handler,
+                                &input_tx,
                                 &video_service,
                                 &qos,
                                 &ctrl_tx,
@@ -679,6 +689,9 @@ impl ConnectionHandler {
         if let Some(mut cursor) = cursor_service {
             cursor.stop();
         }
+        if let Some(mut input) = input_service {
+            input.stop();
+        }
         // Close WebRTC transport if active
         if let Some(rtc) = webrtc_transport {
             if let Err(e) = rtc.close().await {
@@ -692,7 +705,7 @@ impl ConnectionHandler {
     /// Handle a text message from the client (control, input, or WebRTC signaling)
     async fn handle_text_message(
         text: &str,
-        input_handler: &mut InputHandler,
+        input_tx: &Option<crossbeam_channel::Sender<CoreInputEvent>>,
         video_service: &VideoService,
         qos: &Arc<parking_lot::Mutex<QualityControl>>,
         ctrl_tx: &mpsc::Sender<String>,
@@ -850,7 +863,7 @@ impl ConnectionHandler {
                             monitor_id: None,
                         }
                     }
-                    InputMsg::KeyDown { key, code, key_code, ctrl_key, alt_key, shift_key, meta_key, modifiers } => {
+                    InputMsg::KeyDown { key, code, key_code: _, ctrl_key: _, alt_key: _, shift_key: _, meta_key: _, modifiers: _ } => {
                         // Build code string: prefer explicit `code`, fall back to key_code mapping
                         let code_str = code.or_else(|| {
                             // The client may send keyCode (integer) without code (string)
@@ -864,7 +877,7 @@ impl ConnectionHandler {
                             repeat: None,
                         }
                     }
-                    InputMsg::KeyUp { key, code, key_code, ctrl_key, alt_key, shift_key, meta_key, modifiers } => {
+                    InputMsg::KeyUp { key, code, key_code: _, ctrl_key: _, alt_key: _, shift_key: _, meta_key: _, modifiers: _ } => {
                         let code_str = code;
                         CoreInputEvent::KeyUp {
                             key,
@@ -874,8 +887,11 @@ impl ConnectionHandler {
                     }
                 };
 
-                if let Err(e) = input_handler.handle_event(event) {
-                    debug!("Input event error: {}", e);
+                // Send input event to the dedicated input service thread
+                if let Some(ref tx) = input_tx {
+                    if let Err(e) = tx.send(event) {
+                        debug!("Failed to send input event: {}", e);
+                    }
                 }
             }
             Err(e) => {
