@@ -4,12 +4,11 @@ import { invoke } from "@tauri-apps/api/tauri";
 export function useServer() {
   const serverStatus = ref(false);
   const serverUrl = ref("");
-  const serverPort = ref(5900); // VNC default port
+  const serverPort = ref(9921);
   const loading = ref(false);
   const errorMessage = ref("");
   const monitors = ref([]);
   const loadingMonitors = ref(false);
-  const vncInfo = ref(null);
 
   // Relay server state
   const relayStatus = reactive({
@@ -36,7 +35,7 @@ export function useServer() {
     }
   });
 
-  // VNC Server settings
+  // Server settings
   const settings = reactive({
     deltaEncoding: true,
     adaptiveQuality: true,
@@ -44,10 +43,9 @@ export function useServer() {
     useWebRTC: true,
     hardwareAcceleration: true,
     selectedMonitor: 0,
-    audioPort: 6900,
-    autoStart: true,
-    mediamtxUrl: '',
-    mediamtxAutoScan: true
+    audioBitrate: 128,
+    videoBitrate: 4000,
+    framerate: 30
   });
 
   const selectedCodec = computed(() => {
@@ -100,38 +98,30 @@ export function useServer() {
 
   async function checkServerStatus() {
     try {
-      const status = await invoke("get_vnc_status");
-      serverStatus.value = status.running;
+      const status = await invoke("get_server_status");
+      serverStatus.value = status;
       
-      if (status.running) {
-        // Update status info while preserving monitor details from start_vnc_server
-        if (vncInfo.value) {
-          // Merge status into existing vncInfo to preserve monitor details
-          vncInfo.value = {
-            ...vncInfo.value,
-            clients_connected: status.clients,
-            audio_enabled: status.audio_enabled,
-            registration_status: status.registration_status
-          };
-        } else {
-          // No existing vncInfo (e.g., after page reload), use status data
-          vncInfo.value = status;
+      if (status) {
+        try {
+          const url = await invoke("get_server_url");
+          serverUrl.value = url;
+        } catch (urlError) {
+          console.warn("Failed to get server URL:", urlError);
+          // If we can get status but not URL, something might be wrong
+          serverStatus.value = false;
+          serverUrl.value = "";
         }
-        // Set a basic VNC URL (actual VNC URL is in vncInfo)
-        serverUrl.value = "VNC Server Running";
       } else {
         serverUrl.value = "";
-        vncInfo.value = null;
       }
       
       await loadMonitors();
       await checkRelayStatus();
     } catch (error) {
-      console.error("Failed to check VNC status:", error);
-      errorMessage.value = `Failed to check VNC status: ${error}`;
+      console.error("Failed to check server status:", error);
+      errorMessage.value = `Failed to check server status: ${error}`;
       serverStatus.value = false;
       serverUrl.value = "";
-      vncInfo.value = null;
     }
   }
 
@@ -160,7 +150,9 @@ export function useServer() {
     errorMessage.value = "";
     
     try {
-      const info = await invoke("start_vnc_server", { 
+      const codec = selectedCodec.value;
+      
+      const url = await invoke("start_server", { 
         port: serverPort.value,
         options: {
           deltaEncoding: settings.deltaEncoding,
@@ -176,8 +168,7 @@ export function useServer() {
         }
       });
       
-      vncInfo.value = info;
-      serverUrl.value = info.vnc_url;
+      serverUrl.value = url;
       serverStatus.value = true;
       
       // Double-check the server status after starting
@@ -186,11 +177,10 @@ export function useServer() {
       }, 1000);
       
     } catch (error) {
-      console.error("Failed to start VNC server:", error);
-      errorMessage.value = `Failed to start VNC server: ${error}`;
+      console.error("Failed to start server:", error);
+      errorMessage.value = `Failed to start server: ${error}`;
       serverStatus.value = false;
       serverUrl.value = "";
-      vncInfo.value = null;
     } finally {
       loading.value = false;
     }
@@ -201,10 +191,9 @@ export function useServer() {
     errorMessage.value = "";
     
     try {
-      await invoke("stop_vnc_server");
+      await invoke("stop_server");
       serverStatus.value = false;
       serverUrl.value = "";
-      vncInfo.value = null;
       
       // Double-check the server status after stopping
       setTimeout(async () => {
@@ -212,28 +201,49 @@ export function useServer() {
       }, 1000);
       
     } catch (error) {
-      console.error("Failed to stop VNC server:", error);
-      errorMessage.value = `Failed to stop VNC server: ${error}`;
+      console.error("Failed to stop server:", error);
+      errorMessage.value = `Failed to stop server: ${error}`;
     } finally {
       loading.value = false;
     }
   }
 
   function buildUrlWithParams() {
-    if (!vncInfo.value || !vncInfo.value.vnc_url) return "";
+    if (!serverUrl.value) return "";
     
-    return vncInfo.value.vnc_url;
+    let url = serverUrl.value;
+    // Ensure the URL ends with /kvm for the KVM client
+    if (!url.endsWith('/kvm')) {
+      url = url.replace(/\/$/, '') + '/kvm';
+    }
+    
+    const params = [];
+    
+    if (settings.useWebRTC) {
+      params.push('audio=true');
+    }
+    
+    if (settings.encryptionEnabled) {
+      params.push('encryption=true');
+    }
+    
+    params.push(`codec=${selectedCodec.value}`);
+    
+    if (settings.selectedMonitor > 0) {
+      params.push(`monitor=${settings.selectedMonitor}`);
+    }
+    
+    if (params.length > 0) {
+      url += (url.includes('?') ? ';' : '?') + params.join(';');
+    }
+    
+    return url;
   }
 
   function openUrl() {
     const url = buildUrlWithParams();
     if (url) {
-      // Copy VNC URL to clipboard and show notification
-      navigator.clipboard.writeText(url).then(() => {
-        console.log(`VNC URL copied to clipboard: ${url}`);
-      }).catch(err => {
-        console.error('Failed to copy VNC URL:', err);
-      });
+      window.open(url, '_blank');
     }
   }
 
@@ -327,28 +337,8 @@ export function useServer() {
   }
 
   // Initialize monitoring when composable is created
-  checkServerStatus().then(async () => {
+  checkServerStatus().then(() => {
     startStatusMonitoring();
-    
-    // Auto-scan for MediaMTX servers if enabled
-    if (settings.mediamtxAutoScan) {
-      console.log("Auto-scanning for MediaMTX servers...");
-      try {
-        await scanMediaMtxServers();
-      } catch (error) {
-        console.error("Failed to scan for MediaMTX servers:", error);
-      }
-    }
-    
-    // Auto-start VNC server if enabled and not already running
-    if (settings.autoStart && !serverStatus.value) {
-      console.log("Auto-starting VNC server...");
-      try {
-        await startServer();
-      } catch (error) {
-        console.error("Failed to auto-start VNC server:", error);
-      }
-    }
   });
 
   return {

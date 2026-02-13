@@ -15,13 +15,11 @@
 
 use log::{debug, error, info, warn};
 use std::sync::Mutex;
-use anyhow::Result;
 
 use super::native_capture::{NativeScreenCapture, NativeCaptureError, NativeMonitorInfo};
 
 /// Screen tile for delta encoding optimization
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct ScreenTile {
     pub data: Vec<u8>,
     pub hash: u64,
@@ -112,7 +110,6 @@ pub struct ScreenCapture {
 
     /// Tile-based encoding support
     tile_size: usize,
-    #[allow(dead_code)]
     tiles: Vec<ScreenTile>,
 
     /// Previous frame for delta encoding
@@ -123,7 +120,6 @@ pub struct ScreenCapture {
 
     /// Monitor identification
     monitor_id: String,
-    #[allow(dead_code)]
     is_primary: bool,
 
     /// Capture options

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
 use std::sync::Mutex;
 use log::{debug, info, warn};
-use std::thread;
+use std::thread; // Add missing thread import
 
 lazy_static! {
     // Map for special keys that need more complex handling
@@ -124,7 +124,6 @@ pub struct TouchPoint {
     pub pressure: Option<f32>,
 }
 
-#[allow(dead_code)]
 pub struct InputHandler {
     enigo: Enigo,
     // Monitor positions and dimensions for multi-monitor support
@@ -135,7 +134,6 @@ pub struct InputHandler {
     key_repeat_interval: Duration,
 }
 
-#[allow(dead_code)]
 impl InputHandler {
     pub fn new() -> Self {
         Self {
@@ -162,6 +160,7 @@ impl InputHandler {
                 // Translate coordinates to global screen space if monitor_id is provided
                 let (global_x, global_y) = self.translate_coordinates(x, y, monitor_id)?;
                 self.enigo.mouse_move_to(global_x, global_y);
+                debug!("Mouse move to ({}, {})", global_x, global_y);
             }
             
             InputEvent::MouseDown { button, x, y, monitor_id } => {
@@ -170,6 +169,7 @@ impl InputHandler {
                 self.enigo.mouse_move_to(global_x, global_y);
                 let button = self.map_mouse_button(&button)?;
                 self.enigo.mouse_down(button);
+                debug!("Mouse down {:?} at ({}, {})", button, global_x, global_y);
             }
             
             InputEvent::MouseUp { button, x, y, monitor_id } => {
@@ -178,6 +178,7 @@ impl InputHandler {
                 self.enigo.mouse_move_to(global_x, global_y);
                 let button = self.map_mouse_button(&button)?;
                 self.enigo.mouse_up(button);
+                debug!("Mouse up {:?} at ({}, {})", button, global_x, global_y);
             }
             
             InputEvent::MouseWheel { delta_y, delta_x, monitor_id: _ } => {
@@ -332,11 +333,15 @@ impl InputHandler {
                     let primary = &touches[0];
                     let (global_x, global_y) = self.translate_coordinates(primary.x, primary.y, monitor_id)?;
                     self.enigo.mouse_move_to(global_x, global_y);
+                    debug!("Multi-touch primary point: ({}, {})", global_x, global_y);
                 }
             }
             
-            InputEvent::GamepadEvent { button, value: _, is_pressed } => {
-                // Gamepad events mapped to keyboard/mouse actions
+            InputEvent::GamepadEvent { button, value, is_pressed } => {
+                // Gamepad events could be mapped to keyboard/mouse actions
+                // This is a placeholder - real implementation would depend on use case
+                debug!("Gamepad event: button={}, value={}, pressed={}", button, value, is_pressed);
+                
                 // Example: Map some gamepad buttons to keyboard keys
                 match button {
                     0 => { // A button
@@ -360,6 +365,8 @@ impl InputHandler {
             
             InputEvent::HotKey { combination } => {
                 // Handle special hotkey combinations
+                debug!("HotKey: {:?}", combination);
+                
                 // Press all keys in the combination
                 let mut keys = Vec::new();
                 for key_name in &combination {

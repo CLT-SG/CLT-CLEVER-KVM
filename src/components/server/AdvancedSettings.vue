@@ -84,132 +84,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
-import { invoke } from '@tauri-apps/api/tauri';
+import { ref } from 'vue';
 
-const props = defineProps({
+defineProps({
   settings: Object,
   disabled: {
     type: Boolean,
     default: false
-  },
-  scanningMediaMtx: {
-    type: Boolean,
-    default: false
-  },
-  mediamtxServers: {
-    type: Array,
-    default: () => []
   }
 });
-
-const emit = defineEmits(['settings-changed', 'scan-mediamtx']);
 
 const showAdvancedSettings = ref(false);
-const useTlsUrls = ref(false);
-
-// Configuration objects
-const vncConfig = ref({
-  base_port: 5900,
-  quality: 'high',
-  frame_rate_limit: 60,
-  cursor_encoding: true,
-  desktop_resize: true,
-  view_only: false
-});
-
-const audioConfig = ref({
-  sample_rate: 48000,
-  quality: 'high',
-  channels: 'stereo',
-  latency: 'low'
-});
-
-const connectionConfig = ref({
-  keep_alive_interval: 30,
-  connection_timeout: 300,
-  auto_reconnect: true,
-  max_clients_per_monitor: 5
-});
-
-onMounted(async () => {
-  try {
-    useTlsUrls.value = await invoke('get_use_tls_urls');
-  } catch (error) {
-    console.error('Failed to get TLS setting:', error);
-    useTlsUrls.value = false;
-  }
-  
-  // Load VNC configuration
-  try {
-    vncConfig.value = await invoke('get_vnc_config');
-  } catch (error) {
-    console.error('Failed to load VNC config:', error);
-  }
-  
-  // Load audio configuration
-  try {
-    audioConfig.value = await invoke('get_audio_config');
-  } catch (error) {
-    console.error('Failed to load audio config:', error);
-  }
-  
-  // Load connection configuration
-  try {
-    connectionConfig.value = await invoke('get_connection_config');
-  } catch (error) {
-    console.error('Failed to load connection config:', error);
-  }
-});
-
-async function handleTlsToggle() {
-  try {
-    await invoke('set_use_tls_urls', { useTls: useTlsUrls.value });
-    console.log(`TLS URLs ${useTlsUrls.value ? 'enabled' : 'disabled'}`);
-  } catch (error) {
-    console.error('Failed to set TLS URLs:', error);
-    // Revert on error
-    useTlsUrls.value = !useTlsUrls.value;
-  }
-}
-
-async function saveVncConfig() {
-  try {
-    await invoke('set_vnc_config', { config: vncConfig.value });
-    console.log('VNC configuration saved:', vncConfig.value);
-  } catch (error) {
-    console.error('Failed to save VNC config:', error);
-  }
-}
-
-async function saveAudioConfig() {
-  try {
-    await invoke('set_audio_config', { config: audioConfig.value });
-    console.log('Audio configuration saved:', audioConfig.value);
-  } catch (error) {
-    console.error('Failed to save audio config:', error);
-  }
-}
-
-async function saveConnectionConfig() {
-  try {
-    await invoke('set_connection_config', { config: connectionConfig.value });
-    console.log('Connection configuration saved:', connectionConfig.value);
-  } catch (error) {
-    console.error('Failed to save connection config:', error);
-  }
-}
-
-async function handleManualScan() {
-  emit('scan-mediamtx');
-}
-
-function handleAutoScanChange() {
-  emit('settings-changed');
-  if (props.settings.mediamtxAutoScan) {
-    emit('scan-mediamtx');
-  }
-}
 </script>
 
 <style scoped>
