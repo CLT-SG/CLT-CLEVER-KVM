@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
 use std::sync::Mutex;
-use tracing::{debug, info, warn};
-use std::thread; // Add missing thread import
+use log::{debug, info, warn};
+use std::thread;
 
 lazy_static! {
     // Map for special keys that need more complex handling

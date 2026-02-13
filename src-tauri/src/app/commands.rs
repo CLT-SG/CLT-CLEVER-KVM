@@ -2,10 +2,10 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use log::{info, warn, debug, error};
 use local_ip_address::local_ip;
-use serde::{Deserialize, Serialize};
 
-use crate::app::{ServerState, MonitorInfo};
+use crate::app::{ServerState, ServerOptions, MonitorInfo};
 use crate::core::ScreenCapture;
+use crate::network::WebSocketServer;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -78,6 +78,12 @@ pub fn get_primary_monitor_size() -> Result<(u32, u32), String> {
 // - start_vnc_server() for starting VNC servers
 // - stop_vnc_server() for stopping VNC servers  
 // - get_vnc_status() for checking VNC server status
+
+#[tauri::command]
+pub fn start_server(app_handle: tauri::AppHandle, port: Option<u16>, options: Option<ServerOptions>) -> Result<String, String> {
+    let port = port.unwrap_or(crate::lib::DEFAULT_SERVER_PORT);
+    let state = app_handle.state::<Arc<Mutex<ServerState>>>();
+    let mut state = state.lock().unwrap();
 
     if state.running {
         warn!("Attempted to start server when already running");
@@ -211,22 +217,6 @@ pub fn get_server_url(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_logs() -> Result<(String, String), String> {
-<<<<<<< HEAD
-    let log_dir = get_log_directory();
-    
-    let access_log_path = log_dir.join("access.log");
-    let error_log_path = log_dir.join("error.log");
-    
-    let access_content = match std::fs::read_to_string(&access_log_path) {
-        Ok(content) => content,
-        Err(_) => format!("Access log not found at {:?}", access_log_path),
-    };
-    
-    let error_content = match std::fs::read_to_string(&error_log_path) {
-        Ok(content) => content,
-        Err(_) => format!("Error log not found at {:?}", error_log_path),
-    };
-=======
     // Read logs from cross-platform log directory using the logger module
     // Works on Windows, macOS, and Linux
     let debug_content = crate::lib::read_debug_log();
@@ -234,9 +224,8 @@ pub fn get_logs() -> Result<(String, String), String> {
     
     debug!("Logs requested - debug: {} chars, error: {} chars", 
            debug_content.len(), error_content.len());
->>>>>>> refactor/standardize-logging-remove-legacy
     
-    Ok((access_content, error_content))
+    Ok((debug_content, error_content))
 }
 
 #[tauri::command]

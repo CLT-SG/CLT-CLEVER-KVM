@@ -21,8 +21,6 @@ mod lib;
 mod network;
 mod rdengine;
 mod system;
-mod tls;
-mod vnc;
 
 use app::{commands::*, ServerState, APP_NAME};
 use auto_launch::AutoLaunchBuilder;
@@ -328,8 +326,4 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-    
-    // Explicitly drop log guards after Tauri exits to ensure all logs are flushed
-    drop(access_guard);
-    drop(error_guard);
 }
