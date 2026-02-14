@@ -15,25 +15,10 @@ use std::path::PathBuf;
 use tokio::sync::broadcast;
 
 use super::websocket::{handle_socket_wrapper, handle_socket_wrapper_with_stop};
+use super::web_client_path;
 
 fn get_web_client_path() -> PathBuf {
-    // Try multiple possible locations for the web-client directory
-    let possible_paths = vec![
-        "web-client",                           // Current working directory
-        "src-tauri/web-client",                 // From project root
-        "../src-tauri/web-client",              // From dist directory  
-        "./src-tauri/web-client",               // Alternative from root
-    ];
-    
-    for path in possible_paths {
-        let full_path = PathBuf::from(path);
-        if full_path.exists() && full_path.is_dir() {
-            return full_path;
-        }
-    }
-    
-    // Fallback to the default path
-    PathBuf::from("web-client")
+    web_client_path::get_web_client_path()
 }
 
 pub async fn kvm_client_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {

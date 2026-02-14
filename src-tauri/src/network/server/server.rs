@@ -18,25 +18,10 @@ use axum::body::Body;
 use axum_server::tls_rustls::RustlsConfig;
 
 use super::handlers::{kvm_client_handler, static_file_handler, ws_handler_with_stop};
+use super::web_client_path;
 
 fn get_web_client_path() -> PathBuf {
-    // Try multiple possible locations for the web-client directory
-    let possible_paths = vec![
-        "web-client",                           // Current working directory
-        "src-tauri/web-client",                 // From project root
-        "../src-tauri/web-client",              // From dist directory  
-        "./src-tauri/web-client",               // Alternative from root
-    ];
-    
-    for path in possible_paths {
-        let full_path = PathBuf::from(path);
-        if full_path.exists() && full_path.is_dir() {
-            return full_path;
-        }
-    }
-    
-    // Fallback to the default path
-    PathBuf::from("web-client")
+    web_client_path::get_web_client_path()
 }
 
 pub struct WebSocketServer {
@@ -172,6 +157,10 @@ fn generate_self_signed_cert() -> Result<(Vec<u8>, Vec<u8>), String> {
 
 impl WebSocketServer {
     pub async fn new(port: u16, _app_handle: AppHandle) -> Result<Self, String> {
+        // Resolve web-client resource path from the Tauri AppHandle.
+        // This must happen before any HTTP handler tries to serve the files.
+        web_client_path::init_web_client_path(&_app_handle);
+
         // Channel for shutdown signal
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         

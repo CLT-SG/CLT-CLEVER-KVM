@@ -1,6 +1,6 @@
 [package]
 name = "clever-kvm"
-version = "5.0.12"
+version = "5.0.13"
 description = "A KVM solution built with Tauri"
 authors = ["CLEVER Technologies"]
 license = "MIT"

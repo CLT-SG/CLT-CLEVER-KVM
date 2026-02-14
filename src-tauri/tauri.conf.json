@@ -110,9 +110,13 @@
       },
       "deb": {
         "depends": [
-          "ffmpeg"
+          "ffmpeg",
+          "libvpx7"
         ]
       },
+      "resources": [
+        "web-client/*"
+      ],
       "appimage": {
         "bundleMediaFramework": false
       }
