@@ -2,6 +2,32 @@
 
 ## Version History
 
+## [5.0.12] - 2026-02-14
+
+### Fix Installer Missing libvpx Runtime Dependency and Web-Client Files
+
+### Bug Fixes
+- **Missing libvpx Runtime Dependency**: Release build failed to launch with "error while loading shared libraries: libvpx.so.7" because the .deb installer did not declare libvpx7 as a package dependency
+- **Web-Client Files Not Bundled**: Accessing /kvm endpoint returned "Failed to load KVM client template: No such file or directory" because web-client files (HTML, JS, CSS) were not included in the installer package
+- **Hardcoded Development Paths**: get_web_client_path() in server.rs and handlers.rs used only CWD-relative development paths that do not exist in installed packages on any platform
+- **CWD-Sensitive Path Resolution**: Relative path lookups failed when the application working directory differed from the project root
+
+### Improvements
+- **Automatic libvpx Installation**: Added libvpx7 to deb.depends in tauri.conf.json so apt installs it automatically during .deb package installation
+- **Bundled Web-Client Resources**: Added resources: ["web-client/*"] to tauri.bundle configuration, including all web-client files in installers across all platforms (Linux /usr/lib/, macOS Contents/Resources/, Windows next to .exe)
+- **5-Tier Path Resolution**: Created shared web_client_path module with resolution order: Tauri resolve_resource(), executable-relative, compile-time CARGO_MANIFEST_DIR, CWD-relative dev paths, bare fallback
+- **Compile-Time Source Path**: build.rs emits CLEVER_KVM_MANIFEST_DIR env var baked into the binary, providing a reliable absolute path to src-tauri/web-client for dev builds regardless of CWD
+- **Path Validation**: Each candidate directory is validated by checking for kvm-template.html before acceptance via is_valid_web_client_dir()
+- **Diagnostic Logging**: init_web_client_path() logs CWD, executable path, MANIFEST_DIR, and each candidate checked for easier debugging
+
+### Technical Changes
+- **src-tauri/tauri.conf.json**: Added libvpx7 to deb.depends array, added resources: ["web-client/*"] to bundle section
+- **src-tauri/build.rs**: Emit CLEVER_KVM_MANIFEST_DIR compile-time env var from CARGO_MANIFEST_DIR
+- **src-tauri/src/network/server/web_client_path.rs** (new): Shared module with init_web_client_path() and get_web_client_path() using OnceLock for thread-safe caching, is_valid_web_client_dir() for candidate validation
+- **src-tauri/src/network/server/mod.rs**: Added web_client_path module declaration
+- **src-tauri/src/network/server/server.rs**: Replaced hardcoded path lookup with shared web_client_path module, added init_web_client_path() call in WebSocketServer::new()
+- **src-tauri/src/network/server/handlers.rs**: Replaced hardcoded path lookup with shared web_client_path module
+
 ## [5.0.11] - 2026-02-11
 
 ### Fix macOS Intel x86_64 Build Failure in GitHub Actions

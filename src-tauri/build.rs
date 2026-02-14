@@ -100,6 +100,15 @@ fn main() {
         println!("cargo:rustc-link-lib=vpx");
     }
 
+    // Emit the source directory as a compile-time constant.
+    // In dev mode this gives the absolute path to src-tauri/ on the build
+    // machine, which is used as a reliable fallback when resolve_resource
+    // or CWD-relative lookups fail.
+    println!(
+        "cargo:rustc-env=CLEVER_KVM_MANIFEST_DIR={}",
+        std::env::var("CARGO_MANIFEST_DIR").unwrap()
+    );
+
     // Create web-client directory if it doesn't exist
     let web_client_dir = std::path::Path::new("web-client");
     if !web_client_dir.exists() {
